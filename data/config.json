@@ -1,0 +1,13 @@
+{
+    "napcat":{
+        "example_qq_number":{
+            "ws_url":"ws://127.0.0.1:3001",
+            "ws_token":"37xrt2x3n4qgonpfwb4gnp"
+        }
+    },
+    "discord":{
+        "id_only_in_config":{
+            "webhook_url":"https://example.webhook.url/"
+        }
+    }
+}

@@ -1,0 +1,39 @@
+{
+    "rules": [
+        {
+            "from": {
+                "discord": {
+                    "server_id": "exampleserverid",
+                    "channel_id": "examplechannelid"
+                }
+            },
+            "to": {
+                "qq": {
+                    "group_id": "236919289"
+                }
+            },
+            "msg": {
+                "msg_format": "{user} @ {from}: \n {msg}"
+            }
+        },
+        {
+            "from": {
+                "qq": {
+                    "group_id": "236919289"
+                }
+            },
+            "to": {
+                "discord": {
+                    "server_id": "exampleserverid",
+                    "channel_id": "examplechannelid",
+                    "send_method": "webhook"
+                }
+            },
+            "msg": {
+                "msg_format": "{msg}",
+                "webhook_title": "{user} @ {from}",
+                "webhook_avatar": "{user_avatar}"
+            }
+        }
+    ]
+}
