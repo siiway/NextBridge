@@ -43,11 +43,11 @@ export default {
 <head>
   <meta charset="UTF-8">
   <meta property="og:type"  content="website">
-  <meta property="og:title" content="${e(title)}">
-  ${content ? `<meta property="og:description" content="${e(content)}">` : ''}
+  <meta property="og:site_name" content="${e(title)}">
+  ${content ? `<meta property="og:title" content="${e(content)}">` : ''}
   ${avatar  ? `<meta property="og:image"       content="${e(avatar)}">` : ''}
 </head>
-<body></body>
+<body>There is nothing here.</body>
 </html>`;
 
     return new Response(html, {
