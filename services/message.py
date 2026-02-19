@@ -1,5 +1,3 @@
-# services/message.py
-
 from dataclasses import dataclass, field
 
 

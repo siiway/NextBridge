@@ -1,5 +1,3 @@
-# services/media.py
-#
 # Shared media download utility used by all drivers when sending
 # attachments to a target platform.
 #
