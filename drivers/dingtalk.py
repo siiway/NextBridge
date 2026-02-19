@@ -1,5 +1,3 @@
-# drivers/dingtalk.py
-#
 # DingTalk driver via alibabacloud-dingtalk.
 #
 # Receive: DingTalk pushes events to an HTTP endpoint you expose (outgoing

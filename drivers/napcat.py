@@ -1,5 +1,3 @@
-# drivers/napcat.py
-#
 # QQ driver via NapCat (OneBot 11 WebSocket protocol).
 # NapCat acts as a WebSocket server; this driver connects as a client,
 # receives push events, and sends actions over the same connection.

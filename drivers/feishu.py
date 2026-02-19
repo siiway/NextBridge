@@ -1,5 +1,3 @@
-# drivers/feishu.py
-#
 # Feishu / Lark driver via lark-oapi.
 #
 # Receive: Feishu pushes events to an HTTP endpoint you expose.

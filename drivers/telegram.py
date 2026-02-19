@@ -1,5 +1,3 @@
-# drivers/telegram.py
-#
 # Telegram driver via python-telegram-bot (v20+).
 # Uses long-polling to receive messages and the bot API to send.
 #

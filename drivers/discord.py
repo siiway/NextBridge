@@ -1,5 +1,3 @@
-# drivers/discord.py
-#
 # Discord driver.
 #
 # Receive: requires a bot token (bot_token in config).
