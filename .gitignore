@@ -8,3 +8,15 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Logs
+logs/
+
+# Configs
+data/
+
+# Document related
+node_modules/
+dist/
+docs/.vitepress/dist/
+docs/.vitepress/cache/

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:napcat.apifox.cn)",
+      "mcp__NapCat_API_docs__read_project_oas_q68dvh",
+      "mcp__NapCat_API_docs__read_project_oas_ref_resources_q68dvh",
+      "mcp__NapCat_API_docs__refresh_project_oas_q68dvh",
+      "Bash(python3:*)",
+      "Bash(uv run python:*)",
+      "Read(//c/Users/Nt/AppData/Local/Temp/claude/c--Users-Nt-Dev-siiway-NextBridge/tasks/**)",
+      "Bash(echo:*)"
+    ]
+  }
+}

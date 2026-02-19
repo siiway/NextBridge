@@ -2,13 +2,16 @@
 > The chat bridge that links up all the major chat platforms!
 
 ## To-Do List
- - [ ] [Tencent QQ](https://im.qq.com) (with [NapCat](https://napneko.github.io))
- - [ ] [Discord](https://discord.gg)
- - [ ] [Telegram](htps://telegram.org)
+ - [x] [Tencent QQ](https://im.qq.com) (with [NapCat](https://napneko.github.io))
+ - [x] [Discord](https://discord.gg)
+ - [x] [Telegram](htps://telegram.org)
  - [ ] [VoceChat](https://voce.chat)
- - [ ] [WhatsApp](https://whatsapp.com)
+ ~~ - [ ] [WhatsApp](https://whatsapp.com)~~
  - [ ] [DingTalk](https://dingtalk.com)
+ - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
  - [ ] [WeChat / WeiXin](https://weixin.qq.com)
 
 ## Special Thanks
  - discord.py
+ - NapCat
+ - python-telegram-bot

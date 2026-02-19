@@ -1,5 +1,3 @@
-# services/error.py
-
 from contextlib import contextmanager
 import sys
 import traceback

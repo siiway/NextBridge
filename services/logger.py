@@ -1,11 +1,7 @@
-# services/logger.py
-
 import logging
 import sys
 import os
 from datetime import datetime
-
-import services.config as c
 
 # ANSI 颜色码
 COLORS = {

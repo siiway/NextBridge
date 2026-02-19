@@ -1,0 +1,12 @@
+ {
+  "mcpServers": {
+    "NapCat API docs": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "apifox-mcp-server@latest",
+        "--site-id=5348325"
+      ]
+    }
+  }
+}

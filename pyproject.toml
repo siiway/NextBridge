@@ -1,9 +1,14 @@
 [project]
 name = "nextbridge"
 version = "0.1.0"
-description = "Add your description here"
+description = "The chat bridge that links up all the major chat platforms!"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "discord-py>=2.6.3",
+    "websockets>=13.0",
+    "aiohttp>=3.10",
+    "python-telegram-bot>=22.6",
+    "lark-oapi>=1.5.3",
+    "alibabacloud-dingtalk>=2.2.38",
 ]
