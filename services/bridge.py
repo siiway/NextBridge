@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -11,6 +12,26 @@ l = log.get_logger()
 # Config keys whose values are treated as credentials and must never appear in
 # outgoing messages.  Matched as substrings against lower-cased key names.
 _SENSITIVE_KEY_PATTERNS = ("token", "secret", "password", "webhook_url")
+
+# Rich-header tag: <richheader title="..." content="..."/>
+_RICHHEADER_RE = re.compile(r'<richheader\b([^/]*)/>',  re.IGNORECASE)
+_ATTR_RE        = re.compile(r'(\w+)="([^"]*)"')
+
+
+def _parse_richheader(text: str) -> tuple[str, dict | None]:
+    """
+    Extract a ``<richheader title="..." content="..."/>`` tag from *text*.
+
+    Returns ``(clean_text, attrs_dict)`` where *clean_text* has the tag
+    (and any directly adjacent whitespace) stripped.  *attrs_dict* is
+    ``None`` when no tag is found.
+    """
+    m = _RICHHEADER_RE.search(text)
+    if not m:
+        return text, None
+    attrs = dict(_ATTR_RE.findall(m.group(1)))
+    clean = (text[:m.start()] + text[m.end():]).strip()
+    return clean, attrs or None
 
 
 def _collect_sensitive(obj, found: set[str]) -> None:
@@ -111,7 +132,12 @@ class Bridge:
             l.warning(f"msg_format missing key {e}; using raw text")
             formatted = msg.text
 
+        formatted, rich_header = _parse_richheader(formatted)
+
         extra: dict = {}
+        if rich_header is not None:
+            rich_header["avatar"] = msg.user_avatar
+            extra["rich_header"] = rich_header
         for k, v in msg_cfg.items():
             if k == "msg_format":
                 continue

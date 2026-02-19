@@ -2,17 +2,26 @@
 # Uses long-polling to receive messages and the bot API to send.
 #
 # Config keys (under telegram.<instance_id>):
-#   bot_token     – Telegram bot token from @BotFather (required)
-#   max_file_size – Max bytes per attachment when sending (default 50 MB,
-#                   Telegram bot API limit)
+#   bot_token         – Telegram bot token from @BotFather (required)
+#   max_file_size     – Max bytes per attachment when sending (default 50 MB,
+#                       Telegram bot API limit)
+#   rich_header_host  – Base URL of the Cloudflare rich-header worker
+#                       (e.g. "https://richheader.yourname.workers.dev").
+#                       When set, text-only bridged messages whose msg_format
+#                       includes a <richheader/> tag are sent with a small OG
+#                       link-preview card shown above the text (avatar + name).
+#                       Falls back to bold HTML header when absent or when the
+#                       message carries media attachments.
 #
 # Rule channel keys:
 #   chat_id – Telegram chat ID (negative for groups, e.g. "-100123456789")
 
 import asyncio
+import html
 import io
+from urllib.parse import urlencode
 
-from telegram import Update
+from telegram import LinkPreviewOptions, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 import services.logger as log
@@ -25,6 +34,13 @@ l = log.get_logger()
 _DEFAULT_MAX = 50 * 1024 * 1024  # 50 MB (Telegram bot API limit)
 
 # Catch all non-command message types that may carry content
+def _richheader_html(title: str, content: str) -> str:
+    """Render a rich header as a Telegram HTML snippet."""
+    t = html.escape(title)
+    c = html.escape(content)
+    return f"<b>{t}</b>" + (f" · <i>{c}</i>" if c else "")
+
+
 _CONTENT_FILTER = (
     filters.TEXT
     | filters.PHOTO
@@ -173,6 +189,41 @@ class TelegramDriver(BaseDriver):
         max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
         caption_used = False
 
+        parse_mode: str | None = None
+        link_preview_opts: LinkPreviewOptions | None = None
+
+        rich_header = kwargs.get("rich_header")
+        if rich_header:
+            host = self.config.get("rich_header_host", "").rstrip("/")
+            has_attachments = bool(attachments)
+
+            if host and not has_attachments:
+                # Preferred path: Cloudflare Worker returns an OG page; Telegram
+                # shows it as a small avatar+name card above the message text.
+                params: dict = {
+                    "title":   rich_header.get("title", ""),
+                    "content": rich_header.get("content", ""),
+                }
+                if av := rich_header.get("avatar", ""):
+                    params["avatar"] = av
+                rh_url = f"{host}/richheader?{urlencode(params)}"
+                link_preview_opts = LinkPreviewOptions(
+                    url=rh_url,
+                    prefer_small_media=True,
+                    show_above_text=True,
+                )
+            else:
+                # Fallback: embed the header as HTML bold text (used when
+                # rich_header_host is not configured or when there are media
+                # attachments, since captions cannot carry link previews).
+                header = _richheader_html(
+                    rich_header.get("title", ""),
+                    rich_header.get("content", ""),
+                )
+                body = html.escape(text) if text else ""
+                text = f"{header}\n{body}" if body else header
+                parse_mode = "HTML"
+
         try:
             for att in (attachments or []):
                 if not att.url and att.data is None:
@@ -180,8 +231,11 @@ class TelegramDriver(BaseDriver):
 
                 result = await media.fetch_attachment(att, max_size)
                 if not result:
-                    # Oversized or failed — fall through to text fallback below
-                    text += f"\n[{att.type.capitalize()}: {att.name or att.url}]"
+                    # Oversized or failed — append as text (escape if in HTML mode)
+                    label = att.name or att.url or ""
+                    if parse_mode == "HTML":
+                        label = html.escape(label)
+                    text += f"\n[{att.type.capitalize()}: {label}]"
                     continue
 
                 data_bytes, mime = result
@@ -191,19 +245,32 @@ class TelegramDriver(BaseDriver):
                 caption = text if not caption_used else None
 
                 if att.type == "image":
-                    await self._app.bot.send_photo(chat_id=cid, photo=bio, caption=caption)
+                    await self._app.bot.send_photo(
+                        chat_id=cid, photo=bio, caption=caption, parse_mode=parse_mode
+                    )
                 elif att.type == "voice":
-                    await self._app.bot.send_voice(chat_id=cid, voice=bio, caption=caption)
+                    await self._app.bot.send_voice(
+                        chat_id=cid, voice=bio, caption=caption, parse_mode=parse_mode
+                    )
                 elif att.type == "video":
-                    await self._app.bot.send_video(chat_id=cid, video=bio, caption=caption)
+                    await self._app.bot.send_video(
+                        chat_id=cid, video=bio, caption=caption, parse_mode=parse_mode
+                    )
                 else:
-                    await self._app.bot.send_document(chat_id=cid, document=bio, caption=caption)
+                    await self._app.bot.send_document(
+                        chat_id=cid, document=bio, caption=caption, parse_mode=parse_mode
+                    )
 
                 caption_used = True
 
             # Send text-only if no attachments consumed it
             if text and not caption_used:
-                await self._app.bot.send_message(chat_id=cid, text=text)
+                await self._app.bot.send_message(
+                    chat_id=cid,
+                    text=text,
+                    parse_mode=parse_mode,
+                    link_preview_options=link_preview_opts,
+                )
 
         except Exception as e:
             l.error(f"Telegram [{self.instance_id}] send failed: {e}")

@@ -258,6 +258,12 @@ class NapCatDriver(BaseDriver):
         max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
         segments: list[dict] = []
 
+        rich_header = kwargs.get("rich_header")
+        if rich_header:
+            t, c = rich_header.get("title", ""), rich_header.get("content", "")
+            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
+            text = f"{prefix}\n{text}" if text else prefix
+
         if text:
             segments.append({"type": "text", "data": {"text": text}})
 

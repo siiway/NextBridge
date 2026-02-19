@@ -141,6 +141,12 @@ class DingTalkDriver(BaseDriver):
             )
             return
 
+        rich_header = kwargs.get("rich_header")
+        if rich_header:
+            t, c = rich_header.get("title", ""), rich_header.get("content", "")
+            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
+            text = f"{prefix}\n{text}" if text else prefix
+
         for att in (attachments or []):
             if att.url:
                 text += f"\n[{att.type.capitalize()}: {att.name or att.url}]({att.url})"

@@ -132,6 +132,12 @@ class DiscordDriver(BaseDriver):
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
+        rich_header = kwargs.get("rich_header")
+        if rich_header:
+            t, c = rich_header.get("title", ""), rich_header.get("content", "")
+            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
+            text = f"{prefix}\n{text}" if text else prefix
+
         if self._send_method == "webhook" and self._webhook_url:
             await self._send_webhook(text, attachments, **kwargs)
         elif self._client is not None:
