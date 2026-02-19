@@ -6,7 +6,7 @@
  - [x] [Discord](https://discord.gg)
  - [x] [Telegram](htps://telegram.org)
  - [ ] [VoceChat](https://voce.chat)
- ~~ - [ ] [WhatsApp](https://whatsapp.com)~~
+ - [ ] ~~[WhatsApp](https://whatsapp.com)~~
  - [x] [DingTalk](https://dingtalk.com)
  - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
  - [ ] [WeChat / WeiXin](https://weixin.qq.com)
