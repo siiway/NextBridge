@@ -17,13 +17,15 @@ Add under `telegram.<instance_id>` in `config.json`:
 |---|---|---|---|
 | `bot_token` | Yes | — | Bot token from @BotFather |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
+| `rich_header_host` | No | — | Base URL of your Cloudflare rich-header worker (see [Rich Header](#rich-header)) |
 
 ```json
 {
   "telegram": {
     "tg_main": {
       "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-      "max_file_size": 52428800
+      "max_file_size": 52428800,
+      "rich_header_host": "https://richheader.yourname.workers.dev"
     }
   }
 }
@@ -66,6 +68,43 @@ Media messages may include a caption, which becomes the message text.
 | `file` | `send_document` |
 
 The message text is sent as the caption of the first attachment. If there are no attachments (or all fail), it is sent as a plain `send_message`. Text for subsequent attachments is omitted.
+
+## Rich Header
+
+When a `msg_format` contains a `<richheader title="..." content="..."/>` tag and `rich_header_host` is configured, NextBridge shows a **small link-preview card** above the message text on Telegram. The card displays the sender's avatar, name (title), and a secondary line (content) — visually compact and distinct from the message body.
+
+This works by serving a tiny HTML page with [Open Graph](https://ogp.me/) meta tags from a Cloudflare Worker. Telegram fetches those tags and renders the result as a `prefer_small_media` link preview shown above the text.
+
+### Cloudflare Worker setup
+
+::: tip Public endpoint
+We provides a public endpoint, `https://richheader.siiway.top`. Feel free to use it.
+:::
+
+1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create**.
+2. Paste the contents of [`cloudflare/richheader-worker.js`](https://github.com/siiway/NextBridge/blob/main/cloudflare/richheader-worker.js) into the editor and deploy.
+3. Copy the worker's URL (e.g. `https://richheader.yourname.workers.dev`).
+4. Set `rich_header_host` in your Telegram instance config to that URL.
+
+### msg_format example
+
+```json
+{
+  "my_tg": {
+    "chat_id": "-100987654321",
+    "msg": {
+      "msg_format": "<richheader title=\"{username}\" content=\"id: {user_id}\"/> {msg}"
+    }
+  }
+}
+```
+
+### Fallback behaviour
+
+| Condition | Behaviour |
+|---|---|
+| `rich_header_host` is not set | Bold/italic HTML header prepended to the message text |
+| Message includes media attachments | Same bold/italic HTML fallback (Telegram captions cannot carry link previews) |
 
 ## Notes
 

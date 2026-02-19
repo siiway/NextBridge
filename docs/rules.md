@@ -106,6 +106,57 @@ Controls how the message is formatted when sent to a target.
 | `{user_avatar}` | Avatar URL of the sender (may be empty) |
 | `{msg}` | The message text content |
 
+### Rich header tag
+
+The `<richheader>` self-closing tag can be embedded anywhere in `msg_format`. The bridge strips it from the final text and passes its attributes to each driver for platform-native rendering.
+
+```
+<richheader title="..." content="..."/>
+```
+
+| Attribute | Description |
+|---|---|
+| `title` | Primary line — typically the sender name |
+| `content` | Secondary line — typically the user ID or role |
+
+Both attributes support the same `{variable}` substitutions as `msg_format`.
+
+**Rendering by platform:**
+
+| Platform | Rendered as |
+|---|---|
+| Telegram (with `rich_header_host`) | Small OG link-preview card above the message (avatar + title + content) |
+| Telegram (fallback) | `**title** · *content*` HTML bold/italic header prepended to text |
+| Discord | `**title** · *content*` Markdown bold/italic header prepended to text |
+| QQ (NapCat) | `[title · content]` plain text prepended |
+| Feishu / DingTalk | `[title · content]` plain text prepended |
+
+**Example — rich header for Telegram with QQ-style plain text for QQ:**
+
+```json
+{
+  "type": "connect",
+  "channels": {
+    "my_qq": {
+      "group_id": "123456789",
+      "msg": { "msg_format": "{username} ({user_id}): {msg}" }
+    },
+    "my_tg": {
+      "chat_id": "-100987654321",
+      "msg": {
+        "msg_format": "<richheader title=\"{username}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
+      }
+    }
+  }
+}
+```
+
+On Telegram (when `rich_header_host` is configured) this produces a compact card with the sender's avatar and name displayed above the message body.
+
+> **Note:** The rich header card is only shown for text-only messages. Messages that include media attachments fall back to the bold/italic HTML header in the caption.
+
+---
+
 ### Examples
 
 ```json

@@ -17,13 +17,15 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
 |---|---|---|---|
 | `bot_token` | 是 | — | 来自 @BotFather 的 Bot Token |
 | `max_file_size` | 否 | `52428800`（50 MB） | 发送附件时单个文件的最大字节数 |
+| `rich_header_host` | 否 | — | Cloudflare 富头部 Worker 的基础 URL（见 [富头部](#富头部)） |
 
 ```json
 {
   "telegram": {
     "tg_main": {
       "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-      "max_file_size": 52428800
+      "max_file_size": 52428800,
+      "rich_header_host": "https://richheader.yourname.workers.dev"
     }
   }
 }
@@ -66,6 +68,43 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
 | `file` | `send_document` |
 
 消息文本作为第一个附件的 Caption 发送。若没有附件（或所有附件均失败），则以普通 `send_message` 发送。后续附件不再携带文本。
+
+## 富头部
+
+当 `msg_format` 中包含 `<richheader title="..." content="..."/>` 标签，且已配置 `rich_header_host` 时，NextBridge 会在 Telegram 消息文本上方显示一张**小型链接预览卡片**。卡片包含发送者的头像、名称（title）和副标题（content），视觉上紧凑且与消息正文明显区分。
+
+其工作原理是通过 Cloudflare Worker 提供一个包含 [Open Graph](https://ogp.me/) 元标签的微型 HTML 页面。Telegram 获取这些标签后，以 `prefer_small_media` 样式将其渲染为显示在文字上方的链接预览卡片。
+
+### Cloudflare Worker 部署步骤
+
+::: tip 公共地址
+我们提供一个公共地址，`https://richheader.siiway.top`。你可以直接使用它。
+:::
+
+1. 进入 [Cloudflare 控制台](https://dash.cloudflare.com/) → **Workers & Pages** → **创建**。
+2. 将 [`cloudflare/richheader-worker.js`](https://github.com/siiway/NextBridge/blob/main/cloudflare/richheader-worker.js) 的内容粘贴到编辑器中并部署。
+3. 复制 Worker 的 URL（如 `https://richheader.yourname.workers.dev`）。
+4. 将该 URL 设置为 Telegram 实例配置中的 `rich_header_host`。
+
+### msg_format 示例
+
+```json
+{
+  "my_tg": {
+    "chat_id": "-100987654321",
+    "msg": {
+      "msg_format": "<richheader title=\"{username}\" content=\"id: {user_id}\"/> {msg}"
+    }
+  }
+}
+```
+
+### 回退行为
+
+| 条件 | 行为 |
+|---|---|
+| 未配置 `rich_header_host` | 加粗/斜体 HTML 头部文字附加在消息文本前 |
+| 消息包含媒体附件 | 同上（Telegram 的媒体 Caption 不支持链接预览） |
 
 ## 注意事项
 

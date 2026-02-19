@@ -106,6 +106,57 @@
 | `{user_avatar}` | 发送者的头像 URL（可能为空） |
 | `{msg}` | 消息文本内容 |
 
+### 富头部标签（Rich Header）
+
+可以在 `msg_format` 的任意位置嵌入 `<richheader>` 自闭合标签。桥接器会将其从最终文本中提取出来，并将属性传递给各驱动器，由各平台以原生方式渲染。
+
+```
+<richheader title="..." content="..."/>
+```
+
+| 属性 | 说明 |
+|---|---|
+| `title` | 主行内容，通常为发送者名称 |
+| `content` | 次行内容，通常为用户 ID 或角色 |
+
+两个属性均支持与 `msg_format` 相同的 `{变量}` 替换。
+
+**各平台渲染方式：**
+
+| 平台 | 渲染形式 |
+|---|---|
+| Telegram（已配置 `rich_header_host`） | 消息上方的小型 OG 链接预览卡片（含头像、标题、副标题） |
+| Telegram（回退模式） | 加粗/斜体 HTML 头部文字，附加在消息文本前 |
+| Discord | `**title** · *content*` Markdown 加粗/斜体，附加在文本前 |
+| QQ（NapCat） | `[title · content]` 纯文本，附加在消息前 |
+| 飞书 / 钉钉 | `[title · content]` 纯文本，附加在消息前 |
+
+**示例——Telegram 使用富头部，QQ 使用纯文本格式：**
+
+```json
+{
+  "type": "connect",
+  "channels": {
+    "my_qq": {
+      "group_id": "123456789",
+      "msg": { "msg_format": "{username} ({user_id}): {msg}" }
+    },
+    "my_tg": {
+      "chat_id": "-100987654321",
+      "msg": {
+        "msg_format": "<richheader title=\"{username}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
+      }
+    }
+  }
+}
+```
+
+在 Telegram 上（已配置 `rich_header_host` 时），将在消息正文上方显示一张带有发送者头像和名称的紧凑卡片。
+
+> **注意：** 富头部卡片仅在纯文字消息中显示。包含媒体附件的消息将回退为在 Caption 中附加加粗/斜体头部文字。
+
+---
+
 ### 示例
 
 ```json
