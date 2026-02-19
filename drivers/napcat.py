@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import uuid
+from pathlib import Path
 
 import websockets
 import websockets.exceptions
@@ -23,6 +24,54 @@ from drivers import BaseDriver
 l = log.get_logger()
 
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
+
+# ---------------------------------------------------------------------------
+# CQ face GIF database
+# ---------------------------------------------------------------------------
+
+# Resolved once at import time so path traversal checks are always anchored to
+# the same absolute directory, even if the working directory changes.
+_FACE_DB: Path = (Path(__file__).parent.parent / "db" / "cqface-gif").resolve()
+
+
+def _load_face_gif(face_id_raw) -> bytes | None:
+    """
+    Safely load a QQ face GIF from the local database.
+
+    Security:
+    - Layer 1: The face ID is parsed as a non-negative integer.  Integers
+      cannot contain path separators or ``..``, so no traversal is possible
+      by construction.
+    - Layer 2: The resolved candidate path is checked with
+      ``Path.is_relative_to(_FACE_DB)`` as a hard guarantee — this catches
+      any edge cases such as OS-level symlinks that point outside the db dir.
+
+    Returns ``None`` if the ID is invalid, escapes the database directory,
+    or the file simply does not exist.
+    """
+    try:
+        face_id = int(face_id_raw)
+        if face_id < 0:
+            raise ValueError("negative id")
+    except (TypeError, ValueError):
+        l.warning(f"Invalid face ID {face_id_raw!r} — ignored")
+        return None
+
+    candidate = (_FACE_DB / f"{face_id}.gif").resolve()
+
+    # Layer 2 path-traversal guard.
+    if not candidate.is_relative_to(_FACE_DB):
+        l.warning(f"Face path {candidate} escapes database dir — blocked")
+        return None
+
+    if not candidate.is_file():
+        return None
+
+    try:
+        return candidate.read_bytes()
+    except OSError as e:
+        l.error(f"Failed to read face GIF {candidate}: {e}")
+        return None
 
 
 class NapCatDriver(BaseDriver):
@@ -169,7 +218,15 @@ class NapCatDriver(BaseDriver):
                     size = -1
                 attachments.append(Attachment(type="file", url=url, name=name, size=size))
 
-            # face, reply, forward, etc. — silently skip
+            elif t == "face":
+                face_id_raw = d.get("id", "")
+                gif_data = _load_face_gif(face_id_raw)
+                if gif_data is not None:
+                    # face_id is validated integer at this point
+                    name = f"face_{int(face_id_raw)}.gif"
+                    attachments.append(Attachment(type="image", url="", name=name, data=gif_data))
+
+            # reply, forward, mface, etc. — silently skip
 
         text = "".join(text_parts)
         # If segments gave us nothing useful, fall back to raw_message string
@@ -205,42 +262,43 @@ class NapCatDriver(BaseDriver):
             segments.append({"type": "text", "data": {"text": text}})
 
         for att in (attachments or []):
-            if not att.url:
+            if not att.url and att.data is None:
                 continue
 
             if att.type == "image":
                 # Download through the bridge so NapCat doesn't need to reach
                 # external CDNs (e.g. Discord CDN, Telegram API) directly.
-                result = await media.fetch(att.url, max_size)
+                # fetch_attachment() uses att.data directly if already loaded
+                # (e.g. a face GIF), otherwise downloads from att.url.
+                result = await media.fetch_attachment(att, max_size)
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
                     segments.append({"type": "image", "data": {"file": f"base64://{b64}"}})
                 else:
-                    segments.append({"type": "text", "data": {"text": f"\n[图片] {att.url}"}})
+                    segments.append({"type": "text", "data": {"text": f"\n[图片] {att.url or att.name}"}})
 
             elif att.type == "voice":
-                result = await media.fetch(att.url, max_size)
+                result = await media.fetch_attachment(att, max_size)
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
                     segments.append({"type": "record", "data": {"file": f"base64://{b64}"}})
                 else:
-                    segments.append({"type": "text", "data": {"text": f"\n[语音] {att.url}"}})
+                    segments.append({"type": "text", "data": {"text": f"\n[语音] {att.url or att.name}"}})
 
             elif att.type == "video":
-                # Download through the bridge for the same CDN-access reason.
-                result = await media.fetch(att.url, max_size)
+                result = await media.fetch_attachment(att, max_size)
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
                     segments.append({"type": "video", "data": {"file": f"base64://{b64}"}})
                 else:
-                    segments.append({"type": "text", "data": {"text": f"\n[视频] {att.url}"}})
-
+                    segments.append({"type": "text", "data": {"text": f"\n[视频] {att.url or att.name}"}})
 
             else:  # file — QQ file upload is complex; send URL as text
-                segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {att.url}"}})
+                label = att.url or att.name
+                segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {label}"}})
 
         if not segments:
             return

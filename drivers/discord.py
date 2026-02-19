@@ -159,16 +159,18 @@ class DiscordDriver(BaseDriver):
         # Download each attachment; collect as (bytes, mime, filename) triples
         files: list[tuple[bytes, str, str]] = []
         for att in (attachments or []):
-            if not att.url:
+            if not att.url and att.data is None:
                 continue
-            result = await media.fetch(att.url, max_size)
+            result = await media.fetch_attachment(att, max_size)
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
                 files.append((data_bytes, mime, fname))
             else:
-                # Size exceeded or download failed — append URL as text
-                payload["content"] += f"\n[{att.type.capitalize()}: {att.name or att.url}]({att.url})"
+                # Size exceeded or download failed — append URL or name as text
+                label = att.name or att.url
+                ref = f"({att.url})" if att.url else ""
+                payload["content"] += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
         if files:
             form = aiohttp.FormData()
@@ -216,14 +218,16 @@ class DiscordDriver(BaseDriver):
 
         discord_files: list[discord.File] = []
         for att in (attachments or []):
-            if not att.url:
+            if not att.url and att.data is None:
                 continue
-            result = await media.fetch(att.url, max_size)
+            result = await media.fetch_attachment(att, max_size)
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
                 discord_files.append(discord.File(io.BytesIO(data_bytes), filename=fname))
             else:
-                text += f"\n[{att.type.capitalize()}: {att.name or att.url}]({att.url})"
+                label = att.name or att.url
+                ref = f"({att.url})" if att.url else ""
+                text += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
         await ch.send(text or None, files=discord_files)

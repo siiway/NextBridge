@@ -7,6 +7,8 @@
 #   if result:
 #       data, content_type = result
 
+import mimetypes
+
 import aiohttp
 
 import services.logger as log
@@ -72,6 +74,23 @@ async def fetch(url: str, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, str] | 
     except Exception as e:
         l.error(f"media.fetch failed for {url!r}: {e}")
         return None
+
+
+async def fetch_attachment(att, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, str] | None:
+    """
+    Return ``(bytes, mime)`` for an Attachment.
+
+    If ``att.data`` is already populated (e.g. a locally-loaded face GIF),
+    return it directly without any network request.  Otherwise fall back to
+    ``fetch(att.url, max_bytes)``.
+    """
+    if att.data is not None:
+        if len(att.data) > max_bytes:
+            l.debug(f"media.fetch_attachment: {att.name!r} pre-fetched size {len(att.data)} > {max_bytes}, skipping")
+            return None
+        mime = mimetypes.guess_type(att.name)[0] or "application/octet-stream"
+        return att.data, mime
+    return await fetch(att.url, max_bytes)
 
 
 def filename_for(name: str, content_type: str) -> str:

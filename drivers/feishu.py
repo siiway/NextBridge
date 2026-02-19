@@ -167,6 +167,8 @@ class FeishuDriver(BaseDriver):
         for att in (attachments or []):
             if att.url:
                 text += f"\n[{att.type.capitalize()}: {att.name or att.url}]({att.url})"
+            elif att.name:
+                text += f"\n[{att.type.capitalize()}: {att.name}]"
 
         req = (
             CreateMessageRequest.builder()

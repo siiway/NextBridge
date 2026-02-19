@@ -175,10 +175,10 @@ class TelegramDriver(BaseDriver):
 
         try:
             for att in (attachments or []):
-                if not att.url:
+                if not att.url and att.data is None:
                     continue
 
-                result = await media.fetch(att.url, max_size)
+                result = await media.fetch_attachment(att, max_size)
                 if not result:
                     # Oversized or failed — fall through to text fallback below
                     text += f"\n[{att.type.capitalize()}: {att.name or att.url}]"

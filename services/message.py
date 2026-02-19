@@ -8,6 +8,7 @@ class Attachment:
     url: str       # download URL (may be empty when unavailable)
     name: str = "" # filename hint
     size: int = -1 # bytes; -1 = unknown
+    data: bytes | None = None  # pre-fetched bytes; if set, skip URL download
 
 
 @dataclass
