@@ -1,13 +1,20 @@
 {
-    "napcat":{
-        "example_qq_number":{
-            "ws_url":"ws://127.0.0.1:3001",
-            "ws_token":"37xrt2x3n4qgonpfwb4gnp"
+    "napcat": {
+        "id_only_in_config_for_qq": {
+            "ws_url": "wss://napcat-ws.krnl32.win",
+            "ws_token": "21vbgiaZHCCiMEDj"
         }
     },
-    "discord":{
-        "id_only_in_config":{
-            "webhook_url":"https://example.webhook.url/"
+    "discord": {
+        "id_only_in_config_for_dc": {
+            "send_method": "webhook",
+            "webhook_url": "https://discord.com/api/webhooks/1473963201795194911/5Q_-4_pT0pE0vZo3dwyxfsyIgHZxO5NF8HNxGvtLsh0rt9o39wnAYiwxGdv4C3rlEKxD",
+            "bot_token": "MTM0MzkyMzEzMzM3MDk5NDc1MA.GADjE-.1pewCwy439rnjNmcWeLUJF7FbzjSKD095DVavk"
+        }
+    },
+    "telegram": {
+        "id_only_in_config_for_tg": {
+            "bot_token": "8240957438:AAGYwRrVq2kOs4IkokV7mZtQ7PlO3ce16Jw"
         }
     }
 }

@@ -1,38 +1,32 @@
 {
     "rules": [
         {
-            "from": {
-                "discord": {
-                    "server_id": "exampleserverid",
-                    "channel_id": "examplechannelid"
-                }
-            },
-            "to": {
-                "qq": {
-                    "group_id": "236919289"
-                }
-            },
-            "msg": {
-                "msg_format": "{user} @ {from}: \n {msg}"
-            }
-        },
-        {
-            "from": {
-                "qq": {
-                    "group_id": "236919289"
-                }
-            },
-            "to": {
-                "discord": {
-                    "server_id": "exampleserverid",
-                    "channel_id": "examplechannelid",
-                    "send_method": "webhook"
+            "type": "connect",
+            "channels": {
+                "id_only_in_config_for_dc": {
+                    "server_id": "1061629481267245086",
+                    "channel_id": "1269706305661309030",
+                    "msg": {
+                        "msg_format": "{msg}",
+                        "webhook_title": "{username} ({user_id}) @ {from}",
+                        "webhook_avatar": "{user_avatar}"
+                    }
+                },
+                "id_only_in_config_for_qq": {
+                    "group_id": "947429526",
+                    "msg": {
+                        "msg_format": "{username} ({user_id}): {msg}"
+                    }
+                },
+                "id_only_in_config_for_tg": {
+                    "chat_id": "-1002206757362",
+                    "msg": {
+                        "msg_format": "{username} ({user_id}): {msg}"
+                    }
                 }
             },
             "msg": {
-                "msg_format": "{msg}",
-                "webhook_title": "{user} @ {from}",
-                "webhook_avatar": "{user_avatar}"
+                "msg_format": "{username} ({user_id}): {msg}"
             }
         }
     ]
