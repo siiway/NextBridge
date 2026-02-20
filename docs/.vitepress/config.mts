@@ -18,6 +18,8 @@ const enSidebar = [
       { text: 'Telegram', link: '/drivers/telegram' },
       { text: 'Feishu / Lark', link: '/drivers/feishu' },
       { text: 'DingTalk', link: '/drivers/dingtalk' },
+      { text: 'Yunhu', link: '/drivers/yunhu' },
+      { text: 'KOOK', link: '/drivers/kook' },
     ],
   },
 ]
@@ -40,6 +42,8 @@ const zhSidebar = [
       { text: 'Telegram', link: '/zh/drivers/telegram' },
       { text: '飞书 / Lark', link: '/zh/drivers/feishu' },
       { text: '钉钉', link: '/zh/drivers/dingtalk' },
+      { text: '云湖', link: '/zh/drivers/yunhu' },
+      { text: 'KOOK', link: '/zh/drivers/kook' },
     ],
   },
 ]

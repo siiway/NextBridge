@@ -11,4 +11,6 @@ dependencies = [
     "python-telegram-bot>=22.6",
     "lark-oapi>=1.5.3",
     "alibabacloud-dingtalk>=2.2.38",
+    "khl-py>=0.3.17",
+    "yunhu>=0.0.11",
 ]

@@ -9,9 +9,9 @@
  - [ ] ~~[WhatsApp](https://whatsapp.com)~~
  - [x] [DingTalk](https://dingtalk.com)
  - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
- - [ ] [WeChat / WeiXin](https://weixin.qq.com)
- - [ ] [Yunhu](https://www.yhchat.com/)
- - [ ] [Kook](https://www.kookapp.cn/)
+ - [ ] ~~[WeChat / WeiXin](https://weixin.qq.com)~~
+ - [x] [Yunhu](https://www.yhchat.com/)
+ - [x] [Kook](https://www.kookapp.cn/)
 
 ## Special Thanks
  - discord.py

@@ -12,6 +12,8 @@ from drivers.discord import DiscordDriver
 from drivers.telegram import TelegramDriver
 from drivers.feishu import FeishuDriver
 from drivers.dingtalk import DingTalkDriver
+from drivers.yunhu import YunhuDriver
+from drivers.kook import KookDriver
 
 l = log.get_logger()
 
@@ -21,6 +23,8 @@ DRIVER_MAP = {
     "telegram": TelegramDriver,
     "feishu": FeishuDriver,
     "dingtalk": DingTalkDriver,
+    "yunhu": YunhuDriver,
+    "kook": KookDriver,
 }
 
 

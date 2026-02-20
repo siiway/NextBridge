@@ -11,6 +11,8 @@ A **driver** is the adapter between NextBridge and a specific chat platform. Eac
 | Telegram | [Telegram](/drivers/telegram) | ✅ | ✅ | Uses long polling |
 | Feishu / Lark | [Feishu](/drivers/feishu) | ✅ | ✅ | Webhook receive; IM API send |
 | DingTalk | [DingTalk](/drivers/dingtalk) | ✅ | ✅ | Webhook receive; Robot API send |
+| Yunhu (云湖) | [Yunhu](/drivers/yunhu) | ✅ | ✅ | Webhook receive; open API send |
+| KOOK (开黑啦) | [KOOK](/drivers/kook) | ✅ | ✅ | WebSocket receive; bot API send; uploads to KOOK CDN |
 
 ## How drivers work
 

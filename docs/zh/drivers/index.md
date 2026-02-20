@@ -11,6 +11,8 @@
 | Telegram | [Telegram](/zh/drivers/telegram) | ✅ | ✅ | 使用长轮询 |
 | 飞书 / Lark | [飞书](/zh/drivers/feishu) | ✅ | ✅ | Webhook 接收；IM API 发送 |
 | 钉钉 | [钉钉](/zh/drivers/dingtalk) | ✅ | ✅ | Webhook 接收；机器人 API 发送 |
+| 云湖 | [云湖](/zh/drivers/yunhu) | ✅ | ✅ | Webhook 接收；开放 API 发送 |
+| KOOK（开黑啦） | [KOOK](/zh/drivers/kook) | ✅ | ✅ | WebSocket 接收；机器人 API 发送；上传至 KOOK CDN |
 
 ## 驱动器工作原理
 

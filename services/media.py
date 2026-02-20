@@ -95,7 +95,26 @@ async def fetch_attachment(att, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, s
 
 def filename_for(name: str, content_type: str) -> str:
     """Return a sane filename given an optional hint and a MIME type."""
+    _mime_ext = {
+        "image/jpeg":  "jpg",
+        "image/png":   "png",
+        "image/gif":   "gif",
+        "image/webp":  "webp",
+        "video/mp4":   "mp4",
+        "video/webm":  "webm",
+        "audio/ogg":   "ogg",
+        "audio/mpeg":  "mp3",
+        "audio/aac":   "aac",
+        "audio/amr":   "amr",
+    }
     if name:
+        # Platforms like Yunhu CDN serve all images with a .tmp extension.
+        # Replace it with an extension derived from the actual MIME type so
+        # that receiving platforms (Discord etc.) render the file correctly.
+        if name.endswith(".tmp"):
+            ext = _mime_ext.get(content_type)
+            if ext:
+                return name[:-4] + "." + ext
         return name
     _fallback = {
         "image/jpeg":  "photo.jpg",
