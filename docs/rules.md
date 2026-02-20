@@ -100,7 +100,8 @@ Controls how the message is formatted when sent to a target.
 | Variable | Description |
 |---|---|
 | `{platform}` | Platform name of the sender, e.g. `napcat`, `discord` |
-| `{from}` | Instance ID of the sender as defined in config.json |
+| `{instance_id}` | Instance ID of the sender as defined in config.json |
+| `{from}` | Alias for `{instance_id}` |
 | `{username}` | Display name of the sender |
 | `{user_id}` | Platform-native user ID |
 | `{user_avatar}` | Avatar URL of the sender (may be empty) |

@@ -120,6 +120,7 @@ class Bridge:
         fmt = msg_cfg.get("msg_format", "{msg}")
         ctx = {
             "platform":    msg.platform,
+            "instance_id": msg.instance_id,
             "from":        msg.instance_id,
             "username":    msg.user,
             "user_id":     msg.user_id,

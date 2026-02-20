@@ -100,7 +100,8 @@
 | 变量 | 说明 |
 |---|---|
 | `{platform}` | 发送方的平台名，如 `napcat`、`discord` |
-| `{from}` | 发送方的实例 ID（与 config.json 中定义一致） |
+| `{instance_id}` | 发送方的实例 ID（与 config.json 中定义一致） |
+| `{from}` | `{instance_id}` 的别名 |
 | `{username}` | 发送者的显示名称 |
 | `{user_id}` | 平台原生用户 ID |
 | `{user_avatar}` | 发送者的头像 URL（可能为空） |
