@@ -1,50 +1,35 @@
-import json
-import os
 from pathlib import Path
 
 import services.util as u
 import services.logger as log
+import services.config_io as config_io
 
 l = log.get_logger()
 
-data_path = u.get_data_path()
-config_file_path = Path(data_path) / "config.json"
-
 _config_cache = None
+_config_path: Path | None = None
+
 
 def _load_config():
-    """内部函数：加载配置文件到内存缓存"""
-    global _config_cache
+    """Load the config file into the in-memory cache."""
+    global _config_cache, _config_path
 
     if _config_cache is not None:
         return _config_cache
 
-    if not config_file_path.is_file():
-        raise FileNotFoundError(f"File not found: {config_file_path}")
+    found = config_io.find_config(Path(u.get_data_path()))
+    if found is None:
+        raise FileNotFoundError(f"No config file found in: {u.get_data_path()}")
 
-    try:
-        with open(config_file_path, 'r', encoding='utf-8') as f:
-            _config_cache = json.load(f)
-        return _config_cache
-    except json.JSONDecodeError as e:
-        raise ValueError(f"JSON decode error: {config_file_path}, Error: {e}")
-    except Exception as e:
-        raise RuntimeError(f"Read config failed: {e}")
+    _config_path = found
+    _config_cache = config_io.load_config(found)
+    return _config_cache
+
 
 def get(key: str, default=None):
     """
-    获取配置项的值。
-
-    支持嵌套键，用点号 '.' 分隔，例如:
-        get("database.host")
-        get("app.debug")
-
-    :param key: 配置项的键（支持点号分隔的嵌套键）
-    :param default: 如果键不存在，返回的默认值
-    :return: 配置值或默认值
+    Get a config value. Supports dot-notation for nested keys, e.g. ``get("database.host")``.
     """
-    global _config_cache
-
     try:
         config = _load_config()
     except Exception as e:
@@ -57,24 +42,24 @@ def get(key: str, default=None):
         if isinstance(value, dict) and k in value:
             value = value[k]
         else:
-            return default  # 键不存在或路径中断
+            return default
     return value
 
 
 def set(key: str, value):
     """
-    （可选）设置配置项并写回文件（谨慎使用）
+    Set a config value and write it back to the file.
 
-    :param key: 配置键（支持嵌套，如 "a.b.c"）
-    :param value: 要设置的值
+    :param key: Config key, supports dot-notation (e.g. ``"a.b.c"``).
+    :param value: Value to set.
     """
-    global _config_cache
+    global _config_cache, _config_path
     try:
         if _config_cache is None:
-            config = _load_config()  # 触发加载
+            config = _load_config()
         else:
             config = _config_cache
-    except:
+    except Exception:
         config = {}
 
     keys = key.split(".")
@@ -85,11 +70,9 @@ def set(key: str, value):
         d = d[k]
     d[keys[-1]] = value
 
-    # 写回文件
+    path = _config_path or (Path(u.get_data_path()) / "config.json")
     try:
-        config_file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_file_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=4)
-        _config_cache = config  # 更新缓存
+        config_io.save_config(config, path)
+        _config_cache = config
     except Exception as e:
         raise RuntimeError(f"Save config failed: {e}")

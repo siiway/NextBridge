@@ -1,10 +1,12 @@
+import argparse
 import asyncio
-import json
+import sys
 from pathlib import Path
 
 import services.error  # installs global uncaught-exception hook
 import services.logger as log
 import services.util as u
+import services.config_io as config_io
 from services.bridge import bridge
 
 from drivers.napcat import NapCatDriver
@@ -28,18 +30,41 @@ DRIVER_MAP = {
 }
 
 
+def cmd_convert(src: str, dst: str) -> None:
+    src_path = Path(src)
+    dst_path = Path(dst)
+
+    if not src_path.is_file():
+        print(f"Error: source file not found: {src_path}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        data = config_io.load_config(src_path)
+    except Exception as e:
+        print(f"Error reading {src_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        config_io.save_config(data, dst_path)
+    except Exception as e:
+        print(f"Error writing {dst_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Converted {src_path} → {dst_path}")
+
+
 async def main():
     l.info("NextBridge starting…")
 
     bridge.load_rules()
 
-    config_path = Path(u.get_data_path()) / "config.json"
-    if not config_path.is_file():
-        l.critical(f"Config file not found: {config_path}")
+    config_path = config_io.find_config(Path(u.get_data_path()))
+    if config_path is None:
+        l.critical(f"No config file found in: {u.get_data_path()} (tried config.json / .yaml / .toml)")
         return
 
-    with open(config_path, "r", encoding="utf-8") as f:
-        config: dict = json.load(f)
+    l.info(f"Loading config from: {config_path}")
+    config: dict = config_io.load_config(config_path)
 
     bridge.load_sensitive_values(config)
 
@@ -73,6 +98,19 @@ async def main():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog="nextbridge", description="NextBridge chat bridge")
+    subparsers = parser.add_subparsers(dest="command")
+
+    conv = subparsers.add_parser("convert", help="Convert a config file between formats (json/yaml/toml)")
+    conv.add_argument("src", help="Source config file (e.g. config.json)")
+    conv.add_argument("dst", help="Destination config file (e.g. config.yaml)")
+
+    args = parser.parse_args()
+
+    if args.command == "convert":
+        cmd_convert(args.src, args.dst)
+        sys.exit(0)
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

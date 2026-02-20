@@ -8,7 +8,12 @@
       "Bash(python3:*)",
       "Bash(uv run python:*)",
       "Read(//c/Users/Nt/AppData/Local/Temp/claude/c--Users-Nt-Dev-siiway-NextBridge/tasks/**)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(pip show:*)",
+      "Bash(python:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(test:*)"
     ]
   }
 }

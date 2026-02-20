@@ -13,4 +13,6 @@ dependencies = [
     "alibabacloud-dingtalk>=2.2.38",
     "khl-py>=0.3.17",
     "yunhu>=0.0.11",
+    "pyyaml>=6.0",
+    "tomli-w>=1.0",
 ]
