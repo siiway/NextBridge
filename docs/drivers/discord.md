@@ -20,6 +20,7 @@ Add under `discord.<instance_id>` in `config.json`:
 | `send_method` | No | `webhook` | `"webhook"` or `"bot"` |
 | `webhook_url` | No* | — | Webhook URL. Required when `send_method` is `"webhook"` |
 | `max_file_size` | No | `8388608` (8 MB) | Maximum bytes per attachment when sending |
+| `send_as_bot_when_using_cqface_emoji` | No | `false` | When `true`, messages containing `:cqface<id>:` tokens (emitted by the NapCat driver's `cqface_mode: "emoji"`) are sent via the bot instead of the webhook, even if `send_method` is `"webhook"`. Requires `bot_token`. |
 
 \* At least one of `bot_token` (for receive) or `webhook_url` (for send) must be provided.
 
@@ -74,14 +75,28 @@ Use under `channels` or `from`/`to` in `rules.json`:
 
 ## Extra msg keys
 
-These can be placed in the rule's `msg` block and are only used by the Discord driver when `send_method` is `"webhook"`:
+These can be placed in the rule's `msg` block and are picked up by the Discord driver:
 
 | Key | Description |
 |---|---|
-| `webhook_title` | Display name shown on the webhook message |
-| `webhook_avatar` | Avatar URL shown on the webhook message |
+| `webhook_msg_format` | Overrides `msg_format` when the message is sent via webhook. Supports the same template variables. |
+| `bot_msg_format` | Overrides `msg_format` when the message is sent via the bot (including when `send_as_bot_when_using_cqface_emoji` triggers). Supports the same template variables. |
+| `webhook_title` | Display name shown on the webhook message (`send_method: "webhook"` only) |
+| `webhook_avatar` | Avatar URL shown on the webhook message (`send_method: "webhook"` only) |
 
-Both support the same template variables as `msg_format`.
+All keys support the same template variables as `msg_format`.
+
+## CQ Face Emojis (discord_emojis.json)
+
+When using NapCat's `cqface_mode: "emoji"`, the Discord driver resolves `:cqface<id>:` tokens to Discord custom emojis (`<:cqface306:emoji_id>`) using a local JSON file. To set this up:
+
+1. Go to `https://discord.com/developers/applications/<your_app_id>/emojis` in your browser.
+2. Open the browser **Network** tab (F12 → Network).
+3. Refresh the page.
+4. Find the request to the `emojis` endpoint (e.g. `https://discord.com/api/v9/applications/1343923133370994750/emojis`).
+5. Copy the JSON response body and save it as `discord_emojis.json` in the data directory (default: `data/discord_emojis.json`).
+
+If the file is absent or an emoji is not found, the token falls back to the plain `:cqface<id>:` text.
 
 ## Notes
 

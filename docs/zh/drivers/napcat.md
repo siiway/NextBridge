@@ -17,6 +17,7 @@ NextBridge 通过 [NapCat](https://napneko.github.io) 连接 QQ——NapCat 是�
 | `ws_url` | 否 | `ws://127.0.0.1:3001` | NapCat 服务端的 WebSocket 地址 |
 | `ws_token` | 否 | — | 访问令牌（作为 `?access_token=…` 追加到 URL） |
 | `max_file_size` | 否 | `10485760`（10 MB） | 发送附件时单个文件的最大下载字节数 |
+| `cqface_mode` | 否 | `"gif"` | QQ 表情段的呈现方式。`"gif"` 将表情以动态 GIF 图上传（来自本地 `db/cqface-gif/` 数据库）；`"emoji"` 以内联文本呈现，如 `:cqface306:`。 |
 
 ```json
 {

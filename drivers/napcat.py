@@ -148,7 +148,8 @@ class NapCatDriver(BaseDriver):
         # Prefer group card (nickname-in-group) over global nickname
         nickname = sender.get("card") or sender.get("nickname") or user_id
 
-        text, attachments = self._parse_message(event)
+        face_as_emoji: bool = self.config.get("cqface_mode", "gif") == "emoji"
+        text, attachments = self._parse_message(event, face_as_emoji=face_as_emoji)
         if not text.strip() and not attachments:
             return
 
@@ -168,7 +169,7 @@ class NapCatDriver(BaseDriver):
         await self.bridge.on_message(msg)
 
     @staticmethod
-    def _parse_message(event: dict) -> tuple[str, list[Attachment]]:
+    def _parse_message(event: dict, *, face_as_emoji: bool = False) -> tuple[str, list[Attachment]]:
         """
         Parse an OneBot 11 message event into plain text + attachments.
         Always uses the structured ``message`` segment array; CQ-code strings
@@ -220,11 +221,17 @@ class NapCatDriver(BaseDriver):
 
             elif t == "face":
                 face_id_raw = d.get("id", "")
-                gif_data = _load_face_gif(face_id_raw)
-                if gif_data is not None:
-                    # face_id is validated integer at this point
-                    name = f"face_{int(face_id_raw)}.gif"
-                    attachments.append(Attachment(type="image", url="", name=name, data=gif_data))
+                if face_as_emoji:
+                    try:
+                        text_parts.append(f":cqface{int(face_id_raw)}:")
+                    except (TypeError, ValueError):
+                        pass
+                else:
+                    gif_data = _load_face_gif(face_id_raw)
+                    if gif_data is not None:
+                        # face_id is validated integer at this point
+                        name = f"face_{int(face_id_raw)}.gif"
+                        attachments.append(Attachment(type="image", url="", name=name, data=gif_data))
 
             # reply, forward, mface, etc. — silently skip
 

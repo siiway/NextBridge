@@ -17,6 +17,7 @@ Add under `napcat.<instance_id>` in `config.json`:
 | `ws_url` | No | `ws://127.0.0.1:3001` | WebSocket URL of the NapCat server |
 | `ws_token` | No | — | Access token (appended as `?access_token=…`) |
 | `max_file_size` | No | `10485760` (10 MB) | Maximum bytes to download per attachment when sending |
+| `cqface_mode` | No | `"gif"` | How to represent QQ face/emoji segments. `"gif"` uploads the face as an animated GIF (from the local `db/cqface-gif/` database); `"emoji"` renders it as inline text, e.g. `:cqface306:`. |
 
 ```json
 {

@@ -20,6 +20,8 @@
 
 import io
 import json
+from pathlib import Path
+import re
 
 import discord
 import aiohttp
@@ -27,11 +29,14 @@ import aiohttp
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.util import get_data_path
 from drivers import BaseDriver
 
 l = log.get_logger()
 
 _DEFAULT_MAX = 8 * 1024 * 1024  # 8 MB (Discord webhook limit)
+
+_CQFACE_RE = re.compile(r':cqface(\d+):')
 
 
 class DiscordDriver(BaseDriver):
@@ -43,6 +48,10 @@ class DiscordDriver(BaseDriver):
         self._send_method: str = config.get("send_method", "webhook")
         self._webhook_url: str | None = config.get("webhook_url")
         self._bot_token: str | None = config.get("bot_token")
+        # face_id (str) → "<:name:id>" resolved Discord emoji string
+        self._emoji_cache: dict[str, str] = {}
+        # name → emoji_id index built lazily from discord_emojis.json
+        self._emoji_db: dict[str, str] | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -122,6 +131,86 @@ class DiscordDriver(BaseDriver):
         await self.bridge.on_message(msg)
 
     # ------------------------------------------------------------------
+    # CQ face emoji resolution
+    # ------------------------------------------------------------------
+
+    def _get_emoji_db(self) -> dict[str, str]:
+        """Lazily load and index discord_emojis.json as {emoji_name: emoji_id}.
+
+        Supports two formats:
+        - Discord API export: ``{"items": [{"id": "...", "name": "cqface0", ...}]}``
+        - Simple map: ``{"0": "emoji_id"}`` or ``{"0": {"name": "...", "id": "..."}}``
+        """
+        if self._emoji_db is not None:
+            return self._emoji_db
+
+        self._emoji_db = {}
+        try:
+            raw = json.loads(
+                (Path(get_data_path()) / "discord_emojis.json").read_text(encoding="utf-8")
+            )
+            if isinstance(raw, dict) and "items" in raw:
+                # Discord API export format
+                for item in raw["items"]:
+                    name = item.get("name", "")
+                    eid  = item.get("id", "")
+                    if name and eid:
+                        self._emoji_db[name] = eid
+            elif isinstance(raw, dict):
+                # Simple {face_id: emoji_id | {name, id}} map
+                for face_id, entry in raw.items():
+                    if isinstance(entry, str):
+                        self._emoji_db[f"cqface{face_id}"] = entry
+                    elif isinstance(entry, dict):
+                        name = entry.get("name", f"cqface{face_id}")
+                        eid  = entry.get("id", "")
+                        if eid:
+                            self._emoji_db[name] = eid
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            l.warning(f"Discord [{self.instance_id}] failed to read emoji DB: {exc}")
+
+        return self._emoji_db
+
+    def _resolve_cqface(self, face_id: str) -> str:
+        """Return the Discord emoji string for a CQ face ID.
+
+        Lookup order:
+        1. In-process cache (populated by previous calls).
+        2. ``data/discord_emojis.json`` indexed by emoji name ``cqface<id>``.
+        3. Walk every guild the bot is connected to and search for a custom
+           emoji whose name is ``cqface<id>``.
+        4. Fall back to the plain ``:cqface<id>:`` text token.
+        """
+        if face_id in self._emoji_cache:
+            return self._emoji_cache[face_id]
+
+        target_name = f"cqface{face_id}"
+
+        # 1. JSON database
+        db = self._get_emoji_db()
+        if target_name in db:
+            result = f"<:{target_name}:{db[target_name]}>"
+            self._emoji_cache[face_id] = result
+            return result
+
+        # 2. Discord API — search all guilds the bot has joined
+        if self._client is not None:
+            for guild in self._client.guilds:
+                emoji = discord.utils.get(guild.emojis, name=target_name)
+                if emoji is not None:
+                    result = str(emoji)  # "<:name:id>"
+                    self._emoji_cache[face_id] = result
+                    return result
+
+        return f":cqface{face_id}:"  # plain fallback
+
+    def _expand_cqface_emojis(self, text: str) -> str:
+        """Replace all ``:cqface<id>:`` tokens with Discord emoji strings."""
+        return _CQFACE_RE.sub(lambda m: self._resolve_cqface(m.group(1)), text)
+
+    # ------------------------------------------------------------------
     # Send
     # ------------------------------------------------------------------
 
@@ -132,13 +221,36 @@ class DiscordDriver(BaseDriver):
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
+        has_cqface = bool(re.search(r':cqface\d+:', text))
+        force_bot = (
+            has_cqface
+            and self.config.get("send_as_bot_when_using_cqface_emoji", False)
+            and self._client is not None
+        )
+
+        # Resolve the send path first so we know which format override to apply
+        is_webhook_send = (
+            self._send_method == "webhook"
+            and self._webhook_url
+            and not force_bot
+        )
+
+        # Apply send-path-specific msg_format override if provided
+        fmt_key = "webhook_msg_format" if is_webhook_send else "bot_msg_format"
+        if fmt_key in kwargs:
+            text = kwargs[fmt_key]
+
+        # Expand :cqface<id>: tokens into proper Discord custom emoji strings
+        if has_cqface:
+            text = self._expand_cqface_emojis(text)
+
         rich_header = kwargs.get("rich_header")
         if rich_header:
             t, c = rich_header.get("title", ""), rich_header.get("content", "")
             prefix = f"**{t}**" + (f" · *{c}*" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
 
-        if self._send_method == "webhook" and self._webhook_url:
+        if is_webhook_send:
             await self._send_webhook(text, attachments, **kwargs)
         elif self._client is not None:
             await self._send_bot(channel, text, attachments)
