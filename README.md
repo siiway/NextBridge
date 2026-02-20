@@ -10,6 +10,8 @@
  - [x] [DingTalk](https://dingtalk.com)
  - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
  - [ ] [WeChat / WeiXin](https://weixin.qq.com)
+ - [ ] [Yunhu](https://www.yhchat.com/)
+ - [ ] [Kook](https://www.kookapp.cn/)
 
 ## Special Thanks
  - discord.py
