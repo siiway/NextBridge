@@ -21,6 +21,10 @@ Add under `yunhu.<instance_id>` in `config.json`:
 | `webhook_path` | No | `"/yunhu-webhook"` | HTTP path for the webhook endpoint |
 | `proxy_host` | No | — | Base URL of the `cloudflare/yh-proxy.js` Worker. Enables two sub-features: avatar URLs are rewritten to `<host>/pfp?url=…` (adds required Referer); Discord CDN attachment URLs are rewritten to `<host>/media?url=…` so Yunhu's servers can fetch them from inside China. |
 
+::: tip Public endpoint available
+`https://yh-proxy.siiway.top` is a hosted instance of `cloudflare/yh-proxy.js` that you can use directly without deploying your own Worker.
+:::
+
 ```json
 {
   "yunhu": {
@@ -28,7 +32,7 @@ Add under `yunhu.<instance_id>` in `config.json`:
       "token": "your-yunhu-bot-token",
       "webhook_port": 8765,
       "webhook_path": "/yunhu-webhook",
-      "proxy_host": "https://proxy.yourname.workers.dev"
+      "proxy_host": "https://yh-proxy.siiway.top"
     }
   }
 }

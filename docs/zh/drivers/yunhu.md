@@ -21,6 +21,10 @@
 | `webhook_path` | 否 | `"/yunhu-webhook"` | Webhook 端点的 HTTP 路径 |
 | `proxy_host` | 否 | — | `cloudflare/yh-proxy.js` Worker 的基础 URL。启用两项功能：头像 URL 改写为 `<host>/pfp?url=…`（注入必要的 Referer）；Discord CDN 附件 URL 改写为 `<host>/media?url=…`，使云湖服务器在中国境内也能拉取。 |
 
+::: tip 公共端点
+ `https://yh-proxy.siiway.top` 是 `cloudflare/yh-proxy.js` 的托管实例，可直接使用，无需自行部署 Worker。
+:::
+
 ```json
 {
   "yunhu": {
@@ -28,7 +32,7 @@
       "token": "your-yunhu-bot-token",
       "webhook_port": 8765,
       "webhook_path": "/yunhu-webhook",
-      "proxy_host": "https://proxy.yourname.workers.dev"
+      "proxy_host": "https://yh-proxy.siiway.top"
     }
   }
 }
