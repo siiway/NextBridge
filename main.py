@@ -16,6 +16,7 @@ from drivers.feishu import FeishuDriver
 from drivers.dingtalk import DingTalkDriver
 from drivers.yunhu import YunhuDriver
 from drivers.kook import KookDriver
+from drivers.matrix import MatrixDriver
 
 l = log.get_logger()
 
@@ -27,6 +28,7 @@ DRIVER_MAP = {
     "dingtalk": DingTalkDriver,
     "yunhu": YunhuDriver,
     "kook": KookDriver,
+    "matrix": MatrixDriver,
 }
 
 

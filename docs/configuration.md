@@ -1,6 +1,25 @@
 # Configuration Reference
 
-NextBridge is configured through `data/config.json`. The file has a two-level structure:
+## Config file formats
+
+NextBridge supports **JSON**, **YAML**, and **TOML** config files. Place the file in the data directory (default: `data/`). The first file found in this order is used:
+
+1. `config.json`
+2. `config.yaml` / `config.yml`
+3. `config.toml`
+
+### Converting between formats
+
+Use the built-in convert command to translate between formats:
+
+```sh
+uv run main.py convert data/config.json data/config.yaml
+uv run main.py convert data/config.yaml data/config.toml
+```
+
+## Structure
+
+The config has a two-level structure regardless of format:
 
 ```
 {
@@ -12,7 +31,7 @@ NextBridge is configured through `data/config.json`. The file has a two-level st
 
 | Level | Description |
 |---|---|
-| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk` |
+| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `matrix` |
 | `<instance_id>` | A name you choose freely — used to reference this instance in rules |
 
 You can run **multiple instances of the same platform** by adding more keys under the platform:
@@ -26,7 +45,7 @@ You can run **multiple instances of the same platform** by adding more keys unde
 }
 ```
 
-## Full example
+## Full example (JSON)
 
 ```json
 {
@@ -69,8 +88,37 @@ You can run **multiple instances of the same platform** by adding more keys unde
       "listen_port": 8082,
       "listen_path": "/dingtalk/event"
     }
+  },
+  "matrix": {
+    "mx_main": {
+      "homeserver": "https://matrix.org",
+      "user_id": "@mybot:matrix.org",
+      "password": "your_password"
+    }
   }
 }
+```
+
+## Full example (YAML)
+
+```yaml
+napcat:
+  qq_main:
+    ws_url: ws://127.0.0.1:3001
+    ws_token: secret
+
+discord:
+  dc_main:
+    send_method: webhook
+    webhook_url: https://discord.com/api/webhooks/ID/TOKEN
+    bot_token: BOT_TOKEN
+    max_file_size: 8388608
+
+matrix:
+  mx_main:
+    homeserver: https://matrix.org
+    user_id: "@mybot:matrix.org"
+    password: your_password
 ```
 
 For per-driver config keys, see the individual driver pages in the [Drivers](/drivers/) section.

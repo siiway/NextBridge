@@ -1,6 +1,25 @@
 # 配置文件参考
 
-NextBridge 通过 `data/config.json` 进行配置，文件采用两级结构：
+## 配置文件格式
+
+NextBridge 支持 **JSON**、**YAML** 和 **TOML** 格式的配置文件。将配置文件放在数据目录（默认为 `data/`）下，程序会按以下顺序查找并使用第一个存在的文件：
+
+1. `config.json`
+2. `config.yaml` / `config.yml`
+3. `config.toml`
+
+### 格式转换
+
+使用内置 convert 命令可以在各格式之间互转：
+
+```sh
+uv run main.py convert data/config.json data/config.yaml
+uv run main.py convert data/config.yaml data/config.toml
+```
+
+## 结构
+
+无论使用哪种格式，配置文件均采用两级结构：
 
 ```
 {
@@ -12,7 +31,7 @@ NextBridge 通过 `data/config.json` 进行配置，文件采用两级结构：
 
 | 层级 | 说明 |
 |---|---|
-| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk` 之一 |
+| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`matrix` 之一 |
 | `<实例ID>` | 由你自由命名，在规则配置中用于引用此实例 |
 
 同一平台可以**运行多个实例**，只需在平台名下添加多个键：
@@ -26,7 +45,7 @@ NextBridge 通过 `data/config.json` 进行配置，文件采用两级结构：
 }
 ```
 
-## 完整示例
+## 完整示例（JSON）
 
 ```json
 {
@@ -69,8 +88,37 @@ NextBridge 通过 `data/config.json` 进行配置，文件采用两级结构：
       "listen_port": 8082,
       "listen_path": "/dingtalk/event"
     }
+  },
+  "matrix": {
+    "mx_main": {
+      "homeserver": "https://matrix.org",
+      "user_id": "@mybot:matrix.org",
+      "password": "your_password"
+    }
   }
 }
+```
+
+## 完整示例（YAML）
+
+```yaml
+napcat:
+  qq_main:
+    ws_url: ws://127.0.0.1:3001
+    ws_token: secret
+
+discord:
+  dc_main:
+    send_method: webhook
+    webhook_url: https://discord.com/api/webhooks/ID/TOKEN
+    bot_token: BOT_TOKEN
+    max_file_size: 8388608
+
+matrix:
+  mx_main:
+    homeserver: https://matrix.org
+    user_id: "@mybot:matrix.org"
+    password: your_password
 ```
 
 各平台的详细配置项，请参阅[驱动器](/zh/drivers/)章节中对应的驱动器页面。
