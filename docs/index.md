@@ -15,7 +15,7 @@ hero:
 
 features:
   - title: Multi-platform
-    details: Supports QQ (via NapCat), Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, and Slack out of the box. New platforms can be added as drivers.
+    details: Supports QQ (via NapCat), Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack, Google Chat and Mattermost out of the box. New platforms can be added as drivers.
   - title: Config-driven routing
     details: Define which channels talk to each other using a simple rules file — no code needed. Use "connect" rules to link groups, or "forward" rules for fine-grained control.
   - title: Media bridging
