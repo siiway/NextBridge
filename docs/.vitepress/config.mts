@@ -21,6 +21,7 @@ const enSidebar = [
       { text: 'Yunhu', link: '/drivers/yunhu' },
       { text: 'KOOK', link: '/drivers/kook' },
       { text: 'Matrix', link: '/drivers/matrix' },
+      { text: 'Signal', link: '/drivers/signal' },
     ],
   },
 ]
@@ -46,6 +47,7 @@ const zhSidebar = [
       { text: '云湖', link: '/zh/drivers/yunhu' },
       { text: 'KOOK', link: '/zh/drivers/kook' },
       { text: 'Matrix', link: '/zh/drivers/matrix' },
+      { text: 'Signal', link: '/zh/drivers/signal' },
     ],
   },
 ]

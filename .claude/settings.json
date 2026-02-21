@@ -13,7 +13,8 @@
       "Bash(python:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }

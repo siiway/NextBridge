@@ -7,13 +7,13 @@
  - [x] [Telegram](htps://telegram.org)
  - [ ] [VoceChat](https://voce.chat)
  - [ ] ~~[WhatsApp](https://whatsapp.com)~~ - paused since there is no support for bot and no community implementations
- - [x] [DingTalk](https://dingtalk.com)
- - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
+ - [x] [DingTalk](https://dingtalk.com) - Not Tested
+ - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com) - Not Tested
  - [ ] ~~[WeChat / WeiXin](https://weixin.qq.com)~~ - paused cuz i dont want to get my wechat account banned
  - [x] [Yunhu](https://www.yhchat.com/)
  - [x] [Kook](https://www.kookapp.cn/)
  - [x] [Matrix](https://matrix.org) - No E2E though
- - [ ] [Signal](https://signal.org)
+ - [x] [Signal](https://signal.org) - Not Tested
 
 ## Special Thanks
  - discord.py

@@ -4,7 +4,7 @@ layout: home
 hero:
   name: NextBridge
   text: The chat bridge that links up all the major chat platforms!
-  tagline: Connect QQ, Discord, Telegram, Feishu, DingTalk, Yunhu, KOOK, Matrix — and more — with a single config file.
+  tagline: Connect QQ, Discord, Telegram, Feishu, DingTalk, Yunhu, KOOK, Matrix, Signal — and more — with a single config file.
   actions:
     - theme: brand
       text: Get Started
@@ -15,7 +15,7 @@ hero:
 
 features:
   - title: Multi-platform
-    details: Supports QQ (via NapCat), Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, and Matrix out of the box. New platforms can be added as drivers.
+    details: Supports QQ (via NapCat), Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, and Signal out of the box. New platforms can be added as drivers.
   - title: Config-driven routing
     details: Define which channels talk to each other using a simple rules file — no code needed. Use "connect" rules to link groups, or "forward" rules for fine-grained control.
   - title: Media bridging

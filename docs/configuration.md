@@ -31,7 +31,7 @@ The config has a two-level structure regardless of format:
 
 | Level | Description |
 |---|---|
-| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `matrix` |
+| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `matrix`, `signal` |
 | `<instance_id>` | A name you choose freely — used to reference this instance in rules |
 
 You can run **multiple instances of the same platform** by adding more keys under the platform:
@@ -94,6 +94,12 @@ You can run **multiple instances of the same platform** by adding more keys unde
       "homeserver": "https://matrix.org",
       "user_id": "@mybot:matrix.org",
       "password": "your_password"
+    }
+  },
+  "signal": {
+    "sg_main": {
+      "api_url": "http://localhost:8080",
+      "number": "+12025551234"
     }
   }
 }
