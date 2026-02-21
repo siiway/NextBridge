@@ -4,7 +4,7 @@ layout: home
 hero:
   name: NextBridge
   text: The chat bridge that links up all the major chat platforms!
-  tagline: Connect QQ, Discord, Telegram, Feishu, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack — and more — with a single config file.
+  tagline: Connect QQ, Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack, Google Chat, Mattermost, VoceChat, Rocket.Chat — and more — with a single config file.
   actions:
     - theme: brand
       text: Get Started

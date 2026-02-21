@@ -4,7 +4,7 @@ layout: home
 hero:
   name: NextBridge
   text: 连接所有主流聊天平台的消息桥接工具！
-  tagline: 用一个配置文件将 QQ、Discord、Telegram、飞书、钉钉、云湖、KOOK、Matrix、Signal、Slack 连接在一起。
+  tagline: 用一个配置文件将 QQ、Discord、Telegram、飞书、钉钉、云湖、KOOK、Matrix、Signal、Slack、Google Chat、Mattermost、VoceChat、Rocket.Chat - 以及更多 - 连接在一起。
   actions:
     - theme: brand
       text: 快速开始
