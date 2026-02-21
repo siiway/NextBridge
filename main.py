@@ -19,6 +19,7 @@ from drivers.kook import KookDriver
 from drivers.matrix import MatrixDriver
 from drivers.signal import SignalDriver
 from drivers.slack import SlackDriver
+from drivers.webhook import WebhookDriver
 
 l = log.get_logger()
 
@@ -33,6 +34,7 @@ DRIVER_MAP = {
     "matrix": MatrixDriver,
     "signal": SignalDriver,
     "slack": SlackDriver,
+    "webhook": WebhookDriver,
 }
 
 

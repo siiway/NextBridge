@@ -23,6 +23,7 @@ const enSidebar = [
       { text: 'Matrix', link: '/drivers/matrix' },
       { text: 'Signal', link: '/drivers/signal' },
       { text: 'Slack', link: '/drivers/slack' },
+      { text: 'Webhook', link: '/drivers/webhook' },
     ],
   },
 ]
@@ -50,6 +51,7 @@ const zhSidebar = [
       { text: 'Matrix', link: '/zh/drivers/matrix' },
       { text: 'Signal', link: '/zh/drivers/signal' },
       { text: 'Slack', link: '/zh/drivers/slack' },
+      { text: 'Webhook', link: '/zh/drivers/webhook' },
     ],
   },
 ]
