@@ -25,6 +25,32 @@ _log_filename = datetime.now().strftime("%Y%m%d-%H%M%S%f")[:-3] + ".log"  # 毫�
 LOG_FILE_PATH = os.path.join(LOG_DIR, _log_filename)
 
 
+# Sensitive strings to redact from all log output.
+# Populated by register_sensitive() after the config is loaded.
+_sensitive: set[str] = set()
+
+
+def register_sensitive(values: frozenset[str]) -> None:
+    """Register secret strings that must never appear in log output."""
+    _sensitive.clear()
+    # Skip values shorter than 8 chars to avoid masking common substrings
+    _sensitive.update(v for v in values if len(v) >= 8)
+
+
+class MaskingFilter(logging.Filter):
+    """Redacts sensitive values from every log record before emission."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if _sensitive:
+            msg = record.getMessage()
+            for secret in _sensitive:
+                if secret in msg:
+                    msg = msg.replace(secret, "***")
+            record.msg = msg
+            record.args = ()
+        return True
+
+
 class CustomFormatter(logging.Formatter):
     replaces = {
         'DEBUG': '[DBG]',
@@ -65,6 +91,7 @@ class CustomFormatter(logging.Formatter):
 # 创建主 logger
 logger = logging.getLogger('app')
 logger.setLevel(logging.DEBUG)
+logger.addFilter(MaskingFilter())
 
 # 清除已有 handlers 防止重复
 if logger.handlers:

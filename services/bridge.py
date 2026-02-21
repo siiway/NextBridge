@@ -11,7 +11,7 @@ l = log.get_logger()
 
 # Config keys whose values are treated as credentials and must never appear in
 # outgoing messages.  Matched as substrings against lower-cased key names.
-_SENSITIVE_KEY_PATTERNS = ("token", "secret", "password", "webhook_url")
+_SENSITIVE_KEY_PATTERNS = ("token", "secret", "password", "webhook_url", "webhook_path", "access_token")
 
 # Rich-header tag: <richheader title="..." content="..."/>
 _RICHHEADER_RE = re.compile(r'<richheader\b([^/]*)/>',  re.IGNORECASE)
@@ -76,6 +76,7 @@ class Bridge:
         found: set[str] = set()
         _collect_sensitive(config, found)
         self._sensitive = frozenset(found)
+        log.register_sensitive(self._sensitive)
         l.info(f"Loaded {len(self._sensitive)} sensitive value(s) for leak detection")
 
     def register_sender(self, instance_id: str, send_func: Callable):
