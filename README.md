@@ -17,7 +17,7 @@
  - [x] [Microsoft Teams](https://teams.microsoft.com) - Not Tested
  - [x] [Google Chat](https://chat.google.com) - Not Tested
  - [x] [Mattermost](https://mattermost.com) - Not Tested
- - [ ] [Rocket.Chat](https://rocket.chat)
+ - [x] [Rocket.Chat](https://rocket.chat) - Not Tested
  - [ ] [Zulip](https://zulip.com)
  - [ ] [LINE](https://line.me)
  - [ ] [Viber](https://viber.com)
