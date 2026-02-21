@@ -15,7 +15,7 @@ hero:
 
 features:
   - title: 多平台支持
-    details: 开箱即用地支持 QQ（通过 NapCat）、Discord、Telegram、飞书/Lark、钉钉、云湖、KOOK、Matrix、Signal、Slack、Google Chat 和 Mattermost，可通过驱动器扩展更多平台。
+    details: 开箱即用地支持 QQ（通过 NapCat）、Discord、Telegram、飞书/Lark、钉钉、云湖、KOOK、Matrix、Signal、Slack、Google Chat、Mattermost 和 VoceChat，可通过驱动器扩展更多平台。
   - title: 配置驱动的消息路由
     details: 使用简单的规则文件定义群组之间的消息流向，无需编写代码。使用 connect 规则一键互联，或使用 forward 规则精细控制消息方向。
   - title: 媒体文件桥接

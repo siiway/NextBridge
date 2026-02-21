@@ -5,7 +5,7 @@
  - [x] [Tencent QQ](https://im.qq.com) (with [NapCat](https://napneko.github.io))
  - [x] [Discord](https://discord.gg)
  - [x] [Telegram](htps://telegram.org)
- - [ ] [VoceChat](https://voce.chat)
+ - [x] [VoceChat](https://voce.chat)
  - [ ] ~~[WhatsApp](https://whatsapp.com)~~ - paused since there is no support for bot and no community implementations
  - [x] [DingTalk](https://dingtalk.com) - Not Tested
  - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com) - Not Tested
