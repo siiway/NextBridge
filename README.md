@@ -14,6 +14,13 @@
  - [x] [Kook](https://www.kookapp.cn/)
  - [x] [Matrix](https://matrix.org) - No E2E though
  - [x] [Signal](https://signal.org) - Not Tested
+ - [x] [Microsoft Teams](https://teams.microsoft.com) - Not Tested
+ - [x] [Google Chat](https://chat.google.com) - Not Tested
+ - [ ] [Mattermost](https://mattermost.com)
+ - [ ] [Rocket.Chat](https://rocket.chat)
+ - [ ] [Zulip](https://zulip.com)
+ - [ ] [LINE](https://line.me)
+ - [ ] [Viber](https://viber.com)
 
 ## Special Thanks
  - discord.py

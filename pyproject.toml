@@ -18,4 +18,5 @@ dependencies = [
     "mautrix>=0.21.0",
     "slack-sdk>=3.40.1",
     "pydantic>=2.0",
+    "google-auth>=2.0",
 ]
