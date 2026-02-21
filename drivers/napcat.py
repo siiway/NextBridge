@@ -5,11 +5,18 @@
 # Config keys (under napcat.<instance_id>):
 #   ws_url        – WebSocket URL, e.g. "ws://127.0.0.1:3001"
 #   ws_token      – Optional access token
-#   max_file_size – Max bytes to download when bridging media (default 10 MB)
+#   max_file_size    – Max bytes to download when bridging media (default 10 MB)
+#   file_send_mode   – How to upload files/videos to QQ: \"stream\" (default) or \"base64\"
+#                      stream: chunked upload_file_stream → upload_group_file with path
+#                      base64: upload_group_file with base64:// payload directly
+#   stream_threshold – If > 0, force stream mode when file exceeds this many bytes,
+#                      regardless of file_send_mode (default 0 = disabled)
 
 import asyncio
 import base64
+import hashlib
 import json
+import math
 import uuid
 from pathlib import Path
 
@@ -79,6 +86,8 @@ class NapCatDriver(BaseDriver):
     def __init__(self, instance_id: str, config: dict, bridge):
         super().__init__(instance_id, config, bridge)
         self._ws: websockets.WebSocketClientProtocol | None = None
+        # echo_id → Future; used to await responses for specific actions
+        self._pending: dict[str, asyncio.Future] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -119,6 +128,14 @@ class NapCatDriver(BaseDriver):
         async for raw in ws:
             try:
                 data = json.loads(raw)
+                # Action responses carry an "echo" field and "status" — route
+                # them to any waiting _call() coroutine, then skip normal handling.
+                echo = data.get("echo")
+                if echo and echo in self._pending:
+                    fut = self._pending.pop(echo)
+                    if not fut.done():
+                        fut.set_result(data)
+                    continue
                 await self._handle(data)
             except json.JSONDecodeError:
                 l.warning(f"NapCat [{self.instance_id}] invalid JSON received")
@@ -212,9 +229,10 @@ class NapCatDriver(BaseDriver):
 
             elif t == "file":
                 url = d.get("url") or d.get("path", "")
-                name = d.get("name", "file")
+                # NapCat puts the actual filename in "file"; "name" is not used
+                name = d.get("file") or d.get("name", "file")
                 try:
-                    size = int(d.get("size", -1))
+                    size = int(d.get("file_size", d.get("size", -1)))
                 except (TypeError, ValueError):
                     size = -1
                 attachments.append(Attachment(type="file", url=url, name=name, size=size))
@@ -308,6 +326,103 @@ class NapCatDriver(BaseDriver):
         return text, attachments
 
     # ------------------------------------------------------------------
+    # Action helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_send_mode(self, size: int) -> str:
+        """
+        Return the effective file/video send mode for a payload of *size* bytes.
+        Forces \"stream\" when stream_threshold is set and size exceeds it.
+        """
+        threshold = int(self.config.get("stream_threshold", 0))
+        if threshold > 0 and size > threshold:
+            return "stream"
+        return self.config.get("file_send_mode", "stream")
+
+    async def _call(self, action: str, params: dict, timeout: float = 30.0) -> dict | None:
+        """Send a OneBot action and await its echo response."""
+        if self._ws is None:
+            return None
+        echo = str(uuid.uuid4())
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._pending[echo] = fut
+        payload = {"action": action, "params": params, "echo": echo}
+        try:
+            await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            l.warning(f"NapCat [{self.instance_id}] action '{action}' timed out")
+            self._pending.pop(echo, None)
+            return None
+        except Exception as e:
+            l.error(f"NapCat [{self.instance_id}] action '{action}' error: {e}")
+            self._pending.pop(echo, None)
+            return None
+
+    async def _upload_file_stream(self, data_bytes: bytes, filename: str) -> str | None:
+        """
+        Upload bytes via OneBot upload_file_stream (chunked base64).
+
+        NapCat processes chunk_data and is_complete in separate branches:
+        when chunk_data is present it stores the chunk and returns early,
+        so is_complete must be sent as a separate final request with no chunk_data.
+
+        Returns the server-side file_path on success, or None on failure.
+        """
+        CHUNK_SIZE = 256 * 1024  # 256 KB per chunk
+        total = len(data_bytes)
+        total_chunks = max(1, math.ceil(total / CHUNK_SIZE))
+        stream_id = str(uuid.uuid4())
+
+        # Upload all chunks (NapCat param is "filename", not "file_name")
+        for i in range(total_chunks):
+            chunk = data_bytes[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE]
+            b64 = base64.b64encode(chunk).decode()
+
+            resp = await self._call("upload_file_stream", {
+                "stream_id": stream_id,
+                "filename": filename,
+                "chunk_index": i,
+                "total_chunks": total_chunks,
+                "chunk_data": b64,
+            })
+            if resp is None:
+                l.warning(
+                    f"NapCat [{self.instance_id}] stream upload chunk {i}/{total_chunks} "
+                    f"got no response for '{filename}'"
+                )
+                return None
+            if resp.get("status") == "failed":
+                l.warning(
+                    f"NapCat [{self.instance_id}] stream upload failed at chunk "
+                    f"{i}/{total_chunks}: {resp.get('msg', '')}"
+                )
+                return None
+
+        # Trigger completion in a separate request (is_complete + no chunk_data)
+        resp = await self._call("upload_file_stream", {
+            "stream_id": stream_id,
+            "is_complete": True,
+        })
+        if resp is None or resp.get("status") == "failed":
+            l.warning(
+                f"NapCat [{self.instance_id}] stream upload completion failed "
+                f"for '{filename}': {resp}"
+            )
+            return None
+
+        data = resp.get("data") or {}
+        file_path = data.get("file_path")
+        if not file_path:
+            l.warning(
+                f"NapCat [{self.instance_id}] stream upload complete but "
+                f"no file_path in response: {resp}"
+            )
+            return None
+
+        return file_path
+
+    # ------------------------------------------------------------------
     # Send
     # ------------------------------------------------------------------
 
@@ -369,29 +484,49 @@ class NapCatDriver(BaseDriver):
                 result = await media.fetch_attachment(att, max_size)
                 if result:
                     data_bytes, _ = result
-                    b64 = base64.b64encode(data_bytes).decode()
-                    segments.append({"type": "video", "data": {"file": f"base64://{b64}"}})
+                    mode = self._resolve_send_mode(len(data_bytes))
+                    if mode == "base64":
+                        b64 = base64.b64encode(data_bytes).decode()
+                        segments.append({"type": "video", "data": {"file": f"base64://{b64}"}})
+                    else:  # stream
+                        file_path = await self._upload_file_stream(data_bytes, att.name or "video.mp4")
+                        if file_path:
+                            segments.append({"type": "video", "data": {"file": file_path}})
+                        else:
+                            segments.append({"type": "text", "data": {"text": f"\n[视频] {att.url or att.name}"}})
                 else:
                     segments.append({"type": "text", "data": {"text": f"\n[视频] {att.url or att.name}"}})
 
-            else:  # file — upload via NapCat's upload_group_file (base64 supported)
+            else:  # file
                 result = await media.fetch_attachment(att, max_size)
                 if result:
                     data_bytes, _ = result
-                    b64 = base64.b64encode(data_bytes).decode()
-                    file_payload = {
-                        "action": "upload_group_file",
-                        "params": {
-                            "group_id": int(group_id),
-                            "file": f"base64://{b64}",
-                            "name": att.name or "file",
-                        },
-                        "echo": str(uuid.uuid4()),
-                    }
-                    try:
-                        await self._ws.send(json.dumps(file_payload, ensure_ascii=False))
-                    except Exception as e:
-                        l.error(f"NapCat [{self.instance_id}] file upload failed: {e}")
+                    fname = att.name or "file"
+                    mode = self._resolve_send_mode(len(data_bytes))
+                    if mode == "base64":
+                        b64 = base64.b64encode(data_bytes).decode()
+                        await self._call(
+                            "upload_group_file",
+                            {
+                                "group_id": int(group_id),
+                                "file": f"base64://{b64}",
+                                "name": fname,
+                            },
+                        )
+                    else:  # stream (default)
+                        file_path = await self._upload_file_stream(data_bytes, fname)
+                        if file_path:
+                            await self._call(
+                                "upload_group_file",
+                                {
+                                    "group_id": int(group_id),
+                                    "file": file_path,
+                                    "name": fname,
+                                },
+                            )
+                        else:
+                            label = att.url or att.name
+                            segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {label}"}})
                 else:
                     label = att.url or att.name
                     segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {label}"}})
