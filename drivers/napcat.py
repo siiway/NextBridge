@@ -374,9 +374,27 @@ class NapCatDriver(BaseDriver):
                 else:
                     segments.append({"type": "text", "data": {"text": f"\n[视频] {att.url or att.name}"}})
 
-            else:  # file — QQ file upload is complex; send URL as text
-                label = att.url or att.name
-                segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {label}"}})
+            else:  # file — upload via NapCat's upload_group_file (base64 supported)
+                result = await media.fetch_attachment(att, max_size)
+                if result:
+                    data_bytes, _ = result
+                    b64 = base64.b64encode(data_bytes).decode()
+                    file_payload = {
+                        "action": "upload_group_file",
+                        "params": {
+                            "group_id": int(group_id),
+                            "file": f"base64://{b64}",
+                            "name": att.name or "file",
+                        },
+                        "echo": str(uuid.uuid4()),
+                    }
+                    try:
+                        await self._ws.send(json.dumps(file_payload, ensure_ascii=False))
+                    except Exception as e:
+                        l.error(f"NapCat [{self.instance_id}] file upload failed: {e}")
+                else:
+                    label = att.url or att.name
+                    segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {label}"}})
 
         if not segments:
             return
