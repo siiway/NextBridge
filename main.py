@@ -3,11 +3,14 @@ import asyncio
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 import services.error  # installs global uncaught-exception hook
 import services.logger as log
 import services.util as u
 import services.config_io as config_io
 from services.bridge import bridge
+from services.config_schema import AppConfig
 
 from drivers.napcat import NapCatDriver
 from drivers.discord import DiscordDriver
@@ -23,19 +26,19 @@ from drivers.webhook import WebhookDriver
 
 l = log.get_logger()
 
-DRIVER_MAP = {
-    "napcat": NapCatDriver,
-    "discord": DiscordDriver,
-    "telegram": TelegramDriver,
-    "feishu": FeishuDriver,
-    "dingtalk": DingTalkDriver,
-    "yunhu": YunhuDriver,
-    "kook": KookDriver,
-    "matrix": MatrixDriver,
-    "signal": SignalDriver,
-    "slack": SlackDriver,
-    "webhook": WebhookDriver,
-}
+PLATFORM_FIELDS: list[tuple[str, type]] = [
+    ("napcat",   NapCatDriver),
+    ("discord",  DiscordDriver),
+    ("telegram", TelegramDriver),
+    ("feishu",   FeishuDriver),
+    ("dingtalk", DingTalkDriver),
+    ("yunhu",    YunhuDriver),
+    ("kook",     KookDriver),
+    ("matrix",   MatrixDriver),
+    ("signal",   SignalDriver),
+    ("slack",    SlackDriver),
+    ("webhook",  WebhookDriver),
+]
 
 
 def cmd_convert(src: str, dst: str) -> None:
@@ -72,9 +75,15 @@ async def main():
         return
 
     l.info(f"Loading config from: {config_path}")
-    config: dict = config_io.load_config(config_path)
+    raw: dict = config_io.load_config(config_path)
 
-    bridge.load_sensitive_values(config)
+    try:
+        app_config = AppConfig.model_validate(raw)
+    except ValidationError as exc:
+        l.critical(f"Config validation failed:\n{exc}")
+        return
+
+    bridge.load_sensitive_values(app_config.model_dump())
 
     def _on_task_done(task: asyncio.Task) -> None:
         if task.cancelled():
@@ -84,17 +93,13 @@ async def main():
             l.error(f"Driver '{task.get_name()}' crashed: {exc}")
 
     driver_tasks: list[asyncio.Task] = []
-    for platform, instances in config.items():
-        driver_cls = DRIVER_MAP.get(platform)
-        if driver_cls is None:
-            l.warning(f"Unknown platform '{platform}' in config — skipping")
-            continue
-        for instance_id, instance_cfg in instances.items():
+    for field_name, driver_cls in PLATFORM_FIELDS:
+        for instance_id, instance_cfg in getattr(app_config, field_name).items():
             drv = driver_cls(instance_id, instance_cfg, bridge)
-            task = asyncio.create_task(drv.start(), name=f"{platform}/{instance_id}")
+            task = asyncio.create_task(drv.start(), name=f"{field_name}/{instance_id}")
             task.add_done_callback(_on_task_done)
             driver_tasks.append(task)
-            l.info(f"Registered driver: {platform}/{instance_id}")
+            l.info(f"Registered driver: {field_name}/{instance_id}")
 
     if not driver_tasks:
         l.error("No drivers configured — nothing to do, exiting.")

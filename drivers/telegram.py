@@ -27,11 +27,10 @@ from telegram.ext import Application, ContextTypes, MessageHandler, filters
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import TelegramConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
-
-_DEFAULT_MAX = 50 * 1024 * 1024  # 50 MB (Telegram bot API limit)
 
 # Catch all non-command message types that may carry content
 def _richheader_html(title: str, content: str) -> str:
@@ -52,9 +51,9 @@ _CONTENT_FILTER = (
 ) & ~filters.COMMAND
 
 
-class TelegramDriver(BaseDriver):
+class TelegramDriver(BaseDriver[TelegramConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: TelegramConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._app: Application | None = None
 
@@ -65,12 +64,7 @@ class TelegramDriver(BaseDriver):
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
 
-        token = self.config.get("bot_token")
-        if not token:
-            l.warning(f"Telegram [{self.instance_id}] no bot_token configured — skipping")
-            return
-
-        self._app = Application.builder().token(token).build()
+        self._app = Application.builder().token(self.config.bot_token).build()
         self._app.add_handler(MessageHandler(_CONTENT_FILTER, self._on_message))
 
         # async-with handles initialize() / shutdown() automatically
@@ -186,7 +180,7 @@ class TelegramDriver(BaseDriver):
             return
 
         cid = int(chat_id)
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
         caption_used = False
 
         parse_mode: str | None = None
@@ -194,7 +188,7 @@ class TelegramDriver(BaseDriver):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            host = self.config.get("rich_header_host", "").rstrip("/")
+            host = self.config.rich_header_host.rstrip("/")
             has_attachments = bool(attachments)
 
             if host and not has_attachments:

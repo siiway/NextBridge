@@ -17,4 +17,5 @@ dependencies = [
     "tomli-w>=1.0",
     "mautrix>=0.21.0",
     "slack-sdk>=3.40.1",
+    "pydantic>=2.0",
 ]

@@ -41,12 +41,10 @@ from slack_sdk.web.async_client import AsyncWebClient
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import SlackConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
-
-_DEFAULT_MAX = 50 * 1024 * 1024  # 50 MB
-
 
 def _mime_to_att_type(mime: str) -> str:
     if mime.startswith("image/"):
@@ -76,9 +74,9 @@ def _verify_slack_signature(signing_secret: str, headers, body: bytes) -> bool:
     return _hmac.compare_digest(expected, signature)
 
 
-class SlackDriver(BaseDriver):
+class SlackDriver(BaseDriver[SlackConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: SlackConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._web: AsyncWebClient | None = None
         self._sm: SocketModeClient | None = None
@@ -90,13 +88,13 @@ class SlackDriver(BaseDriver):
     # ------------------------------------------------------------------
 
     async def start(self):
-        bot_token      = self.config.get("bot_token", "")
-        app_token      = self.config.get("app_token", "")
-        send_method    = self.config.get("send_method", "bot")
-        webhook_url    = self.config.get("incoming_webhook_url", "")
-        signing_secret = self.config.get("signing_secret", "")
-        listen_port    = int(self.config.get("listen_port", 0) or 0)
-        listen_path    = self.config.get("listen_path", "/slack/events")
+        bot_token      = self.config.bot_token
+        app_token      = self.config.app_token
+        send_method    = self.config.send_method
+        webhook_url    = self.config.incoming_webhook_url
+        signing_secret = self.config.signing_secret
+        listen_port    = self.config.listen_port
+        listen_path    = self.config.listen_path
 
         # Register early so the bridge can route to us; individual send helpers
         # guard against uninitialized state.
@@ -175,8 +173,7 @@ class SlackDriver(BaseDriver):
     async def _handle_events_api(self, request: web.Request) -> web.Response:
         body = await request.read()
 
-        signing_secret = self.config.get("signing_secret", "")
-        if signing_secret and not _verify_slack_signature(signing_secret, request.headers, body):
+        if self.config.signing_secret and not _verify_slack_signature(self.config.signing_secret, request.headers, body):
             return web.Response(status=403, text="Invalid signature")
 
         try:
@@ -215,7 +212,7 @@ class SlackDriver(BaseDriver):
 
         display_name, user_avatar = await self._get_user_info(user_id)
 
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
         attachments: list[Attachment] = []
         for f in event.get("files", []):
             att = await self._download_file(f, max_size)
@@ -272,13 +269,12 @@ class SlackDriver(BaseDriver):
         if not url or (size > 0 and size > max_size):
             return None
 
-        bot_token = self.config.get("bot_token", "")
-        if not bot_token or self._session is None:
+        if not self.config.bot_token or self._session is None:
             return None
 
         try:
             async with self._session.get(
-                url, headers={"Authorization": f"Bearer {bot_token}"}
+                url, headers={"Authorization": f"Bearer {self.config.bot_token}"}
             ) as resp:
                 if resp.status != 200:
                     return None
@@ -315,8 +311,7 @@ class SlackDriver(BaseDriver):
             prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
             text = f"{prefix}\n{text}" if text else prefix
 
-        send_method = self.config.get("send_method", "bot")
-        if send_method == "webhook":
+        if self.config.send_method == "webhook":
             # Incoming Webhooks cannot customize username or icon (silently
             # ignored by Slack). Fall back to bot send whenever the message
             # carries attachments OR a custom identity, provided bot_token is
@@ -330,7 +325,7 @@ class SlackDriver(BaseDriver):
                 await self._send_bot(channel, text, attachments, **kwargs)
             else:
                 await self._send_webhook(text, attachments)
-        else:
+        else:  # "bot"
             await self._send_bot(channel, text, attachments, **kwargs)
 
     async def _send_bot(
@@ -348,7 +343,7 @@ class SlackDriver(BaseDriver):
             l.warning(f"Slack [{self.instance_id}] send: bot_token not configured")
             return
 
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
         title: str  = kwargs.get("webhook_title", "") or ""
         avatar: str = kwargs.get("webhook_avatar", "") or ""
         has_identity = bool(title or avatar)
@@ -417,7 +412,7 @@ class SlackDriver(BaseDriver):
         text: str,
         attachments: list[Attachment] | None,
     ):
-        webhook_url = self.config.get("incoming_webhook_url", "")
+        webhook_url = self.config.incoming_webhook_url
         if not webhook_url:
             l.warning(f"Slack [{self.instance_id}] send: no incoming_webhook_url configured")
             return

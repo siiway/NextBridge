@@ -24,6 +24,7 @@ from aiohttp import web
 
 import services.logger as log
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import YunhuConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
@@ -38,11 +39,11 @@ _YUNHU_CDN_SUFFIXES = (".jwznb.com", ".jwzhd.com")
 _PROXY_MEDIA_SUFFIXES = (".discordapp.com", ".discordapp.net", ".discord.com")
 
 
-class YunhuDriver(BaseDriver):
+class YunhuDriver(BaseDriver[YunhuConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: YunhuConfig, bridge):
         super().__init__(instance_id, config, bridge)
-        self._token: str = config.get("token", "")
+        self._token: str = config.token
         self._session: aiohttp.ClientSession | None = None
 
     # ------------------------------------------------------------------
@@ -57,8 +58,8 @@ class YunhuDriver(BaseDriver):
 
         self._session = aiohttp.ClientSession()
 
-        port: int = self.config.get("webhook_port", _DEFAULT_PORT)
-        path: str = self.config.get("webhook_path", _DEFAULT_PATH)
+        port: int = self.config.webhook_port
+        path: str = self.config.webhook_path
 
         app = web.Application()
         app.router.add_post(path, self._handle_webhook)
@@ -75,7 +76,7 @@ class YunhuDriver(BaseDriver):
     # ------------------------------------------------------------------
 
     def _proxy_host(self) -> str:
-        return self.config.get("proxy_host", "").rstrip("/")
+        return self.config.proxy_host.rstrip("/")
 
     def _proxy_pfp(self, url: str) -> str:
         """Route a Yunhu CDN URL through /pfp so downstream fetchers get the

@@ -36,11 +36,10 @@ from mautrix.types import (
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import MatrixConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
-
-_DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
 _FILE_TYPES = {
     "image": MessageType.IMAGE,
@@ -61,9 +60,9 @@ def _make_info(att_type: str, mime: str, size: int) -> FileInfo:
     return FileInfo(**kwargs)
 
 
-class MatrixDriver(BaseDriver):
+class MatrixDriver(BaseDriver[MatrixConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: MatrixConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: Client | None = None
 
@@ -72,29 +71,19 @@ class MatrixDriver(BaseDriver):
     # ------------------------------------------------------------------
 
     async def start(self):
-        homeserver   = self.config.get("homeserver", "").rstrip("/")
-        user_id      = self.config.get("user_id", "")
-        password     = self.config.get("password", "")
-        access_token = self.config.get("access_token", "")
-
-        if not homeserver or not user_id:
-            l.error(f"Matrix [{self.instance_id}] homeserver and user_id are required")
-            return
-
-        if not password and not access_token:
-            l.error(f"Matrix [{self.instance_id}] either password or access_token is required")
-            return
+        homeserver = self.config.homeserver.rstrip("/")
+        user_id    = self.config.user_id
 
         self._client = Client(mxid=UserID(user_id), base_url=homeserver)
 
-        if access_token:
-            self._client.api.token = access_token
+        if self.config.access_token:
+            self._client.api.token = self.config.access_token
         else:
             try:
                 await self._client.login(
                     login_type=LoginType.PASSWORD,
                     identifier=MatrixUserIdentifier(user=user_id),
-                    password=password,
+                    password=self.config.password,
                     store_access_token=True,
                 )
             except Exception as e:
@@ -124,8 +113,7 @@ class MatrixDriver(BaseDriver):
     def _mxc_to_http(self, mxc_uri: str) -> str:
         if not mxc_uri or not mxc_uri.startswith("mxc://"):
             return ""
-        homeserver = self.config.get("homeserver", "").rstrip("/")
-        return f"{homeserver}/_matrix/media/v3/download/{mxc_uri[6:]}"
+        return f"{self.config.homeserver.rstrip('/')}/_matrix/media/v3/download/{mxc_uri[6:]}"
 
     def _mxid_local(self, user_id: str) -> str:
         return user_id.split(":")[0].lstrip("@") if ":" in user_id else user_id
@@ -189,7 +177,7 @@ class MatrixDriver(BaseDriver):
             else:
                 att_type = "file"
 
-            max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+            max_size: int = self.config.max_file_size
 
             # Honour declared size before downloading
             declared = getattr(content.info, "size", None) if content.info else None
@@ -252,7 +240,7 @@ class MatrixDriver(BaseDriver):
             prefix = f"**{t}**" + (f" · *{c}*" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
 
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
 
         if text.strip():
             try:

@@ -39,6 +39,7 @@ from alibabacloud_dingtalk.robot_1_0 import models as robot_models
 
 import services.logger as log
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import DingTalkConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
@@ -46,9 +47,9 @@ l = log.get_logger()
 _DINGTALK_ENDPOINT = "api.dingtalk.com"
 
 
-class DingTalkDriver(BaseDriver):
+class DingTalkDriver(BaseDriver[DingTalkConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: DingTalkConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._oauth_client: OAuthClient | None = None
         self._robot_client: RobotClient | None = None
@@ -66,8 +67,8 @@ class DingTalkDriver(BaseDriver):
         self._oauth_client = OAuthClient(cfg)
         self._robot_client = RobotClient(cfg)
 
-        port = int(self.config.get("listen_port", 8082))
-        path = self.config.get("listen_path", "/dingtalk/event")
+        port = self.config.listen_port
+        path = self.config.listen_path
 
         web_app = web.Application()
         web_app.router.add_post(path, self._handle_http)
@@ -96,11 +97,10 @@ class DingTalkDriver(BaseDriver):
         except Exception:
             return web.json_response({"message": "bad request"}, status=400)
 
-        signing_secret = self.config.get("signing_secret")
-        if signing_secret:
+        if self.config.signing_secret:
             ts = request.headers.get("timestamp", "")
             sig = request.headers.get("sign", "")
-            if not _verify_sign(ts, signing_secret, sig):
+            if not _verify_sign(ts, self.config.signing_secret, sig):
                 l.warning(f"DingTalk [{self.instance_id}] webhook signature mismatch")
                 return web.json_response({"message": "forbidden"}, status=403)
 
@@ -153,10 +153,7 @@ class DingTalkDriver(BaseDriver):
             elif att.name:
                 text += f"\n[{att.type.capitalize()}: {att.name}]"
 
-        robot_code = self.config.get("robot_code")
-        if not robot_code:
-            l.warning(f"DingTalk [{self.instance_id}] send: no robot_code in config")
-            return
+        robot_code = self.config.robot_code
 
         try:
             token = await self._get_access_token()
@@ -194,8 +191,8 @@ class DingTalkDriver(BaseDriver):
             return self._access_token
 
         req = oauth_models.GetAccessTokenRequest(
-            app_key=self.config["app_key"],
-            app_secret=self.config["app_secret"],
+            app_key=self.config.app_key,
+            app_secret=self.config.app_secret,
         )
         loop = asyncio.get_running_loop()
         resp = await loop.run_in_executor(

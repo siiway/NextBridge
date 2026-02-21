@@ -27,14 +27,15 @@ import aiohttp
 
 import services.logger as log
 from services.message import Attachment
+from services.config_schema import WebhookConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
 
 
-class WebhookDriver(BaseDriver):
+class WebhookDriver(BaseDriver[WebhookConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: WebhookConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
 
@@ -43,14 +44,9 @@ class WebhookDriver(BaseDriver):
     # ------------------------------------------------------------------
 
     async def start(self):
-        url = self.config.get("url", "")
-        if not url:
-            l.error(f"Webhook [{self.instance_id}] 'url' is required — driver disabled")
-            return
-
         self._session = aiohttp.ClientSession()
         self.bridge.register_sender(self.instance_id, self.send)
-        l.info(f"Webhook [{self.instance_id}] send-only, targeting {url}")
+        l.info(f"Webhook [{self.instance_id}] send-only, targeting {self.config.url}")
 
     # ------------------------------------------------------------------
     # Send
@@ -63,9 +59,6 @@ class WebhookDriver(BaseDriver):
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
-        url = self.config.get("url", "")
-        if not url:
-            return
         if self._session is None:
             l.warning(f"Webhook [{self.instance_id}] session not ready, message dropped")
             return
@@ -93,12 +86,10 @@ class WebhookDriver(BaseDriver):
         # Merge any extra msg config keys (webhook_title, webhook_avatar, custom fields…)
         payload.update(kwargs)
 
-        method = self.config.get("method", "POST").upper()
-        extra_headers: dict = self.config.get("headers") or {}
-        headers = {"Content-Type": "application/json", **extra_headers}
+        headers = {"Content-Type": "application/json", **self.config.headers}
 
         try:
-            async with self._session.request(method, url, json=payload, headers=headers) as resp:
+            async with self._session.request(self.config.method, self.config.url, json=payload, headers=headers) as resp:
                 if resp.status not in (200, 201, 202, 204):
                     body = await resp.text()
                     l.error(

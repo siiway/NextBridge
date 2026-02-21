@@ -26,11 +26,10 @@ import websockets.exceptions
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import NapCatConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
-
-_DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
 # ---------------------------------------------------------------------------
 # CQ face GIF database
@@ -81,9 +80,9 @@ def _load_face_gif(face_id_raw) -> bytes | None:
         return None
 
 
-class NapCatDriver(BaseDriver):
+class NapCatDriver(BaseDriver[NapCatConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: NapCatConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._ws: websockets.WebSocketClientProtocol | None = None
         # echo_id → Future; used to await responses for specific actions
@@ -96,11 +95,10 @@ class NapCatDriver(BaseDriver):
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
 
-        ws_url = self.config.get("ws_url", "ws://127.0.0.1:3001")
-        token = self.config.get("ws_token")
-        if token:
+        ws_url = self.config.ws_url
+        if self.config.ws_token:
             sep = "&" if "?" in ws_url else "?"
-            ws_url = f"{ws_url}{sep}access_token={token}"
+            ws_url = f"{ws_url}{sep}access_token={self.config.ws_token}"
 
         l.info(f"NapCat [{self.instance_id}] connecting to {ws_url}")
 
@@ -165,7 +163,7 @@ class NapCatDriver(BaseDriver):
         # Prefer group card (nickname-in-group) over global nickname
         nickname = sender.get("card") or sender.get("nickname") or user_id
 
-        face_as_emoji: bool = self.config.get("cqface_mode", "gif") == "emoji"
+        face_as_emoji: bool = self.config.cqface_mode == "emoji"
         text, attachments = self._parse_message(event, face_as_emoji=face_as_emoji)
         if not text.strip() and not attachments:
             return
@@ -334,10 +332,9 @@ class NapCatDriver(BaseDriver):
         Return the effective file/video send mode for a payload of *size* bytes.
         Forces \"stream\" when stream_threshold is set and size exceeds it.
         """
-        threshold = int(self.config.get("stream_threshold", 0))
-        if threshold > 0 and size > threshold:
+        if self.config.stream_threshold > 0 and size > self.config.stream_threshold:
             return "stream"
-        return self.config.get("file_send_mode", "stream")
+        return self.config.file_send_mode
 
     async def _call(self, action: str, params: dict, timeout: float = 30.0) -> dict | None:
         """Send a OneBot action and await its echo response."""
@@ -442,7 +439,7 @@ class NapCatDriver(BaseDriver):
             l.warning(f"NapCat [{self.instance_id}] send: not connected, message dropped")
             return
 
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
         segments: list[dict] = []
 
         rich_header = kwargs.get("rich_header")

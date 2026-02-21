@@ -30,24 +30,23 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
+from services.config_schema import DiscordConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
 
-_DEFAULT_MAX = 8 * 1024 * 1024  # 8 MB (Discord webhook limit)
-
 _CQFACE_RE = re.compile(r':cqface(\d+):')
 
 
-class DiscordDriver(BaseDriver):
+class DiscordDriver(BaseDriver[DiscordConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: DiscordConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: discord.Client | None = None
         self._session: aiohttp.ClientSession | None = None
-        self._send_method: str = config.get("send_method", "webhook")
-        self._webhook_url: str | None = config.get("webhook_url")
-        self._bot_token: str | None = config.get("bot_token")
+        self._send_method: str = config.send_method
+        self._webhook_url: str | None = config.webhook_url or None
+        self._bot_token: str | None = config.bot_token or None
         # face_id (str) → "<:name:id>" resolved Discord emoji string
         self._emoji_cache: dict[str, str] = {}
         # name → emoji_id index built lazily from discord_emojis.json
@@ -224,7 +223,7 @@ class DiscordDriver(BaseDriver):
         has_cqface = bool(re.search(r':cqface\d+:', text))
         force_bot = (
             has_cqface
-            and self.config.get("send_as_bot_when_using_cqface_emoji", False)
+            and self.config.send_as_bot_when_using_cqface_emoji
             and self._client is not None
         )
 
@@ -266,7 +265,7 @@ class DiscordDriver(BaseDriver):
         if self._session is None or self._webhook_url is None:
             return
 
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
 
         payload: dict = {"content": text}
         if title := kwargs.get("webhook_title"):
@@ -332,7 +331,7 @@ class DiscordDriver(BaseDriver):
             l.warning(f"Discord [{self.instance_id}] channel {channel_id} not in cache")
             return
 
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
 
         discord_files: list[discord.File] = []
         for att in (attachments or []):

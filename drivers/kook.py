@@ -21,16 +21,14 @@ import khl
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import KookConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
 
-_DEFAULT_MAX = 25 * 1024 * 1024  # 25 MB
+class KookDriver(BaseDriver[KookConfig]):
 
-
-class KookDriver(BaseDriver):
-
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: KookConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._bot: khl.Bot | None = None
 
@@ -41,12 +39,7 @@ class KookDriver(BaseDriver):
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
 
-        token = self.config.get("token", "")
-        if not token:
-            l.warning(f"Kook [{self.instance_id}] no token configured — skipping")
-            return
-
-        self._bot = khl.Bot(token=token)
+        self._bot = khl.Bot(token=self.config.token)
 
         # Register our handler alongside khl's internal command-manager handler.
         # khl's Client dispatches to all registered handlers for a given type.
@@ -116,7 +109,7 @@ class KookDriver(BaseDriver):
             prefix = f"**{t}**" + (f" · *{c}*" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
 
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
         has_image = False
         attachment_fragments: list[str] = []
 

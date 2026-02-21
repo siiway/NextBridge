@@ -27,14 +27,15 @@ from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
 import services.logger as log
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import FeishuConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
 
 
-class FeishuDriver(BaseDriver):
+class FeishuDriver(BaseDriver[FeishuConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: FeishuConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: lark.Client | None = None
         self._handler = None
@@ -48,12 +49,12 @@ class FeishuDriver(BaseDriver):
         self.bridge.register_sender(self.instance_id, self.send)
         self._loop = asyncio.get_running_loop()
 
-        app_id = self.config["app_id"]
-        app_secret = self.config["app_secret"]
-        verification_token = self.config.get("verification_token", "")
-        encrypt_key = self.config.get("encrypt_key", "")
-        port = int(self.config.get("listen_port", 8080))
-        path = self.config.get("listen_path", "/event")
+        app_id = self.config.app_id
+        app_secret = self.config.app_secret
+        verification_token = self.config.verification_token
+        encrypt_key = self.config.encrypt_key
+        port = self.config.listen_port
+        path = self.config.listen_path
 
         # Client for outgoing API calls
         self._client = (

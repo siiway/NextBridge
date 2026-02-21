@@ -30,12 +30,10 @@ import aiohttp
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import SignalConfig
 from drivers import BaseDriver
 
 l = log.get_logger()
-
-_DEFAULT_MAX = 50 * 1024 * 1024  # 50 MB
-
 
 def _content_type_to_att_type(ct: str) -> str:
     if ct.startswith("image/"):
@@ -47,9 +45,9 @@ def _content_type_to_att_type(ct: str) -> str:
     return "file"
 
 
-class SignalDriver(BaseDriver):
+class SignalDriver(BaseDriver[SignalConfig]):
 
-    def __init__(self, instance_id: str, config: dict, bridge):
+    def __init__(self, instance_id: str, config: SignalConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
 
@@ -58,12 +56,8 @@ class SignalDriver(BaseDriver):
     # ------------------------------------------------------------------
 
     async def start(self):
-        api_url = self.config.get("api_url", "").rstrip("/")
-        number  = self.config.get("number", "")
-
-        if not api_url or not number:
-            l.error(f"Signal [{self.instance_id}] api_url and number are required")
-            return
+        api_url = self.config.api_url.rstrip("/")
+        number  = self.config.number
 
         self._session = aiohttp.ClientSession()
         self.bridge.register_sender(self.instance_id, self.send)
@@ -125,7 +119,7 @@ class SignalDriver(BaseDriver):
 
         # Download attachments eagerly so downstream platforms can re-upload them
         attachments: list[Attachment] = []
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        max_size: int = self.config.max_file_size
         for att_info in raw_attachments:
             att_id   = att_info.get("id", "")
             ct       = att_info.get("contentType", "application/octet-stream")
@@ -184,9 +178,9 @@ class SignalDriver(BaseDriver):
             l.warning(f"Signal [{self.instance_id}] send: driver not started")
             return
 
-        api_url = self.config.get("api_url", "").rstrip("/")
-        number  = self.config.get("number", "")
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        api_url = self.config.api_url.rstrip("/")
+        number  = self.config.number
+        max_size: int = self.config.max_file_size
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
