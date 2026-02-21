@@ -18,6 +18,7 @@ from drivers.yunhu import YunhuDriver
 from drivers.kook import KookDriver
 from drivers.matrix import MatrixDriver
 from drivers.signal import SignalDriver
+from drivers.slack import SlackDriver
 
 l = log.get_logger()
 
@@ -31,6 +32,7 @@ DRIVER_MAP = {
     "kook": KookDriver,
     "matrix": MatrixDriver,
     "signal": SignalDriver,
+    "slack": SlackDriver,
 }
 
 

@@ -31,7 +31,7 @@ uv run main.py convert data/config.yaml data/config.toml
 
 | 层级 | 说明 |
 |---|---|
-| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`matrix`、`signal` 之一 |
+| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`matrix`、`signal`、`slack` 之一 |
 | `<实例ID>` | 由你自由命名，在规则配置中用于引用此实例 |
 
 同一平台可以**运行多个实例**，只需在平台名下添加多个键：
@@ -100,6 +100,12 @@ uv run main.py convert data/config.yaml data/config.toml
     "sg_main": {
       "api_url": "http://localhost:8080",
       "number": "+12025551234"
+    }
+  },
+  "slack": {
+    "sl_main": {
+      "bot_token": "xoxb-...",
+      "app_token": "xapp-..."
     }
   }
 }

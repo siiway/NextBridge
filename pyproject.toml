@@ -16,4 +16,5 @@ dependencies = [
     "pyyaml>=6.0",
     "tomli-w>=1.0",
     "mautrix>=0.21.0",
+    "slack-sdk>=3.40.1",
 ]

@@ -22,6 +22,7 @@ const enSidebar = [
       { text: 'KOOK', link: '/drivers/kook' },
       { text: 'Matrix', link: '/drivers/matrix' },
       { text: 'Signal', link: '/drivers/signal' },
+      { text: 'Slack', link: '/drivers/slack' },
     ],
   },
 ]
@@ -48,6 +49,7 @@ const zhSidebar = [
       { text: 'KOOK', link: '/zh/drivers/kook' },
       { text: 'Matrix', link: '/zh/drivers/matrix' },
       { text: 'Signal', link: '/zh/drivers/signal' },
+      { text: 'Slack', link: '/zh/drivers/slack' },
     ],
   },
 ]

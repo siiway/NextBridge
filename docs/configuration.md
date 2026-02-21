@@ -31,7 +31,7 @@ The config has a two-level structure regardless of format:
 
 | Level | Description |
 |---|---|
-| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `matrix`, `signal` |
+| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `matrix`, `signal`, `slack` |
 | `<instance_id>` | A name you choose freely — used to reference this instance in rules |
 
 You can run **multiple instances of the same platform** by adding more keys under the platform:
@@ -100,6 +100,12 @@ You can run **multiple instances of the same platform** by adding more keys unde
     "sg_main": {
       "api_url": "http://localhost:8080",
       "number": "+12025551234"
+    }
+  },
+  "slack": {
+    "sl_main": {
+      "bot_token": "xoxb-...",
+      "app_token": "xapp-..."
     }
   }
 }

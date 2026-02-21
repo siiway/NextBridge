@@ -4,7 +4,7 @@ layout: home
 hero:
   name: NextBridge
   text: 连接所有主流聊天平台的消息桥接工具！
-  tagline: 用一个配置文件将 QQ、Discord、Telegram、飞书、钉钉、云湖、KOOK、Matrix、Signal 连接在一起。
+  tagline: 用一个配置文件将 QQ、Discord、Telegram、飞书、钉钉、云湖、KOOK、Matrix、Signal、Slack 连接在一起。
   actions:
     - theme: brand
       text: 快速开始
@@ -15,7 +15,7 @@ hero:
 
 features:
   - title: 多平台支持
-    details: 开箱即用地支持 QQ（通过 NapCat）、Discord、Telegram、飞书/Lark、钉钉、云湖、KOOK、Matrix 和 Signal，可通过驱动器扩展更多平台。
+    details: 开箱即用地支持 QQ（通过 NapCat）、Discord、Telegram、飞书/Lark、钉钉、云湖、KOOK、Matrix、Signal 和 Slack，可通过驱动器扩展更多平台。
   - title: 配置驱动的消息路由
     details: 使用简单的规则文件定义群组之间的消息流向，无需编写代码。使用 connect 规则一键互联，或使用 forward 规则精细控制消息方向。
   - title: 媒体文件桥接
