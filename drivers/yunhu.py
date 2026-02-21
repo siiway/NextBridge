@@ -24,8 +24,15 @@ from aiohttp import web
 
 import services.logger as log
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import YunhuConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class YunhuConfig(_DriverConfig):
+    token:        str = ""
+    webhook_port: int = 8765
+    webhook_path: str = "/yunhu-webhook"
+    proxy_host:   str = ""
 
 l = log.get_logger()
 
@@ -277,3 +284,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                         )
             except Exception as e:
                 l.error(f"Yunhu [{self.instance_id}] send failed: {e}")
+
+
+from drivers.registry import register
+register("yunhu", YunhuConfig, YunhuDriver)

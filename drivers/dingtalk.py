@@ -39,8 +39,17 @@ from alibabacloud_dingtalk.robot_1_0 import models as robot_models
 
 import services.logger as log
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import DingTalkConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class DingTalkConfig(_DriverConfig):
+    app_key:        str
+    app_secret:     str
+    robot_code:     str
+    signing_secret: str = ""
+    listen_port:    int = 8082
+    listen_path:    str = "/dingtalk/event"
 
 l = log.get_logger()
 
@@ -224,3 +233,7 @@ def _verify_sign(timestamp: str, secret: str, sign: str) -> bool:
         return hmac.compare_digest(expected, sign)
     except Exception:
         return False
+
+
+from drivers.registry import register
+register("dingtalk", DingTalkConfig, DingTalkDriver)

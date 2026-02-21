@@ -27,8 +27,14 @@ from telegram.ext import Application, ContextTypes, MessageHandler, filters
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import TelegramConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class TelegramConfig(_DriverConfig):
+    bot_token:        str
+    max_file_size:    int = 50 * 1024 * 1024
+    rich_header_host: str = ""
 
 l = log.get_logger()
 
@@ -268,3 +274,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
         except Exception as e:
             l.error(f"Telegram [{self.instance_id}] send failed: {e}")
+
+
+from drivers.registry import register
+register("telegram", TelegramConfig, TelegramDriver)

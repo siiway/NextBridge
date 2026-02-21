@@ -33,11 +33,27 @@ from mautrix.types import (
     VideoInfo,
 )
 
+from pydantic import model_validator
+
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import MatrixConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class MatrixConfig(_DriverConfig):
+    homeserver:    str
+    user_id:       str
+    password:      str = ""
+    access_token:  str = ""
+    max_file_size: int = 10 * 1024 * 1024
+
+    @model_validator(mode="after")
+    def _require_auth(self) -> "MatrixConfig":
+        if not self.password and not self.access_token:
+            raise ValueError("requires 'password' or 'access_token'")
+        return self
 
 l = log.get_logger()
 
@@ -292,3 +308,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             await self._client.send_text(room_id, body)
         except Exception as e:
             l.error(f"Matrix [{self.instance_id}] fallback send failed: {e}")
+
+
+from drivers.registry import register
+register("matrix", MatrixConfig, MatrixDriver)

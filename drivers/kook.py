@@ -21,8 +21,13 @@ import khl
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import KookConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class KookConfig(_DriverConfig):
+    token:         str
+    max_file_size: int = 25 * 1024 * 1024
 
 l = log.get_logger()
 
@@ -156,3 +161,7 @@ class KookDriver(BaseDriver[KookConfig]):
             await ch.send(full_text, type=msg_type)
         except Exception as e:
             l.error(f"Kook [{self.instance_id}] send failed: {e}")
+
+
+from drivers.registry import register
+register("kook", KookConfig, KookDriver)

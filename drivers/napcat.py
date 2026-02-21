@@ -23,11 +23,22 @@ from pathlib import Path
 import websockets
 import websockets.exceptions
 
+from typing import Literal
+
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import NapCatConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class NapCatConfig(_DriverConfig):
+    ws_url:           str                         = "ws://127.0.0.1:3001"
+    ws_token:         str                         = ""
+    max_file_size:    int                         = 10 * 1024 * 1024
+    file_send_mode:   Literal["stream", "base64"] = "stream"
+    cqface_mode:      Literal["gif", "emoji"]     = "gif"
+    stream_threshold: int                         = 0
 
 l = log.get_logger()
 
@@ -544,3 +555,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             l.error(f"NapCat [{self.instance_id}] send failed: {e}")
+
+
+from drivers.registry import register
+register("napcat", NapCatConfig, NapCatDriver)

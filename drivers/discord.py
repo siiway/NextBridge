@@ -26,12 +26,22 @@ import re
 import discord
 import aiohttp
 
+from typing import Literal
+
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
-from services.config_schema import DiscordConfig
+from services.config_schema import _DriverConfig, CoercedBool
 from drivers import BaseDriver
+
+
+class DiscordConfig(_DriverConfig):
+    send_method:                         Literal["webhook", "bot"] = "webhook"
+    webhook_url:                         str                       = ""
+    bot_token:                           str                       = ""
+    max_file_size:                       int                       = 8 * 1024 * 1024
+    send_as_bot_when_using_cqface_emoji: CoercedBool               = False
 
 l = log.get_logger()
 
@@ -348,3 +358,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 text += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
         await ch.send(text or None, files=discord_files)
+
+
+from drivers.registry import register
+register("discord", DiscordConfig, DiscordDriver)

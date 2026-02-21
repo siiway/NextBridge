@@ -27,8 +27,17 @@ from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
 import services.logger as log
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import FeishuConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class FeishuConfig(_DriverConfig):
+    app_id:             str
+    app_secret:         str
+    verification_token: str = ""
+    encrypt_key:        str = ""
+    listen_port:        int = 8080
+    listen_path:        str = "/event"
 
 l = log.get_logger()
 
@@ -202,3 +211,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 )
         except Exception as e:
             l.error(f"Feishu [{self.instance_id}] send error: {e}")
+
+
+from drivers.registry import register
+register("feishu", FeishuConfig, FeishuDriver)

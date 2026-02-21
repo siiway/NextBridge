@@ -23,12 +23,21 @@
 # The "rich_header" kwarg (if present) is applied as a [Title · Content] prefix
 # to "text" and is not included as a separate field.
 
+from typing import Literal
+
 import aiohttp
+from pydantic import Field
 
 import services.logger as log
 from services.message import Attachment
-from services.config_schema import WebhookConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class WebhookConfig(_DriverConfig):
+    url:     str
+    method:  Literal["POST", "PUT", "PATCH"] = "POST"
+    headers: dict[str, str]                  = Field(default_factory=dict)
 
 l = log.get_logger()
 
@@ -98,3 +107,7 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
                     )
         except Exception as e:
             l.error(f"Webhook [{self.instance_id}] send failed: {e}")
+
+
+from drivers.registry import register
+register("webhook", WebhookConfig, WebhookDriver)

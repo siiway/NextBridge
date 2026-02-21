@@ -30,8 +30,14 @@ import aiohttp
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import SignalConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class SignalConfig(_DriverConfig):
+    api_url:       str
+    number:        str
+    max_file_size: int = 50 * 1024 * 1024
 
 l = log.get_logger()
 
@@ -221,3 +227,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
                     )
         except Exception as e:
             l.error(f"Signal [{self.instance_id}] send error: {e}")
+
+
+from drivers.registry import register
+register("signal", SignalConfig, SignalDriver)

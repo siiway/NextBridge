@@ -38,11 +38,24 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
+from typing import Literal
+
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.config_schema import SlackConfig
+from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+
+class SlackConfig(_DriverConfig):
+    bot_token:            str                       = ""
+    app_token:            str                       = ""
+    send_method:          Literal["bot", "webhook"] = "bot"
+    incoming_webhook_url: str                       = ""
+    signing_secret:       str                       = ""
+    listen_port:          int                       = 0
+    listen_path:          str                       = "/slack/events"
+    max_file_size:        int                       = 50 * 1024 * 1024
 
 l = log.get_logger()
 
@@ -441,3 +454,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
                     )
         except Exception as e:
             l.error(f"Slack [{self.instance_id}] incoming webhook request failed: {e}")
+
+
+from drivers.registry import register
+register("slack", SlackConfig, SlackDriver)
