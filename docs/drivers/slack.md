@@ -15,8 +15,20 @@ If `app_token` is set, Socket Mode is used and Events API config is ignored.
 
 | Mode | Config key | Description |
 |---|---|---|
-| **Bot** (default) | `send_method: "bot"` | Sends via `chat.postMessage`. Supports file uploads. |
+| **Bot** (default) | `send_method: "bot"` | Sends via `chat.postMessage`. Supports file uploads and per-message identity. |
 | **Incoming Webhook** | `send_method: "webhook"` | POSTs to a fixed Incoming Webhook URL. Text-only; `channel_id` is ignored. |
+
+### Per-message identity (username and avatar)
+
+The rule `msg` config keys `webhook_title` and `webhook_avatar` control the sender name and avatar displayed in Slack. How they are applied depends on the send mode and available config:
+
+| Condition | Behaviour |
+|---|---|
+| `send_method: "bot"` | `chat.postMessage` is called with `username` and `icon_url`. Requires the `chat:write.customize` scope. |
+| `send_method: "webhook"` + `bot_token` set | Automatically falls back to `chat.postMessage` (with identity) whenever `webhook_title` or `webhook_avatar` is present. Also requires `chat:write.customize`. |
+| `send_method: "webhook"` + no `bot_token` | Identity fields are ignored — Slack Incoming Webhooks do not support per-message username or icon overrides. |
+
+To enable per-message identity, add `chat:write.customize` to your bot's OAuth scopes in the Slack app settings.
 
 ---
 
@@ -27,6 +39,7 @@ If `app_token` is set, Socket Mode is used and Events API config is ignored.
 3. Under **OAuth & Permissions**, add these bot token scopes:
    - `channels:history`, `groups:history` — read messages
    - `chat:write` — send messages
+   - `chat:write.customize` — per-message username and avatar override (optional)
    - `files:read` — download received files
    - `files:write` — upload files
    - `users:read` — resolve display names
@@ -39,7 +52,7 @@ If `app_token` is set, Socket Mode is used and Events API config is ignored.
 ## Events API setup
 
 1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps).
-2. Under **OAuth & Permissions**, add the same bot token scopes listed above.
+2. Under **OAuth & Permissions**, add the same bot token scopes listed above (including `chat:write.customize` if you want per-message identity).
 3. Under **Event Subscriptions**, enable events and set the **Request URL** to your public endpoint (e.g. `https://example.com/slack/events`).
 4. Subscribe to `message.channels` and `message.groups` bot events.
 5. Under **Basic Information**, copy the **Signing Secret** (used to verify incoming requests).
@@ -144,6 +157,6 @@ The easiest way to find a channel's ID: open the channel in Slack, click the cha
 
 - Bot messages and system messages (joins, edits, etc.) are ignored to prevent echo loops.
 - File downloads require `bot_token` regardless of receive mode.
-- When `send_method` is `"webhook"`, messages that contain attachments automatically fall back to bot send (via `chat_postMessage` + `files_upload_v2`) if `bot_token` is configured. If no bot token is available, attachments are sent as text labels.
+- When `send_method` is `"webhook"`, messages that contain attachments **or** a custom identity (`webhook_title`/`webhook_avatar`) automatically fall back to `chat.postMessage` if `bot_token` is configured. Without a bot token, attachments become text labels and identity fields are ignored.
 - Display names are resolved via the Users API (`bot_token` required) and cached for the lifetime of the process.
 - Events API requests older than 5 minutes are rejected to prevent replay attacks.

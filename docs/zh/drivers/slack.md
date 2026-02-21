@@ -15,8 +15,20 @@ Slack 驱动器支持两种独立的接收模式和两种独立的发送模式�
 
 | 模式 | 配置键 | 说明 |
 |---|---|---|
-| **Bot**（默认） | `send_method: "bot"` | 通过 `chat.postMessage` 发送消息，支持文件上传。 |
+| **Bot**（默认） | `send_method: "bot"` | 通过 `chat.postMessage` 发送消息，支持文件上传和自定义发送者身份。 |
 | **Incoming Webhook** | `send_method: "webhook"` | POST 到固定的 Incoming Webhook URL，仅支持文字，`channel_id` 无效。 |
+
+### 自定义发送者身份（用户名与头像）
+
+规则 `msg` 配置中的 `webhook_title` 和 `webhook_avatar` 键用于控制消息在 Slack 中显示的发送者名称和头像。实际行为取决于发送模式和可用配置：
+
+| 条件 | 行为 |
+|---|---|
+| `send_method: "bot"` | 以 `username` 和 `icon_url` 参数调用 `chat.postMessage`，需要 `chat:write.customize` 权限范围。 |
+| `send_method: "webhook"` + 已配置 `bot_token` | 只要消息携带 `webhook_title` 或 `webhook_avatar`，自动回退到 `chat.postMessage`（含自定义身份），同样需要 `chat:write.customize`。 |
+| `send_method: "webhook"` + 未配置 `bot_token` | 身份字段被忽略——Slack Incoming Webhook 不支持逐条消息的用户名或图标覆盖。 |
+
+如需启用自定义发送者身份，请在 Slack 应用设置的 OAuth 权限范围中添加 `chat:write.customize`。
 
 ---
 
@@ -27,6 +39,7 @@ Slack 驱动器支持两种独立的接收模式和两种独立的发送模式�
 3. 在 **OAuth & Permissions** 下，为 Bot Token 添加以下权限范围：
    - `channels:history`、`groups:history` — 读取消息
    - `chat:write` — 发送消息
+   - `chat:write.customize` — 逐条消息自定义用户名和头像（可选）
    - `files:read` — 下载接收到的文件
    - `files:write` — 上传文件
    - `users:read` — 解析显示名称
@@ -39,7 +52,7 @@ Slack 驱动器支持两种独立的接收模式和两种独立的发送模式�
 ## Events API 准备工作
 
 1. 在 [api.slack.com/apps](https://api.slack.com/apps) 创建 Slack 应用。
-2. 在 **OAuth & Permissions** 下，添加上述相同的 Bot Token 权限范围。
+2. 在 **OAuth & Permissions** 下，添加上述相同的 Bot Token 权限范围（如需自定义发送者身份，也请添加 `chat:write.customize`）。
 3. 在 **Event Subscriptions** 下启用事件，将**请求 URL** 设置为你的公网端点（如 `https://example.com/slack/events`）。
 4. 订阅 `message.channels` 和 `message.groups` 机器人事件。
 5. 在 **Basic Information** 下复制 **Signing Secret**（用于验证请求合法性）。
@@ -144,6 +157,6 @@ Slack 驱动器支持两种独立的接收模式和两种独立的发送模式�
 
 - Bot 消息和系统消息（加入、编辑等）会被自动忽略，防止消息回显。
 - 无论使用哪种接收模式，下载文件均需要 `bot_token`。
-- 当 `send_method` 为 `"webhook"` 时，若消息包含附件且已配置 `bot_token`，会自动回退到 Bot 模式发送（通过 `chat_postMessage` + `files_upload_v2`）；若未配置 `bot_token`，附件将以文字标签形式发送。
+- 当 `send_method` 为 `"webhook"` 时，若消息包含附件**或**自定义身份（`webhook_title`/`webhook_avatar`）且已配置 `bot_token`，会自动回退到 `chat.postMessage`；若未配置 `bot_token`，附件将以文字标签形式发送，身份字段会被忽略。
 - 用户显示名称通过 Users API（需要 `bot_token`）解析，并在进程生命周期内缓存。
 - Events API 请求超过 5 分钟的将被拒绝，以防止重放攻击。

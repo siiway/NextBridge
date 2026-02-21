@@ -317,20 +317,28 @@ class SlackDriver(BaseDriver):
 
         send_method = self.config.get("send_method", "bot")
         if send_method == "webhook":
-            # Incoming Webhooks are text-only; fall back to bot send when the
-            # message carries attachments and a bot_token is available.
-            if attachments and self._web is not None:
-                await self._send_bot(channel, text, attachments)
+            # Incoming Webhooks cannot customize username or icon (silently
+            # ignored by Slack). Fall back to bot send whenever the message
+            # carries attachments OR a custom identity, provided bot_token is
+            # available (requires chat:write.customize scope for identity).
+            needs_bot = self._web is not None and (
+                attachments
+                or kwargs.get("webhook_title")
+                or kwargs.get("webhook_avatar")
+            )
+            if needs_bot:
+                await self._send_bot(channel, text, attachments, **kwargs)
             else:
                 await self._send_webhook(text, attachments)
         else:
-            await self._send_bot(channel, text, attachments)
+            await self._send_bot(channel, text, attachments, **kwargs)
 
     async def _send_bot(
         self,
         channel: dict,
         text: str,
         attachments: list[Attachment] | None,
+        **kwargs,
     ):
         channel_id = channel.get("channel_id")
         if not channel_id:
@@ -341,10 +349,22 @@ class SlackDriver(BaseDriver):
             return
 
         max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        title: str  = kwargs.get("webhook_title", "") or ""
+        avatar: str = kwargs.get("webhook_avatar", "") or ""
+        has_identity = bool(title or avatar)
+
+        def _post_kwargs(msg_text: str) -> dict:
+            """Build chat_postMessage kwargs with optional custom identity."""
+            m: dict = {"channel": channel_id, "text": msg_text}
+            if title:
+                m["username"] = title
+            if avatar:
+                m["icon_url"] = avatar
+            return m
 
         if text:
             try:
-                await self._web.chat_postMessage(channel=channel_id, text=text)
+                await self._web.chat_postMessage(**_post_kwargs(text))
             except Exception as e:
                 l.error(f"Slack [{self.instance_id}] chat_postMessage failed: {e}")
 
@@ -356,8 +376,7 @@ class SlackDriver(BaseDriver):
                 try:
                     label = att.name or att.url or ""
                     await self._web.chat_postMessage(
-                        channel=channel_id,
-                        text=f"[{att.type.capitalize()}: {label}]",
+                        **_post_kwargs(f"[{att.type.capitalize()}: {label}]")
                     )
                 except Exception:
                     pass
@@ -366,11 +385,30 @@ class SlackDriver(BaseDriver):
             data_bytes, mime = result
             fname = media.filename_for(att.name, mime)
             try:
-                await self._web.files_upload_v2(
-                    channel=channel_id,
-                    filename=fname,
-                    content=data_bytes,
-                )
+                if has_identity:
+                    # files_upload_v2 doesn't support username/icon_url.
+                    # Upload without posting, then share the permalink via
+                    # chat_postMessage so the custom identity is applied.
+                    file_resp = await self._web.files_upload_v2(
+                        filename=fname,
+                        content=data_bytes,
+                    )
+                    permalink = (file_resp.get("file") or {}).get("permalink", "")
+                    if permalink:
+                        await self._web.chat_postMessage(**_post_kwargs(permalink))
+                    else:
+                        # Fallback: post to channel directly (no custom identity)
+                        await self._web.files_upload_v2(
+                            channel=channel_id,
+                            filename=fname,
+                            content=data_bytes,
+                        )
+                else:
+                    await self._web.files_upload_v2(
+                        channel=channel_id,
+                        filename=fname,
+                        content=data_bytes,
+                    )
             except Exception as e:
                 l.error(f"Slack [{self.instance_id}] file upload failed: {e}")
 
@@ -396,8 +434,10 @@ class SlackDriver(BaseDriver):
         if not full_text.strip():
             return
 
+        payload: dict = {"text": full_text}
+
         try:
-            async with self._session.post(webhook_url, json={"text": full_text}) as resp:
+            async with self._session.post(webhook_url, json=payload) as resp:
                 if resp.status not in (200, 204):
                     body = await resp.text()
                     l.error(
