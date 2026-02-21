@@ -29,6 +29,7 @@ import hmac
 import json
 import time
 
+import aiohttp
 from aiohttp import web
 from alibabacloud_tea_openapi import models as open_api_models
 from alibabacloud_tea_util import models as util_models
@@ -38,9 +39,12 @@ from alibabacloud_dingtalk.robot_1_0.client import Client as RobotClient
 from alibabacloud_dingtalk.robot_1_0 import models as robot_models
 
 import services.logger as log
+import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+
+_UPLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/upload"
 
 
 class DingTalkConfig(_DriverConfig):
@@ -50,6 +54,7 @@ class DingTalkConfig(_DriverConfig):
     signing_secret: str = ""
     listen_port:    int = 8082
     listen_path:    str = "/dingtalk/event"
+    max_file_size:  int = 20 * 1024 * 1024
 
 l = log.get_logger()
 
@@ -62,6 +67,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         super().__init__(instance_id, config, bridge)
         self._oauth_client: OAuthClient | None = None
         self._robot_client: RobotClient | None = None
+        self._session:      aiohttp.ClientSession | None = None
         self._access_token: str = ""
         self._token_expires_at: float = 0.0
 
@@ -75,6 +81,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         cfg = open_api_models.Config(endpoint=_DINGTALK_ENDPOINT)
         self._oauth_client = OAuthClient(cfg)
         self._robot_client = RobotClient(cfg)
+        self._session = aiohttp.ClientSession()
 
         port = self.config.listen_port
         path = self.config.listen_path
@@ -95,6 +102,8 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             await asyncio.Event().wait()
         finally:
             await runner.cleanup()
+            await self._session.close()
+            self._session = None
 
     # ------------------------------------------------------------------
     # Receive
@@ -156,30 +165,72 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
             text = f"{prefix}\n{text}" if text else prefix
 
-        for att in (attachments or []):
-            if att.url:
-                text += f"\n[{att.type.capitalize()}: {att.name or att.url}]({att.url})"
-            elif att.name:
-                text += f"\n[{att.type.capitalize()}: {att.name}]"
-
-        robot_code = self.config.robot_code
-
         try:
             token = await self._get_access_token()
         except Exception as e:
             l.error(f"DingTalk [{self.instance_id}] access token error: {e}")
             return
 
-        headers = robot_models.OrgGroupSendHeaders(
-            x_acs_dingtalk_access_token=token
-        )
-        req = robot_models.OrgGroupSendRequest(
-            robot_code=robot_code,
-            open_conversation_id=open_conv_id,
-            msg_key="sampleText",
-            msg_param=json.dumps({"title": "NextBridge", "content": text}),
-        )
+        if text.strip():
+            await self._send_org_msg(open_conv_id, token, "sampleText", {"content": text})
 
+        max_size = self.config.max_file_size
+        for att in (attachments or []):
+            if not att.url and att.data is None:
+                continue
+
+            # Images with a public URL → sampleImageMsg (renders inline)
+            if att.type == "image" and att.url:
+                await self._send_org_msg(
+                    open_conv_id, token, "sampleImageMsg", {"photoURL": att.url}
+                )
+                continue
+
+            # All other attachments: download bytes and upload to DingTalk
+            result = await media.fetch_attachment(att, max_size)
+            if not result:
+                label = att.name or att.url or ""
+                await self._send_org_msg(
+                    open_conv_id, token, "sampleText",
+                    {"content": f"[{att.type.capitalize()}: {label}]"},
+                )
+                continue
+
+            data_bytes, mime = result
+            fname = media.filename_for(att.name, mime)
+            media_type = "voice" if mime.startswith("audio/") else "file"
+            media_id = await self._upload_media(token, data_bytes, fname, mime, media_type)
+
+            if not media_id:
+                label = att.name or fname
+                await self._send_org_msg(
+                    open_conv_id, token, "sampleText",
+                    {"content": f"[{att.type.capitalize()}: {label}]"},
+                )
+                continue
+
+            if media_type == "voice":
+                await self._send_org_msg(
+                    open_conv_id, token, "sampleAudio",
+                    {"mediaId": media_id, "duration": "0"},
+                )
+            else:
+                ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "bin"
+                await self._send_org_msg(
+                    open_conv_id, token, "sampleFile",
+                    {"mediaId": media_id, "fileName": fname, "fileType": ext},
+                )
+
+    async def _send_org_msg(
+        self, open_conv_id: str, token: str, msg_key: str, msg_param: dict
+    ) -> None:
+        headers = robot_models.OrgGroupSendHeaders(x_acs_dingtalk_access_token=token)
+        req = robot_models.OrgGroupSendRequest(
+            robot_code=self.config.robot_code,
+            open_conversation_id=open_conv_id,
+            msg_key=msg_key,
+            msg_param=json.dumps(msg_param),
+        )
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(
@@ -189,7 +240,39 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 ),
             )
         except Exception as e:
-            l.error(f"DingTalk [{self.instance_id}] send failed: {e}")
+            l.error(f"DingTalk [{self.instance_id}] send failed ({msg_key}): {e}")
+
+    async def _upload_media(
+        self,
+        token: str,
+        data: bytes,
+        fname: str,
+        mime: str,
+        media_type: str,
+    ) -> str | None:
+        if self._session is None:
+            return None
+        form = aiohttp.FormData()
+        form.add_field("robotCode", self.config.robot_code)
+        form.add_field("mediaType", media_type)
+        form.add_field("file", data, filename=fname, content_type=mime)
+        try:
+            async with self._session.post(
+                _UPLOAD_URL,
+                data=form,
+                headers={"x-acs-dingtalk-access-token": token},
+            ) as resp:
+                if resp.status == 200:
+                    js = await resp.json(content_type=None)
+                    return js.get("mediaId")
+                body = await resp.text()
+                l.error(
+                    f"DingTalk [{self.instance_id}] media upload failed "
+                    f"HTTP {resp.status}: {body[:200]}"
+                )
+        except Exception as e:
+            l.error(f"DingTalk [{self.instance_id}] media upload error: {e}")
+        return None
 
     # ------------------------------------------------------------------
     # Token management

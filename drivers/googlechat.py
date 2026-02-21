@@ -305,7 +305,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             if not att.url and att.data is None:
                 continue
 
-            # Images with a public URL → card widget (Google requires HTTPS URL)
+            # Images with a public URL → card widget (renders inline, no upload needed)
             if att.type == "image" and att.url:
                 await self._post_message(api_url, headers, {
                     "cardsV2": [{
@@ -324,16 +324,59 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 })
                 continue
 
-            # All other attachments → fetch for the label, send as text
+            # All other attachments (or images with bytes only) → multipart upload
             result = await media.fetch_attachment(att, max_size)
-            label  = att.name or att.url or ""
-            if result:
-                _, mime = result
-                label = media.filename_for(att.name, mime) or label
-            await self._post_message(
-                api_url, headers,
-                {"text": f"[{att.type.capitalize()}: {label}]"},
-            )
+            if not result:
+                label = att.name or att.url or ""
+                await self._post_message(
+                    api_url, headers,
+                    {"text": f"[{att.type.capitalize()}: {label}]"},
+                )
+                continue
+
+            data_bytes, mime = result
+            await self._post_media(space_name, headers, data_bytes, mime)
+
+    async def _post_media(
+        self,
+        space_name: str,
+        headers: dict,
+        data_bytes: bytes,
+        mime: str,
+    ) -> None:
+        """Upload a file via the Google Chat multipart media upload endpoint."""
+        boundary = "gc_nb_boundary"
+        meta     = json.dumps({}).encode()
+        body = (
+            f"--{boundary}\r\nContent-Type: application/json\r\n\r\n".encode()
+            + meta
+            + f"\r\n--{boundary}\r\nContent-Type: {mime}\r\n"
+              f"Content-Transfer-Encoding: binary\r\n\r\n".encode()
+            + data_bytes
+            + f"\r\n--{boundary}--".encode()
+        )
+        upload_url = (
+            f"https://upload.googleapis.com/upload/v1/{space_name}/messages"
+        )
+        upload_headers = {
+            "Authorization": headers["Authorization"],
+            "Content-Type":  f"multipart/related; boundary={boundary}",
+        }
+        try:
+            async with self._session.post(
+                upload_url,
+                data=body,
+                headers=upload_headers,
+                params={"uploadType": "multipart"},
+            ) as resp:
+                if resp.status not in (200, 201):
+                    text = await resp.text()
+                    l.error(
+                        f"Google Chat [{self.instance_id}] media upload failed "
+                        f"HTTP {resp.status}: {text[:200]}"
+                    )
+        except Exception as e:
+            l.error(f"Google Chat [{self.instance_id}] media upload error: {e}")
 
     async def _post_message(self, url: str, headers: dict, body: dict) -> None:
         try:

@@ -19,13 +19,19 @@
 #   chat_id – Feishu open chat ID, e.g. "oc_xxxxxxxxxxxxxxxxxx"
 
 import asyncio
+import io
 import json
 
 from aiohttp import web
 import lark_oapi as lark
-from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+from lark_oapi.api.im.v1 import (
+    CreateMessageRequest, CreateMessageRequestBody,
+    CreateImageRequest, CreateImageRequestBody,
+    CreateFileRequest, CreateFileRequestBody,
+)
 
 import services.logger as log
+import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
 from drivers import BaseDriver
@@ -38,6 +44,7 @@ class FeishuConfig(_DriverConfig):
     encrypt_key:        str = ""
     listen_port:        int = 8080
     listen_path:        str = "/event"
+    max_file_size:      int = 50 * 1024 * 1024
 
 l = log.get_logger()
 
@@ -180,25 +187,56 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
             text = f"{prefix}\n{text}" if text else prefix
 
-        for att in (attachments or []):
-            if att.url:
-                text += f"\n[{att.type.capitalize()}: {att.name or att.url}]({att.url})"
-            elif att.name:
-                text += f"\n[{att.type.capitalize()}: {att.name}]"
+        if text.strip():
+            await self._send_feishu_msg(chat_id, "text", json.dumps({"text": text}))
 
+        max_size = self.config.max_file_size
+        for att in (attachments or []):
+            if not att.url and att.data is None:
+                continue
+            result = await media.fetch_attachment(att, max_size)
+            if not result:
+                label = att.name or att.url or ""
+                await self._send_feishu_msg(
+                    chat_id, "text",
+                    json.dumps({"text": f"[{att.type.capitalize()}: {label}]"}),
+                )
+                continue
+
+            data_bytes, mime = result
+            fname = media.filename_for(att.name, mime)
+
+            if mime.startswith("image/"):
+                key = await self._upload_image(data_bytes)
+                if key:
+                    await self._send_feishu_msg(chat_id, "image", json.dumps({"image_key": key}))
+                else:
+                    await self._send_feishu_msg(
+                        chat_id, "text", json.dumps({"text": f"[Image: {fname}]"})
+                    )
+            else:
+                key = await self._upload_file(data_bytes, fname)
+                if key:
+                    await self._send_feishu_msg(chat_id, "file", json.dumps({"file_key": key}))
+                else:
+                    await self._send_feishu_msg(
+                        chat_id, "text",
+                        json.dumps({"text": f"[{att.type.capitalize()}: {fname}]"}),
+                    )
+
+    async def _send_feishu_msg(self, chat_id: str, msg_type: str, content: str) -> None:
         req = (
             CreateMessageRequest.builder()
             .receive_id_type("chat_id")
             .request_body(
                 CreateMessageRequestBody.builder()
                 .receive_id(chat_id)
-                .msg_type("text")
-                .content(json.dumps({"text": text}))
+                .msg_type(msg_type)
+                .content(content)
                 .build()
             )
             .build()
         )
-
         loop = asyncio.get_running_loop()
         try:
             resp = await loop.run_in_executor(
@@ -211,6 +249,53 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 )
         except Exception as e:
             l.error(f"Feishu [{self.instance_id}] send error: {e}")
+
+    async def _upload_image(self, data: bytes) -> str | None:
+        body = (
+            CreateImageRequestBody.builder()
+            .image_type("message")
+            .image(io.BytesIO(data))
+            .build()
+        )
+        req = CreateImageRequest.builder().request_body(body).build()
+        loop = asyncio.get_running_loop()
+        try:
+            resp = await loop.run_in_executor(
+                None, lambda: self._client.im.v1.image.create(req)
+            )
+            if resp.success():
+                return resp.data.image_key
+            l.error(
+                f"Feishu [{self.instance_id}] image upload failed: "
+                f"code={resp.code} msg={resp.msg}"
+            )
+        except Exception as e:
+            l.error(f"Feishu [{self.instance_id}] image upload error: {e}")
+        return None
+
+    async def _upload_file(self, data: bytes, fname: str) -> str | None:
+        body = (
+            CreateFileRequestBody.builder()
+            .file_type("stream")
+            .file_name(fname)
+            .file(io.BytesIO(data))
+            .build()
+        )
+        req = CreateFileRequest.builder().request_body(body).build()
+        loop = asyncio.get_running_loop()
+        try:
+            resp = await loop.run_in_executor(
+                None, lambda: self._client.im.v1.file.create(req)
+            )
+            if resp.success():
+                return resp.data.file_key
+            l.error(
+                f"Feishu [{self.instance_id}] file upload failed: "
+                f"code={resp.code} msg={resp.msg}"
+            )
+        except Exception as e:
+            l.error(f"Feishu [{self.instance_id}] file upload error: {e}")
+        return None
 
 
 from drivers.registry import register
