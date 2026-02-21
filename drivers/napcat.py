@@ -233,7 +233,72 @@ class NapCatDriver(BaseDriver):
                         name = f"face_{int(face_id_raw)}.gif"
                         attachments.append(Attachment(type="image", url="", name=name, data=gif_data))
 
-            # reply, forward, mface, etc. — silently skip
+            elif t == "json":
+                # Rich JSON message (contact card, news, mini-app, etc.)
+                # The `data` field is a JSON string; `prompt` is always a
+                # human-readable summary provided by the QQ client.
+                raw_json = d.get("data", "")
+                try:
+                    obj = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+                    prompt = obj.get("prompt", "").strip()
+                    if prompt:
+                        text_parts.append(f"[{prompt}]")
+                    else:
+                        # Try to build a summary from common fields
+                        meta = obj.get("meta", {})
+                        for key in ("news", "music", "contact", "detail_1"):
+                            sub = meta.get(key)
+                            if isinstance(sub, dict):
+                                title = sub.get("title") or sub.get("nickname") or ""
+                                desc  = sub.get("desc")  or sub.get("tag")      or ""
+                                parts = [p for p in (title, desc) if p]
+                                if parts:
+                                    text_parts.append(f"[{': '.join(parts)}]")
+                                    break
+                        else:
+                            text_parts.append("[App message]")
+                except (json.JSONDecodeError, AttributeError):
+                    text_parts.append("[App message]")
+
+            elif t == "reply":
+                # Quote/reply — mention the replied-to message ID if available
+                reply_id = d.get("id", "")
+                text_parts.append(f"[Reply:{reply_id}] " if reply_id else "[Reply] ")
+
+            elif t == "forward":
+                # Merged forwarded message chain
+                text_parts.append("[Forwarded messages]")
+
+            elif t == "mface":
+                # Market/sticker face — use summary text if present
+                summary = d.get("summary", "").strip()
+                if summary:
+                    text_parts.append(summary)
+
+            elif t == "share":
+                # URL share card
+                title = d.get("title", "").strip()
+                url   = d.get("url",   "").strip()
+                if title and url:
+                    text_parts.append(f"[Share: {title}] {url}")
+                elif url:
+                    text_parts.append(f"[Share] {url}")
+
+            elif t == "location":
+                name    = d.get("name",    "").strip()
+                address = d.get("address", "").strip()
+                parts   = [p for p in (name, address) if p]
+                text_parts.append(f"[Location: {', '.join(parts)}]" if parts else "[Location]")
+
+            elif t == "music":
+                title  = d.get("title",  "").strip()
+                singer = d.get("singer", d.get("author", "")).strip()
+                if title:
+                    text_parts.append(f"[Music: {title}" + (f" — {singer}" if singer else "") + "]")
+                else:
+                    text_parts.append("[Music]")
+
+            # poke, basketball, dice, rps, etc. — silently skip
 
         text = "".join(text_parts)
         # If segments gave us nothing useful, fall back to raw_message string
