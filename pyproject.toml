@@ -15,5 +15,5 @@ dependencies = [
     "yunhu>=0.0.11",
     "pyyaml>=6.0",
     "tomli-w>=1.0",
-    "matrix-nio>=0.25.2",
+    "mautrix>=0.21.0",
 ]

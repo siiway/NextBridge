@@ -70,6 +70,13 @@ async def main():
 
     bridge.load_sensitive_values(config)
 
+    def _on_task_done(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            l.error(f"Driver '{task.get_name()}' crashed: {exc}")
+
     driver_tasks: list[asyncio.Task] = []
     for platform, instances in config.items():
         driver_cls = DRIVER_MAP.get(platform)
@@ -79,6 +86,7 @@ async def main():
         for instance_id, instance_cfg in instances.items():
             drv = driver_cls(instance_id, instance_cfg, bridge)
             task = asyncio.create_task(drv.start(), name=f"{platform}/{instance_id}")
+            task.add_done_callback(_on_task_done)
             driver_tasks.append(task)
             l.info(f"Registered driver: {platform}/{instance_id}")
 

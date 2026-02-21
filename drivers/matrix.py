@@ -1,11 +1,10 @@
-# Matrix driver via matrix-nio (async).
+# Matrix driver via mautrix.
 #
-# Receive: AsyncClient.sync_forever() long-poll loop.  RoomMessageText,
-#          RoomMessageImage, RoomMessageVideo, RoomMessageAudio and
-#          RoomMessageFile events are forwarded to the bridge.  Media is
-#          downloaded eagerly via the authenticated client so downstream
-#          drivers never need Matrix credentials.
-# Send:    room_send() for text; upload() + room_send() for media.
+# Receive: Client.start() sync loop.  ROOM_MESSAGE events (text and media)
+#          are forwarded to the bridge.  Media is downloaded eagerly via
+#          the authenticated client so downstream drivers do not need
+#          Matrix credentials.
+# Send:    send_text() for text; upload_media() + send_file() for media.
 #
 # Config keys (under matrix.<instance_id>):
 #   homeserver    – Homeserver URL, e.g. "https://matrix.org" (required)
@@ -17,20 +16,21 @@
 # Rule channel keys:
 #   room_id – Matrix room ID, e.g. "!abc123:matrix.org"
 
-import io
-
-from nio import (
-    AsyncClient,
-    DownloadResponse,
-    LoginResponse,
-    MatrixRoom,
-    ProfileGetAvatarResponse,
-    RoomMessageAudio,
-    RoomMessageFile,
-    RoomMessageImage,
-    RoomMessageText,
-    RoomMessageVideo,
-    UploadResponse,
+from mautrix.client import Client
+from mautrix.types import (
+    AudioInfo,
+    ContentURI,
+    EventType,
+    FileInfo,
+    ImageInfo,
+    LoginType,
+    MatrixUserIdentifier,
+    MediaMessageEventContent,
+    MessageEvent,
+    MessageType,
+    TextMessageEventContent,
+    UserID,
+    VideoInfo,
 )
 
 import services.logger as log
@@ -40,34 +40,42 @@ from drivers import BaseDriver
 
 l = log.get_logger()
 
-_DEFAULT_MAX = 50 * 1024 * 1024  # 50 MB
+_DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
-_MSGTYPES = {
-    "image": "m.image",
-    "video": "m.video",
-    "voice": "m.audio",
-    "file":  "m.file",
+_FILE_TYPES = {
+    "image": MessageType.IMAGE,
+    "video": MessageType.VIDEO,
+    "voice": MessageType.AUDIO,
+    "file":  MessageType.FILE,
 }
+
+
+def _make_info(att_type: str, mime: str, size: int) -> FileInfo:
+    kwargs = {"mimetype": mime, "size": size}
+    if att_type == "image":
+        return ImageInfo(**kwargs)
+    if att_type == "video":
+        return VideoInfo(**kwargs)
+    if att_type == "voice":
+        return AudioInfo(**kwargs)
+    return FileInfo(**kwargs)
 
 
 class MatrixDriver(BaseDriver):
 
     def __init__(self, instance_id: str, config: dict, bridge):
         super().__init__(instance_id, config, bridge)
-        self._client: AsyncClient | None = None
-        self._user_id: str = ""
+        self._client: Client | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self):
-        self.bridge.register_sender(self.instance_id, self.send)
-
-        homeserver    = self.config.get("homeserver", "")
-        user_id       = self.config.get("user_id", "")
-        password      = self.config.get("password", "")
-        access_token  = self.config.get("access_token", "")
+        homeserver   = self.config.get("homeserver", "").rstrip("/")
+        user_id      = self.config.get("user_id", "")
+        password     = self.config.get("password", "")
+        access_token = self.config.get("access_token", "")
 
         if not homeserver or not user_id:
             l.error(f"Matrix [{self.instance_id}] homeserver and user_id are required")
@@ -77,148 +85,145 @@ class MatrixDriver(BaseDriver):
             l.error(f"Matrix [{self.instance_id}] either password or access_token is required")
             return
 
-        self._user_id = user_id
-        self._client = AsyncClient(homeserver, user_id)
+        self._client = Client(mxid=UserID(user_id), base_url=homeserver)
 
         if access_token:
-            self._client.access_token = access_token
-            self._client.user_id = user_id
+            self._client.api.token = access_token
         else:
-            resp = await self._client.login(password)
-            if not isinstance(resp, LoginResponse):
-                l.error(f"Matrix [{self.instance_id}] login failed: {resp}")
-                await self._client.close()
-                self._client = None
+            try:
+                await self._client.login(
+                    login_type=LoginType.PASSWORD,
+                    identifier=MatrixUserIdentifier(user=user_id),
+                    password=password,
+                    store_access_token=True,
+                )
+            except Exception as e:
+                l.error(f"Matrix [{self.instance_id}] login failed: {e}")
                 return
 
-        self._client.add_event_callback(self._on_text,  RoomMessageText)
-        self._client.add_event_callback(self._on_media, RoomMessageImage)
-        self._client.add_event_callback(self._on_media, RoomMessageVideo)
-        self._client.add_event_callback(self._on_media, RoomMessageAudio)
-        self._client.add_event_callback(self._on_media, RoomMessageFile)
+        # Skip the initial sync batch so historical messages are not bridged
+        self._client.ignore_first_sync = True
+        self._client.ignore_initial_sync = True
 
-        l.info(f"Matrix [{self.instance_id}] connected, starting sync")
-        # Initial sync to mark already-present messages as seen
-        await self._client.sync(timeout=0, full_state=True)
-        await self._client.sync_forever(timeout=30000, loop_sleep_time=1000)
+        self._client.add_event_handler(EventType.ROOM_MESSAGE, self._on_message)
+
+        # Register only after the client is fully ready so send() is never
+        # called while self._client is None (e.g. after a config error above).
+        self.bridge.register_sender(self.instance_id, self.send)
+        l.info(f"Matrix [{self.instance_id}] starting sync")
+        try:
+            await self._client.start(filter_data=None)
+        except Exception as e:
+            l.error(f"Matrix [{self.instance_id}] sync loop error: {e}")
+            raise
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
     def _mxc_to_http(self, mxc_uri: str) -> str:
-        """Convert an mxc:// URI to an HTTP download URL."""
         if not mxc_uri or not mxc_uri.startswith("mxc://"):
             return ""
         homeserver = self.config.get("homeserver", "").rstrip("/")
         return f"{homeserver}/_matrix/media/v3/download/{mxc_uri[6:]}"
 
-    def _display_name(self, room: MatrixRoom, user_id: str) -> str:
-        member = room.users.get(user_id)
-        if member and member.display_name:
-            return member.display_name
-        # Fall back to the local part of the MXID (@user:server → user)
+    def _mxid_local(self, user_id: str) -> str:
         return user_id.split(":")[0].lstrip("@") if ":" in user_id else user_id
 
-    async def _get_avatar(self, user_id: str) -> str:
+    async def _get_profile(self, user_id: str) -> tuple[str, str]:
+        """Return (display_name, avatar_http_url) for a Matrix user ID."""
+        display_name = self._mxid_local(user_id)
+        avatar_url = ""
         if self._client is None:
-            return ""
+            return display_name, avatar_url
         try:
-            resp = await self._client.get_avatar(user_id)
-            if isinstance(resp, ProfileGetAvatarResponse) and resp.avatar_url:
-                return self._mxc_to_http(resp.avatar_url)
+            name = await self._client.get_displayname(UserID(user_id))
+            if name:
+                display_name = name
         except Exception:
             pass
-        return ""
+        try:
+            mxc = await self._client.get_avatar_url(UserID(user_id))
+            if mxc:
+                avatar_url = self._mxc_to_http(str(mxc))
+        except Exception:
+            pass
+        return display_name, avatar_url
 
     # ------------------------------------------------------------------
     # Receive
     # ------------------------------------------------------------------
 
-    async def _on_text(self, room: MatrixRoom, event: RoomMessageText):
-        if event.sender == self._user_id:
-            return
-        if event.msgtype != "m.text":
-            return
-        text = event.body or ""
-        if not text.strip():
+    async def _on_message(self, event: MessageEvent) -> None:
+        if self._client and event.sender == self._client.mxid:
             return
 
-        normalized = NormalizedMessage(
-            platform="matrix",
-            instance_id=self.instance_id,
-            channel={"room_id": room.room_id},
-            user=self._display_name(room, event.sender),
-            user_id=event.sender,
-            user_avatar=await self._get_avatar(event.sender),
-            text=text,
-        )
-        await self.bridge.on_message(normalized)
+        content = event.content
 
-    async def _on_media(self, room: MatrixRoom, event):
-        if event.sender == self._user_id:
-            return
+        if isinstance(content, TextMessageEventContent):
+            if content.msgtype not in (MessageType.TEXT, MessageType.EMOTE):
+                return
+            text = content.body or ""
+            if not text.strip():
+                return
 
-        if isinstance(event, RoomMessageImage):
-            att_type = "image"
-        elif isinstance(event, RoomMessageVideo):
-            att_type = "video"
-        elif isinstance(event, RoomMessageAudio):
-            att_type = "voice"
-        else:
-            att_type = "file"
+            display_name, avatar = await self._get_profile(str(event.sender))
+            await self.bridge.on_message(NormalizedMessage(
+                platform="matrix",
+                instance_id=self.instance_id,
+                channel={"room_id": str(event.room_id)},
+                user=display_name,
+                user_id=str(event.sender),
+                user_avatar=avatar,
+                text=text,
+            ))
 
-        max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
+        elif isinstance(content, MediaMessageEventContent):
+            msgtype = content.msgtype
+            if msgtype == MessageType.IMAGE:
+                att_type = "image"
+            elif msgtype == MessageType.VIDEO:
+                att_type = "video"
+            elif msgtype == MessageType.AUDIO:
+                att_type = "voice"
+            else:
+                att_type = "file"
 
-        # Skip early if the declared size already exceeds the limit
-        info = getattr(event, "info", None)
-        declared_size = getattr(info, "size", None) if info else None
-        if declared_size and declared_size > max_size:
-            l.debug(
-                f"Matrix [{self.instance_id}] skipping {event.body!r}: "
-                f"{declared_size} > {max_size}"
-            )
-            return
+            max_size: int = self.config.get("max_file_size", _DEFAULT_MAX)
 
-        # Eagerly download via the authenticated client
-        mxc = getattr(event, "url", "") or ""
-        att_data: bytes | None = None
-        att_url = ""
-        if mxc and self._client:
-            try:
-                dl = await self._client.download(mxc_uri=mxc)
-                if isinstance(dl, DownloadResponse):
-                    if len(dl.body) <= max_size:
-                        att_data = dl.body
+            # Honour declared size before downloading
+            declared = getattr(content.info, "size", None) if content.info else None
+            if declared and declared > max_size:
+                l.debug(f"Matrix [{self.instance_id}] skipping {content.body!r}: {declared} > {max_size}")
+                return
+
+            att_data: bytes | None = None
+            att_url = ""
+            mxc = content.url
+            if mxc and self._client:
+                try:
+                    raw = await self._client.download_media(mxc)
+                    if len(raw) <= max_size:
+                        att_data = raw
                     else:
-                        l.debug(
-                            f"Matrix [{self.instance_id}] {event.body!r} "
-                            "exceeds size limit after download"
-                        )
+                        l.debug(f"Matrix [{self.instance_id}] {content.body!r} exceeds size limit")
                         return
-                else:
-                    l.warning(f"Matrix [{self.instance_id}] media download error: {dl}")
-                    att_url = self._mxc_to_http(mxc)
-            except Exception as e:
-                l.warning(f"Matrix [{self.instance_id}] media download failed: {e}")
-                att_url = self._mxc_to_http(mxc)
+                except Exception as e:
+                    l.warning(f"Matrix [{self.instance_id}] media download failed: {e}")
+                    att_url = self._mxc_to_http(str(mxc))
 
-        normalized = NormalizedMessage(
-            platform="matrix",
-            instance_id=self.instance_id,
-            channel={"room_id": room.room_id},
-            user=self._display_name(room, event.sender),
-            user_id=event.sender,
-            user_avatar=await self._get_avatar(event.sender),
-            text="",
-            attachments=[Attachment(
-                type=att_type,
-                url=att_url,
-                name=event.body or "",
-                data=att_data,
-            )],
-        )
-        await self.bridge.on_message(normalized)
+            display_name, avatar = await self._get_profile(str(event.sender))
+            fname = getattr(content, "filename", None) or content.body or ""
+            await self.bridge.on_message(NormalizedMessage(
+                platform="matrix",
+                instance_id=self.instance_id,
+                channel={"room_id": str(event.room_id)},
+                user=display_name,
+                user_id=str(event.sender),
+                user_avatar=avatar,
+                text="",
+                attachments=[Attachment(type=att_type, url=att_url, name=fname, data=att_data)],
+            ))
 
     # ------------------------------------------------------------------
     # Send
@@ -251,12 +256,7 @@ class MatrixDriver(BaseDriver):
 
         if text.strip():
             try:
-                await self._client.room_send(
-                    room_id,
-                    "m.room.message",
-                    {"msgtype": "m.text", "body": text},
-                    ignore_unverified_devices=True,
-                )
+                await self._client.send_text(room_id, text)
             except Exception as e:
                 l.error(f"Matrix [{self.instance_id}] send text failed: {e}")
 
@@ -267,53 +267,40 @@ class MatrixDriver(BaseDriver):
             result = await media.fetch_attachment(att, max_size)
             if not result:
                 label = att.name or att.url or ""
-                await self._send_text_fallback(room_id, f"[{att.type.capitalize()}: {label}]")
+                await self._send_fallback(room_id, f"[{att.type.capitalize()}: {label}]")
                 continue
 
             data_bytes, mime = result
             fname = media.filename_for(att.name, mime)
 
             try:
-                upload_resp, _ = await self._client.upload(
-                    io.BytesIO(data_bytes),
-                    content_type=mime,
+                mxc_uri: ContentURI = await self._client.upload_media(
+                    data=data_bytes,
+                    mime_type=mime,
                     filename=fname,
-                    filesize=len(data_bytes),
+                    size=len(data_bytes),
                 )
-                if not isinstance(upload_resp, UploadResponse):
-                    raise RuntimeError(f"Upload response: {upload_resp}")
-                mxc_uri = upload_resp.content_uri
             except Exception as e:
-                l.error(f"Matrix [{self.instance_id}] media upload failed: {e}")
+                l.error(f"Matrix [{self.instance_id}] upload failed: {e}")
                 label = att.name or att.url or fname
-                await self._send_text_fallback(room_id, f"[{att.type.capitalize()}: {label}]")
+                await self._send_fallback(room_id, f"[{att.type.capitalize()}: {label}]")
                 continue
 
-            content = {
-                "msgtype": _MSGTYPES.get(att.type, "m.file"),
-                "url": mxc_uri,
-                "body": fname,
-                "info": {"mimetype": mime, "size": len(data_bytes)},
-            }
             try:
-                await self._client.room_send(
+                await self._client.send_file(
                     room_id,
-                    "m.room.message",
-                    content,
-                    ignore_unverified_devices=True,
+                    url=mxc_uri,
+                    info=_make_info(att.type, mime, len(data_bytes)),
+                    file_name=fname,
+                    file_type=_FILE_TYPES.get(att.type, MessageType.FILE),
                 )
             except Exception as e:
                 l.error(f"Matrix [{self.instance_id}] send media failed: {e}")
 
-    async def _send_text_fallback(self, room_id: str, body: str) -> None:
+    async def _send_fallback(self, room_id: str, body: str) -> None:
         if self._client is None:
             return
         try:
-            await self._client.room_send(
-                room_id,
-                "m.room.message",
-                {"msgtype": "m.text", "body": body},
-                ignore_unverified_devices=True,
-            )
+            await self._client.send_text(room_id, body)
         except Exception as e:
             l.error(f"Matrix [{self.instance_id}] fallback send failed: {e}")
