@@ -1,6 +1,6 @@
 # Matrix
 
-The Matrix driver receives messages via a long-poll sync loop (using [matrix-nio](https://github.com/poljar/matrix-nio)) and sends messages to rooms using the Matrix Client-Server API.
+The Matrix driver receives messages via a long-poll sync loop (using [mautrix-python](https://github.com/mautrix/python)) and sends messages to rooms using the Matrix Client-Server API.
 
 ## Setup
 
@@ -57,5 +57,5 @@ Use under `channels` or `from`/`to` in `rules.json`:
 - The bot ignores its own messages to prevent echo loops.
 - Media received from Matrix is downloaded via the authenticated client before being forwarded, so downstream platforms do not need Matrix credentials.
 - Outgoing media is uploaded to the homeserver via the Matrix media API and sent as native Matrix media events (`m.image`, `m.video`, `m.audio`, `m.file`).
-- E2E-encrypted rooms are supported as long as `libolm` is installed in the environment. Messages to rooms with unverified devices are sent with `ignore_unverified_devices=True`.
-- The driver performs a full-state sync on startup to avoid re-processing messages that arrived before the bot connected.
+- Historical messages from before the bot connected are skipped automatically on startup.
+- E2E encryption is not currently supported.

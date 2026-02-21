@@ -19,6 +19,7 @@
  - discord.py
  - NapCat
  - python-telegram-bot
+ - mautrix-python
 
 ## License
 GNU General Public License v3.0. See [LICENSE](./LICENSE) for details.

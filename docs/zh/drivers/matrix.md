@@ -1,6 +1,6 @@
 # Matrix
 
-Matrix 驱动器通过长轮询同步循环（使用 [matrix-nio](https://github.com/poljar/matrix-nio)）接收消息，并通过 Matrix 客户端-服务器 API 向房间发送消息。
+Matrix 驱动器通过长轮询同步循环（使用 [mautrix-python](https://github.com/mautrix/python)）接收消息，并通过 Matrix 客户端-服务器 API 向房间发送消息。
 
 ## 准备工作
 
@@ -57,5 +57,5 @@ Matrix 驱动器通过长轮询同步循环（使用 [matrix-nio](https://github
 - Bot 会忽略自身发送的消息，防止消息回显循环。
 - 从 Matrix 接收到的媒体文件会通过已认证的客户端直接下载，下游平台无需 Matrix 凭据。
 - 发送媒体时，文件会先上传至 Homeserver 的媒体 API，再以原生 Matrix 媒体事件（`m.image`、`m.video`、`m.audio`、`m.file`）形式发出。
-- 若环境中安装了 `libolm`，则支持端对端加密房间。向含有未验证设备的房间发送消息时，驱动器会设置 `ignore_unverified_devices=True`。
-- 驱动器在启动时会执行一次全量同步，以避免重复处理 Bot 上线前已存在的消息。
+- 启动时自动跳过 Bot 上线前的历史消息，不会重复处理。
+- 当前不支持端对端加密（E2E）。
