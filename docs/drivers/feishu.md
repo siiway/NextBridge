@@ -4,6 +4,23 @@ The Feishu driver supports two receive modes and sends via the Feishu IM v1 API 
 
 Feishu (China) and Lark (international) use the same API and the same driver.
 
+## App permissions
+
+In the Feishu/Lark developer console, grant the app the following scopes under **Permissions & Scopes** and publish the app version:
+
+| Scope | Purpose |
+|---|---|
+| `im:message` (or `im:message:send`) | **Send** messages — required for outgoing bridging |
+| `im:message:receive_v1` | **Receive** message events |
+| `im:resource` (or `im:resource:upload`) | Upload images and files when forwarding attachments |
+| `contact:contact.base:readonly` | Resolve sender open_id to a display name and avatar |
+
+::: tip
+If you see `Access denied` errors in the logs, the app version is missing one or more of the above scopes. Add the required scope(s) under **Permissions & Scopes**, then publish a new version of the app.
+
+`contact:contact.base:readonly` is optional — without it, the sender will be shown as their raw `open_id`.
+:::
+
 ## Receive modes
 
 ### HTTP webhook (default)
@@ -13,10 +30,11 @@ Feishu pushes events to an HTTP endpoint you expose. The driver starts an aiohtt
 **Setup**
 
 1. Go to the [Feishu Open Platform](https://open.feishu.cn) (or [Lark Developer](https://open.larksuite.com)).
-2. Create a **custom app** and enable the **im:message:receive_v1** event.
-3. Under **Event Subscriptions**, set the request URL to `http://your-host:8080/event` (matching your `listen_port` and `listen_path`).
-4. Copy the **App ID**, **App Secret**, **Verification Token**, and **Encrypt Key** (leave encrypt key blank to disable encryption).
-5. Add the bot to the target group chat.
+2. Create a **custom app** and grant the scopes listed above.
+3. Enable the **im.message.receive_v1** event under **Event Subscriptions**.
+4. Set the request URL to `http://your-host:8080/event` (matching your `listen_port` and `listen_path`).
+5. Copy the **App ID**, **App Secret**, **Verification Token**, and **Encrypt Key** (leave encrypt key blank to disable encryption).
+6. Publish the app version and add the bot to the target group chat.
 
 ::: warning Public endpoint required
 Feishu must be able to reach your HTTP endpoint from the internet. Use a reverse proxy, tunnel (e.g. ngrok), or deploy on a public server.
@@ -29,11 +47,12 @@ The driver establishes a persistent outbound WebSocket connection to Feishu's se
 **Setup**
 
 1. Go to the [Feishu Open Platform](https://open.feishu.cn) (or [Lark Developer](https://open.larksuite.com)).
-2. Create a **custom app** and enable the **im:message:receive_v1** event.
-3. Under **Event Subscriptions**, select **"Use long connection to receive events"** instead of setting a request URL.
-4. Copy the **App ID** and **App Secret**.
-5. Add the bot to the target group chat.
-6. Set `use_long_connection: true` in your config.
+2. Create a **custom app** and grant the scopes listed above.
+3. Enable the **im.message.receive_v1** event under **Event Subscriptions**.
+4. Select **"Use long connection to receive events"** instead of setting a request URL.
+5. Copy the **App ID** and **App Secret**.
+6. Publish the app version and add the bot to the target group chat.
+7. Set `use_long_connection: true` in your config.
 
 ## Config keys
 
@@ -100,4 +119,4 @@ You can find the chat ID in the Feishu developer console, or from the event payl
 
 - Currently only **text messages** are received. Other message types (cards, files, stickers) are ignored on the receive side.
 - Outgoing attachments are sent as URLs appended to the message text (Feishu file upload via the API requires additional permissions).
-- The sender's display name is shown as their `open_id`. Resolving the human-readable name requires an extra user-info API call and is not currently implemented.
+- The sender's display name and avatar are resolved via the contact API (`contact:contact.base:readonly`). Without that scope the sender is shown as their raw `open_id`.

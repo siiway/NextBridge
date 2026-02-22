@@ -8,7 +8,7 @@
  - [x] [VoceChat](https://voce.chat)
  - [ ] ~~[WhatsApp](https://whatsapp.com)~~ - paused since there is no support for bot and no community implementations
  - [x] [DingTalk](https://dingtalk.com) - Not Tested
- - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com) - Not Tested
+ - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
  - [ ] ~~[WeChat / WeiXin](https://weixin.qq.com)~~ - paused cuz i dont want to get my wechat account banned
  - [x] [Yunhu](https://www.yhchat.com/)
  - [x] [Kook](https://www.kookapp.cn/)

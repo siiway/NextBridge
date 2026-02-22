@@ -4,6 +4,23 @@
 
 飞书（中国大陆）和 Lark（国际版）使用相同的 API，共用同一驱动器。
 
+## 应用权限
+
+在飞书/Lark 开发者后台的**权限管理**中，为应用开通以下权限范围，并发布应用版本：
+
+| 权限 | 用途 |
+|---|---|
+| `im:message`（或 `im:message:send`） | **发送**消息——出站桥接必需 |
+| `im:message:receive_v1` | **接收**消息事件 |
+| `im:resource`（或 `im:resource:upload`） | 转发附件时上传图片和文件 |
+| `contact:contact.base:readonly` | 将发送者 open_id 解析为显示名称和头像 |
+
+::: tip
+如果日志中出现 `Access denied` 错误，说明应用版本缺少上述一个或多个权限范围。请在**权限管理**中添加对应权限后重新发布应用版本。
+
+`contact:contact.base:readonly` 为可选权限——未开通时，发送者将以原始 `open_id` 显示。
+:::
+
 ## 接收模式
 
 ### HTTP Webhook（默认）
@@ -13,10 +30,10 @@
 **准备工作**
 
 1. 前往[飞书开放平台](https://open.feishu.cn)（或 [Lark 开发者平台](https://open.larksuite.com)）。
-2. 创建一个**自建应用**，并开启 **im:message:receive_v1** 事件订阅。
-3. 在**事件订阅**中，将请求 URL 设为 `http://your-host:8080/event`（与 `listen_port` 和 `listen_path` 配置一致）。
+2. 创建一个**自建应用**，并在**权限管理**中开通上述权限范围。
+3. 在**事件订阅**中开启 **im.message.receive_v1** 事件，并将请求 URL 设为 `http://your-host:8080/event`（与 `listen_port` 和 `listen_path` 配置一致）。
 4. 复制 **App ID**、**App Secret**、**验证 Token** 和**加密 Key**（不需要加密可留空）。
-5. 将应用机器人添加到目标群聊。
+5. 发布应用版本，并将机器人添加到目标群聊。
 
 ::: warning 需要公网可访问的地址
 飞书需要从公网访问你的 HTTP 端点。请使用反向代理、内网穿透工具（如 ngrok）或将服务部署在公网服务器上。
@@ -29,10 +46,10 @@
 **准备工作**
 
 1. 前往[飞书开放平台](https://open.feishu.cn)（或 [Lark 开发者平台](https://open.larksuite.com)）。
-2. 创建一个**自建应用**，并开启 **im:message:receive_v1** 事件订阅。
-3. 在**事件订阅**中，选择**"使用长连接接收事件"**，无需设置请求 URL。
+2. 创建一个**自建应用**，并在**权限管理**中开通上述权限范围。
+3. 在**事件订阅**中开启 **im.message.receive_v1** 事件，并选择**"使用长连接接收事件"**，无需设置请求 URL。
 4. 复制 **App ID** 和 **App Secret**。
-5. 将应用机器人添加到目标群聊。
+5. 发布应用版本，并将机器人添加到目标群聊。
 6. 在配置中设置 `use_long_connection: true`。
 
 ## 配置项
@@ -100,4 +117,4 @@ Chat ID 可在飞书开发者后台查看，也可从机器人在该群收到的
 
 - 目前仅接收**文本消息**，其他消息类型（卡片、文件、表情）在接收端会被忽略。
 - 发出的附件以 URL 形式附加到文本消息末尾（通过 API 上传文件需要额外权限，暂未实现）。
-- 发送者显示名称当前使用其 `open_id`，解析为可读名称需要额外的用户信息 API 调用，暂未实现。
+- 发送者显示名称和头像通过联系人 API（`contact:contact.base:readonly`）解析。未开通该权限时，发送者将以原始 `open_id` 显示。

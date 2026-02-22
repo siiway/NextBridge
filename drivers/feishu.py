@@ -31,10 +31,13 @@
 import asyncio
 import io
 import json
+import logging
+import re
 import threading
 
 from aiohttp import web
 import lark_oapi as lark
+from lark_oapi.api.contact.v3 import GetUserRequest
 from lark_oapi.api.im.v1 import (
     CreateMessageRequest, CreateMessageRequestBody,
     CreateImageRequest, CreateImageRequestBody,
@@ -60,6 +63,23 @@ class FeishuConfig(_DriverConfig):
 
 l = log.get_logger()
 
+_WSS_URL_RE = re.compile(r'wss://\S+')
+
+
+class _LarkLogBridge(logging.Handler):
+    """Forwards lark-oapi WS logs to the system logger, masking wss:// URLs."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = _WSS_URL_RE.sub("wss://***", record.getMessage())
+        if record.levelno >= logging.ERROR:
+            l.error("Feishu WS: %s", msg)
+        elif record.levelno >= logging.WARNING:
+            l.warning("Feishu WS: %s", msg)
+        elif record.levelno >= logging.INFO:
+            l.info("Feishu WS: %s", msg)
+        else:
+            l.debug("Feishu WS: %s", msg)
+
 
 class FeishuDriver(BaseDriver[FeishuConfig]):
 
@@ -68,6 +88,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         self._client: lark.Client | None = None
         self._handler = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # open_id → (display_name, avatar_url)
+        self._user_cache: dict[str, tuple[str, str]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -117,6 +139,12 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             thread_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(thread_loop)
             _ws_mod.loop = thread_loop  # patch module-level loop reference
+
+            # Redirect the lark-oapi "Lark" logger to the system logger.
+            lark_logger = logging.getLogger("Lark")
+            lark_logger.handlers.clear()
+            lark_logger.addHandler(_LarkLogBridge())
+            lark_logger.propagate = False
 
             ws_client = lark.ws.Client(
                 app_id,
@@ -187,6 +215,39 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
     # Receive — event layer (called from executor thread by lark-oapi)
     # ------------------------------------------------------------------
 
+    def _fetch_user_info(self, open_id: str) -> tuple[str, str]:
+        """Return (display_name, avatar_url) for an open_id, using a local cache.
+
+        Falls back to (open_id, "") if the contact API call fails (e.g. missing
+        contact:contact.base:readonly scope).
+        """
+        if open_id in self._user_cache:
+            return self._user_cache[open_id]
+
+        name, avatar = open_id, ""
+        try:
+            req = (
+                GetUserRequest.builder()
+                .user_id_type("open_id")
+                .user_id(open_id)
+                .build()
+            )
+            resp = self._client.contact.v3.user.get(req)
+            if resp.success() and resp.data and resp.data.user:
+                u = resp.data.user
+                name = u.name or open_id
+                avatar = (u.avatar.avatar_72 if u.avatar else "") or ""
+            else:
+                l.info(
+                    f"Feishu [{self.instance_id}] user info fetch failed for "
+                    f"{open_id}: code={resp.code} msg={resp.msg}"
+                )
+        except Exception as e:
+            l.info(f"Feishu [{self.instance_id}] user info fetch error: {e}")
+
+        self._user_cache[open_id] = (name, avatar)
+        return name, avatar
+
     def _on_message_event(self, data) -> None:
         """Synchronous callback invoked by lark-oapi inside the executor thread."""
         try:
@@ -197,9 +258,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             if msg.message_type != "text":
                 return
 
-            text = json.loads(msg.content).get("text", "").strip()
+            content_json = json.loads(msg.content)
+            text = content_json.get("text", "").strip()
             if not text:
                 return
+
+            # Replace mentions placeholders like @_user_1 with @DisplayName
+            if hasattr(msg, "mentions") and msg.mentions:
+                for m in msg.mentions:
+                    if m.key and m.name:
+                        text = text.replace(m.key, f"@{m.name}")
 
             chat_id = msg.chat_id
             open_id = (
@@ -208,13 +276,15 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 else ""
             )
 
+            display_name, avatar = self._fetch_user_info(open_id) if open_id else (open_id, "")
+
             normalized = NormalizedMessage(
                 platform="feishu",
                 instance_id=self.instance_id,
                 channel={"chat_id": chat_id},
-                user=open_id,   # Display name requires a separate user-info call
+                user=display_name,
                 user_id=open_id,
-                user_avatar="",
+                user_avatar=avatar,
                 text=text,
             )
 
