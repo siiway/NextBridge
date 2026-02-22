@@ -4,7 +4,7 @@
 ## To-Do List
  - [x] [Tencent QQ](https://im.qq.com) (with [NapCat](https://napneko.github.io))
  - [x] [Discord](https://discord.gg)
- - [x] [Telegram](htps://telegram.org)
+ - [x] [Telegram](https://telegram.org)
  - [x] [VoceChat](https://voce.chat)
  - [ ] ~~[WhatsApp](https://whatsapp.com)~~ - paused since there is no support for bot and no community implementations
  - [x] [DingTalk](https://dingtalk.com) - Not Tested
