@@ -136,6 +136,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             user_avatar=avatar,
             text=text,
             attachments=attachments,
+            message_id=str(message.id),
+            reply_parent=str(message.reference.message_id) if message.reference else None,
         )
         await self.bridge.on_message(msg)
 
@@ -260,11 +262,12 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             text = f"{prefix}\n{text}" if text else prefix
 
         if is_webhook_send:
-            await self._send_webhook(text, attachments, **kwargs)
+            return await self._send_webhook(text, attachments, **kwargs)
         elif self._client is not None:
-            await self._send_bot(channel, text, attachments)
+            return await self._send_bot(channel, text, attachments, **kwargs)
         else:
             l.warning(f"Discord [{self.instance_id}] no send method available")
+            return None
 
     async def _send_webhook(
         self,
@@ -273,7 +276,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         **kwargs,
     ):
         if self._session is None or self._webhook_url is None:
-            return
+            return None
 
         max_size: int = self.config.max_file_size
 
@@ -299,47 +302,52 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 ref = f"({att.url})" if att.url else ""
                 payload["content"] += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
-        if files:
-            form = aiohttp.FormData()
-            form.add_field(
-                "payload_json", json.dumps(payload), content_type="application/json"
-            )
-            for i, (data_bytes, mime, fname) in enumerate(files):
+        url = self._webhook_url + ("&" if "?" in self._webhook_url else "?") + "wait=true"
+
+        try:
+            if files:
+                form = aiohttp.FormData()
                 form.add_field(
-                    f"files[{i}]", data_bytes, filename=fname, content_type=mime
+                    "payload_json", json.dumps(payload), content_type="application/json"
                 )
-            async with self._session.post(self._webhook_url, data=form) as resp:
-                if resp.status not in (200, 204):
-                    body = await resp.text()
-                    l.error(
-                        f"Discord [{self.instance_id}] webhook error "
-                        f"HTTP {resp.status}: {body}"
+                for i, (data_bytes, mime, fname) in enumerate(files):
+                    form.add_field(
+                        f"files[{i}]", data_bytes, filename=fname, content_type=mime
                     )
-        else:
-            async with self._session.post(self._webhook_url, json=payload) as resp:
-                if resp.status not in (200, 204):
+                async with self._session.post(url, data=form) as resp:
+                    if resp.status in (200, 204, 201):
+                        data = await resp.json()
+                        return str(data.get("id", ""))
                     body = await resp.text()
-                    l.error(
-                        f"Discord [{self.instance_id}] webhook error "
-                        f"HTTP {resp.status}: {body}"
-                    )
+                    l.error(f"Discord [{self.instance_id}] webhook error {resp.status}: {body}")
+            else:
+                async with self._session.post(url, json=payload) as resp:
+                    if resp.status in (200, 204, 201):
+                        data = await resp.json()
+                        return str(data.get("id", ""))
+                    body = await resp.text()
+                    l.error(f"Discord [{self.instance_id}] webhook error {resp.status}: {body}")
+        except Exception as e:
+            l.error(f"Discord [{self.instance_id}] webhook exception: {e}")
+        return None
 
     async def _send_bot(
         self,
         channel: dict,
         text: str,
         attachments: list[Attachment] | None,
+        **kwargs,
     ):
         if self._client is None:
-            return
+            return None
         channel_id = channel.get("channel_id")
         if not channel_id:
             l.warning(f"Discord [{self.instance_id}] send_bot: no channel_id")
-            return
+            return None
         ch = self._client.get_channel(int(channel_id))
         if ch is None:
             l.warning(f"Discord [{self.instance_id}] channel {channel_id} not in cache")
-            return
+            return None
 
         max_size: int = self.config.max_file_size
 
@@ -357,7 +365,24 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 ref = f"({att.url})" if att.url else ""
                 text += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
-        await ch.send(text or None, files=discord_files)
+        reply_to_id = kwargs.get("reply_to_id")
+        reference = None
+        if reply_to_id:
+            try:
+                # We need a partial message for reference
+                reference = discord.MessageReference(
+                    message_id=int(reply_to_id),
+                    channel_id=int(channel_id)
+                )
+            except (ValueError, TypeError):
+                pass
+
+        try:
+            sent = await ch.send(text or None, files=discord_files, reference=reference)
+            return str(sent.id)
+        except Exception as e:
+            l.error(f"Discord [{self.instance_id}] send error: {e}")
+        return None
 
 
 from drivers.registry import register

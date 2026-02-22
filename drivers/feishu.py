@@ -43,6 +43,7 @@ from lark_oapi.api.im.v1 import (
     CreateImageRequest, CreateImageRequestBody,
     CreateFileRequest, CreateFileRequestBody,
     GetMessageResourceRequest,
+    ReplyMessageRequest, ReplyMessageRequestBody,
 )
 
 import services.logger as log
@@ -357,6 +358,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 user_avatar=avatar,
                 text=text,
                 attachments=attachments,
+                message_id=msg.message_id,
+                reply_parent=msg.parent_id,
             )
 
             if self._loop:
@@ -374,10 +377,13 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         chat_id = channel.get("chat_id")
         if not chat_id:
             l.warning(f"Feishu [{self.instance_id}] send: no chat_id in channel {channel}")
-            return
+            return None
         if self._client is None:
             l.warning(f"Feishu [{self.instance_id}] send: driver not started")
-            return
+            return None
+
+        reply_to_id = kwargs.get("reply_to_id")
+        first_msg_id = None
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -386,7 +392,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             text = f"{prefix}\n{text}" if text else prefix
 
         if text.strip():
-            await self._send_feishu_msg(chat_id, "text", json.dumps({"text": text}))
+            mid = await self._send_feishu_msg(chat_id, "text", json.dumps({"text": text}), reply_to_id)
+            if not first_msg_id: first_msg_id = mid
 
         max_size = self.config.max_file_size
         for att in (attachments or []):
@@ -395,10 +402,12 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             result = await media.fetch_attachment(att, max_size)
             if not result:
                 label = att.name or att.url or ""
-                await self._send_feishu_msg(
+                mid = await self._send_feishu_msg(
                     chat_id, "text",
                     json.dumps({"text": f"[{att.type.capitalize()}: {label}]"}),
+                    reply_to_id
                 )
+                if not first_msg_id: first_msg_id = mid
                 continue
 
             data_bytes, mime = result
@@ -407,46 +416,76 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             if mime.startswith("image/"):
                 key = await self._upload_image(data_bytes)
                 if key:
-                    await self._send_feishu_msg(chat_id, "image", json.dumps({"image_key": key}))
+                    mid = await self._send_feishu_msg(chat_id, "image", json.dumps({"image_key": key}), reply_to_id)
+                    if not first_msg_id: first_msg_id = mid
                 else:
-                    await self._send_feishu_msg(
-                        chat_id, "text", json.dumps({"text": f"[Image: {fname}]"})
+                    mid = await self._send_feishu_msg(
+                        chat_id, "text", json.dumps({"text": f"[Image: {fname}]"}), reply_to_id
                     )
+                    if not first_msg_id: first_msg_id = mid
             else:
                 key = await self._upload_file(data_bytes, fname)
                 if key:
-                    await self._send_feishu_msg(chat_id, "file", json.dumps({"file_key": key}))
+                    mid = await self._send_feishu_msg(chat_id, "file", json.dumps({"file_key": key}), reply_to_id)
+                    if not first_msg_id: first_msg_id = mid
                 else:
-                    await self._send_feishu_msg(
+                    mid = await self._send_feishu_msg(
                         chat_id, "text",
                         json.dumps({"text": f"[{att.type.capitalize()}: {fname}]"}),
+                        reply_to_id
                     )
+                    if not first_msg_id: first_msg_id = mid
 
-    async def _send_feishu_msg(self, chat_id: str, msg_type: str, content: str) -> None:
-        req = (
-            CreateMessageRequest.builder()
-            .receive_id_type("chat_id")
-            .request_body(
-                CreateMessageRequestBody.builder()
-                .receive_id(chat_id)
-                .msg_type(msg_type)
-                .content(content)
+        return first_msg_id
+
+    async def _send_feishu_msg(self, chat_id: str, msg_type: str, content: str, reply_to_id: str | None = None) -> str | None:
+        if reply_to_id:
+            req = (
+                ReplyMessageRequest.builder()
+                .message_id(reply_to_id)
+                .request_body(
+                    ReplyMessageRequestBody.builder()
+                    .msg_type(msg_type)
+                    .content(content)
+                    .build()
+                )
                 .build()
             )
-            .build()
-        )
+        else:
+            req = (
+                CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(chat_id)
+                    .msg_type(msg_type)
+                    .content(content)
+                    .build()
+                )
+                .build()
+            )
+
         loop = asyncio.get_running_loop()
         try:
-            resp = await loop.run_in_executor(
-                None, lambda: self._client.im.v1.message.create(req)
-            )
-            if not resp.success():
-                l.error(
-                    f"Feishu [{self.instance_id}] send failed: "
-                    f"code={resp.code} msg={resp.msg}"
+            if reply_to_id:
+                resp = await loop.run_in_executor(
+                    None, lambda: self._client.im.v1.message.reply(req)
                 )
+            else:
+                resp = await loop.run_in_executor(
+                    None, lambda: self._client.im.v1.message.create(req)
+                )
+
+            if resp.success():
+                return resp.data.message_id
+
+            l.error(
+                f"Feishu [{self.instance_id}] send failed: "
+                f"code={resp.code} msg={resp.msg}"
+            )
         except Exception as e:
             l.error(f"Feishu [{self.instance_id}] send error: {e}")
+        return None
 
     async def _upload_image(self, data: bytes) -> str | None:
         body = (

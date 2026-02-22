@@ -171,6 +171,11 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         if not text.strip() and not attachments:
             return
 
+        # Handle both msgId (webhook) and messageId (sometimes used)
+        mid = message.get("msgId") or message.get("messageId")
+        # Handle both parentId and parent_id
+        pid = message.get("parentId") or message.get("parent_id")
+
         msg = NormalizedMessage(
             platform="yunhu",
             instance_id=self.instance_id,
@@ -180,6 +185,8 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             user_avatar=avatar,
             text=text,
             attachments=attachments,
+            message_id=str(mid) if mid else None,
+            reply_parent=str(pid) if pid else None,
         )
         await self.bridge.on_message(msg)
 
@@ -197,15 +204,17 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         chat_id = channel.get("chat_id")
         if not chat_id:
             l.warning(f"Yunhu [{self.instance_id}] send: no chat_id in channel {channel}")
-            return
+            return None
         if not self._token:
             l.warning(f"Yunhu [{self.instance_id}] send: no token, message dropped")
-            return
+            return None
         if self._session is None:
             l.warning(f"Yunhu [{self.instance_id}] send: session not ready, message dropped")
-            return
+            return None
 
         chat_type: str = channel.get("chat_type", "group")
+        reply_to_id = kwargs.get("reply_to_id")
+        first_msg_id = None
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -217,57 +226,52 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         # as its native Yunhu content type.
         payloads: list[dict] = []
 
+        def _add_common(p):
+            p.update({"recvId": str(chat_id), "recvType": chat_type})
+            if reply_to_id:
+                p["parentId"] = str(reply_to_id)
+            return p
+
         if text:
-            payloads.append({
-                "recvId": chat_id,
-                "recvType": chat_type,
+            payloads.append(_add_common({
                 "contentType": "text",
                 "content": {"text": text},
-            })
+            }))
 
         for att in (attachments or []):
             if not att.url:
-                # No URL to give Yunhu — append a text fallback to the first
-                # text payload, or send a standalone text message.
+                # No URL to give Yunhu — append a text fallback
                 fallback = f"[{att.type.capitalize()}: {att.name}]" if att.name else None
                 if fallback:
                     if payloads and payloads[0]["contentType"] == "text":
                         payloads[0]["content"]["text"] += f"\n{fallback}"
                     else:
-                        payloads.append({
-                            "recvId": chat_id,
-                            "recvType": chat_type,
+                        payloads.append(_add_common({
                             "contentType": "text",
                             "content": {"text": fallback},
-                        })
+                        }))
                 continue
 
             url = self._proxy_media(att.url)
             name = att.name or att.url.split("/")[-1]
             if att.type == "image":
-                payloads.append({
-                    "recvId": chat_id,
-                    "recvType": chat_type,
+                payloads.append(_add_common({
                     "contentType": "image",
                     "content": {"imageUrl": url, "imageName": name},
-                })
+                }))
             elif att.type == "video":
-                payloads.append({
-                    "recvId": chat_id,
-                    "recvType": chat_type,
+                payloads.append(_add_common({
                     "contentType": "video",
                     "content": {"videoUrl": url, "videoName": name},
-                })
+                }))
             else:  # voice / file / unknown
-                payloads.append({
-                    "recvId": chat_id,
-                    "recvType": chat_type,
+                payloads.append(_add_common({
                     "contentType": "file",
                     "content": {"fileUrl": url, "fileName": name},
-                })
+                }))
 
         if not payloads:
-            return
+            return None
 
         for payload in payloads:
             try:
@@ -276,7 +280,22 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                     json=payload,
                     headers={"Content-Type": "application/json"},
                 ) as resp:
-                    if resp.status != 200:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # Accept both 0 and 1 as success (docs are inconsistent)
+                        if data.get("code") in (0, 1):
+                            # Try both messageId and msgId at various depths
+                            d = data.get("data", {})
+                            mid = (d.get("messageId") or 
+                                   d.get("msgId") or 
+                                   d.get("messageInfo", {}).get("msgId") or
+                                   d.get("messageInfo", {}).get("messageId"))
+                            
+                            if mid and not first_msg_id: 
+                                first_msg_id = str(mid)
+                        else:
+                            l.error(f"Yunhu [{self.instance_id}] send failed API error: {data}")
+                    else:
                         body = await resp.text()
                         l.error(
                             f"Yunhu [{self.instance_id}] send failed "
@@ -284,6 +303,8 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                         )
             except Exception as e:
                 l.error(f"Yunhu [{self.instance_id}] send failed: {e}")
+
+        return first_msg_id
 
 
 from drivers.registry import register

@@ -22,3 +22,5 @@ class NormalizedMessage:
     user_avatar: str    # avatar URL (may be empty)
     text: str           # message text content
     attachments: list[Attachment] = field(default_factory=list)
+    message_id: str | None = None      # ID of this message on its platform
+    reply_parent: str | None = None    # ID of the message being replied to (if any)

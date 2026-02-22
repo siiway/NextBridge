@@ -1,11 +1,13 @@
 import json
 import re
+import uuid
 from pathlib import Path
 from typing import Callable
 
 import services.util as u
 import services.logger as log
 from services.message import NormalizedMessage
+from services.db import msg_db
 
 l = log.get_logger()
 
@@ -88,13 +90,22 @@ class Bridge:
     # ------------------------------------------------------------------
 
     async def on_message(self, msg: NormalizedMessage):
+        # Generate or resolve bridge_id for the incoming message
+        bridge_id = str(uuid.uuid4())
+        if msg.message_id:
+            msg_db.save_mapping(bridge_id, msg.instance_id, str(msg.channel), msg.message_id)
+
+        reply_bridge_id = None
+        if msg.reply_parent:
+            reply_bridge_id = msg_db.get_bridge_id(msg.instance_id, msg.reply_parent)
+
         for rule in self._rules:
             if rule.get("type") == "connect":
                 if self._matches_channel(msg, rule.get("channels", {})):
-                    await self._dispatch_connect(msg, rule)
+                    await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:
                 if self._matches_from(msg, rule.get("from", {})):
-                    await self._dispatch(msg, rule)
+                    await self._dispatch(msg, rule, bridge_id, reply_bridge_id)
 
     def _matches_channel(self, msg: NormalizedMessage, channels: dict) -> bool:
         """Return True if *msg* originates from one of the channels in a connect rule."""
@@ -153,7 +164,7 @@ class Bridge:
     def _is_sensitive(self, text: str) -> bool:
         return bool(self._sensitive) and any(s in text for s in self._sensitive)
 
-    async def _dispatch(self, msg: NormalizedMessage, rule: dict):
+    async def _dispatch(self, msg: NormalizedMessage, rule: dict, bridge_id: str, reply_bridge_id: str | None = None):
         formatted, extra = self._build_formatted(msg, rule.get("msg", {}))
 
         for target_id, target_channel in rule.get("to", {}).items():
@@ -173,12 +184,21 @@ class Bridge:
                 l.warning(f"No sender registered for instance '{target_id}'")
                 continue
 
+            # Resolve target reply ID
+            target_reply_id = None
+            if reply_bridge_id:
+                target_reply_id = msg_db.get_platform_msg_id(reply_bridge_id, target_id, str(target_channel))
+                if target_reply_id:
+                    extra["reply_to_id"] = target_reply_id
+
             try:
-                await sender(target_channel, formatted, attachments=msg.attachments, **extra)
+                new_msg_id = await sender(target_channel, formatted, attachments=msg.attachments, **extra)
+                if new_msg_id:
+                    msg_db.save_mapping(bridge_id, target_id, str(target_channel), str(new_msg_id))
             except Exception as e:
                 l.error(f"Failed to send to '{target_id}': {e}")
 
-    async def _dispatch_connect(self, msg: NormalizedMessage, rule: dict):
+    async def _dispatch_connect(self, msg: NormalizedMessage, rule: dict, bridge_id: str, reply_bridge_id: str | None = None):
         """Fan-out to every channel in the connect rule except the source."""
         global_msg_cfg = rule.get("msg", {})
 
@@ -206,8 +226,17 @@ class Bridge:
                 l.warning(f"No sender registered for instance '{target_id}'")
                 continue
 
+            # Resolve target reply ID
+            target_reply_id = None
+            if reply_bridge_id:
+                target_reply_id = msg_db.get_platform_msg_id(reply_bridge_id, target_id, str(target_channel))
+                if target_reply_id:
+                    extra["reply_to_id"] = target_reply_id
+
             try:
-                await sender(target_channel, formatted, attachments=msg.attachments, **extra)
+                new_msg_id = await sender(target_channel, formatted, attachments=msg.attachments, **extra)
+                if new_msg_id:
+                    msg_db.save_mapping(bridge_id, target_id, str(target_channel), str(new_msg_id))
             except Exception as e:
                 l.error(f"Failed to send to '{target_id}': {e}")
 

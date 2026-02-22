@@ -21,7 +21,7 @@ import html
 import io
 from urllib.parse import urlencode
 
-from telegram import LinkPreviewOptions, Update
+from telegram import LinkPreviewOptions, Update, ReplyParameters
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 import services.logger as log
@@ -163,6 +163,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             user_avatar="",  # Telegram avatar requires an extra API call
             text=text,
             attachments=attachments,
+            message_id=str(msg.message_id),
+            reply_parent=str(msg.reply_to_message.message_id) if msg.reply_to_message else None,
         )
         await self.bridge.on_message(normalized)
 
@@ -191,6 +193,16 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
         parse_mode: str | None = None
         link_preview_opts: LinkPreviewOptions | None = None
+
+        reply_to_id = kwargs.get("reply_to_id")
+        reply_params = None
+        if reply_to_id:
+            try:
+                reply_params = ReplyParameters(message_id=int(reply_to_id))
+            except (ValueError, TypeError):
+                pass
+
+        first_msg_id = None
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -245,35 +257,48 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 caption = text if not caption_used else None
 
                 if att.type == "image":
-                    await self._app.bot.send_photo(
-                        chat_id=cid, photo=bio, caption=caption, parse_mode=parse_mode
+                    sent = await self._app.bot.send_photo(
+                        chat_id=cid, photo=bio, caption=caption, parse_mode=parse_mode,
+                        reply_parameters=reply_params
                     )
+                    if not first_msg_id: first_msg_id = str(sent.message_id)
                 elif att.type == "voice":
-                    await self._app.bot.send_voice(
-                        chat_id=cid, voice=bio, caption=caption, parse_mode=parse_mode
+                    sent = await self._app.bot.send_voice(
+                        chat_id=cid, voice=bio, caption=caption, parse_mode=parse_mode,
+                        reply_parameters=reply_params
                     )
+                    if not first_msg_id: first_msg_id = str(sent.message_id)
                 elif att.type == "video":
-                    await self._app.bot.send_video(
-                        chat_id=cid, video=bio, caption=caption, parse_mode=parse_mode
+                    sent = await self._app.bot.send_video(
+                        chat_id=cid, video=bio, caption=caption, parse_mode=parse_mode,
+                        reply_parameters=reply_params
                     )
+                    if not first_msg_id: first_msg_id = str(sent.message_id)
                 else:
-                    await self._app.bot.send_document(
-                        chat_id=cid, document=bio, caption=caption, parse_mode=parse_mode
+                    sent = await self._app.bot.send_document(
+                        chat_id=cid, document=bio, caption=caption, parse_mode=parse_mode,
+                        reply_parameters=reply_params
                     )
+                    if not first_msg_id: first_msg_id = str(sent.message_id)
 
                 caption_used = True
 
             # Send text-only if no attachments consumed it
             if text and not caption_used:
-                await self._app.bot.send_message(
+                sent = await self._app.bot.send_message(
                     chat_id=cid,
                     text=text,
                     parse_mode=parse_mode,
                     link_preview_options=link_preview_opts,
+                    reply_parameters=reply_params,
                 )
+                if not first_msg_id: first_msg_id = str(sent.message_id)
+
+            return first_msg_id
 
         except Exception as e:
             l.error(f"Telegram [{self.instance_id}] send failed: {e}")
+            return None
 
 
 from drivers.registry import register

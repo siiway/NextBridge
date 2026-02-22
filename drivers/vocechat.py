@@ -161,6 +161,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             user_avatar=avatar,
             text=text,
             attachments=attachments,
+            message_id=str(event.get("mid", "")),
+            reply_parent=str(detail.get("parent_mid", "")) if detail.get("parent_mid") else None,
         )
         await self.bridge.on_message(normalized)
 
@@ -247,7 +249,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
     ):
         if self._session is None:
             l.warning(f"VoceChat [{self.instance_id}] send: driver not started")
-            return
+            return None
 
         gid = channel.get("gid")
         uid = channel.get("uid")
@@ -256,7 +258,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 f"VoceChat [{self.instance_id}] send: "
                 f"no gid or uid in channel {channel}"
             )
-            return
+            return None
 
         server   = self.config.server_url.rstrip("/")
         max_size = self.config.max_file_size
@@ -267,6 +269,9 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             else f"{server}/api/bot/send_to_user/{uid}"
         )
 
+        reply_to_id = kwargs.get("reply_to_id")
+        first_msg_id = None
+
         rich_header = kwargs.get("rich_header")
         if rich_header:
             t, c = rich_header.get("title", ""), rich_header.get("content", "")
@@ -276,7 +281,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         if text.strip():
             # Use markdown if rich_header was applied; plain text otherwise
             ct = "text/markdown" if rich_header else "text/plain"
-            await self._post_message(endpoint, text.encode(), ct)
+            mid = await self._post_message(endpoint, text.encode(), ct, reply_to_id)
+            if not first_msg_id: first_msg_id = mid
 
         for att in (attachments or []):
             if not att.url and att.data is None:
@@ -284,11 +290,13 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             result = await media.fetch_attachment(att, max_size)
             if not result:
                 label = att.name or att.url or ""
-                await self._post_message(
+                mid = await self._post_message(
                     endpoint,
                     f"[{att.type.capitalize()}: {label}]".encode(),
                     "text/plain",
+                    reply_to_id
                 )
+                if not first_msg_id: first_msg_id = mid
                 continue
 
             data_bytes, mime = result
@@ -296,25 +304,44 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             file_path = await self._upload_file(server, data_bytes, fname, mime)
             if file_path:
                 body = json.dumps({"path": file_path}).encode()
-                await self._post_message(endpoint, body, "vocechat/file")
+                mid = await self._post_message(endpoint, body, "vocechat/file", reply_to_id)
+                if not first_msg_id: first_msg_id = mid
             else:
                 label = att.name or fname
-                await self._post_message(
+                mid = await self._post_message(
                     endpoint,
                     f"[{att.type.capitalize()}: {label}]".encode(),
                     "text/plain",
+                    reply_to_id
                 )
+                if not first_msg_id: first_msg_id = mid
+
+        return first_msg_id
 
     async def _post_message(
-        self, url: str, body: bytes, content_type: str
-    ) -> None:
+        self, url: str, body: bytes, content_type: str, reply_to_id: str | None = None
+    ) -> str | None:
+        # VoceChat bot API handles replies via parent_mid in a JSON wrapper or
+        # as a query parameter for some endpoints. Let's try parent_mid query param.
+        if reply_to_id:
+            url += f"{'&' if '?' in url else '?'}parent_mid={reply_to_id}"
+
         try:
             async with self._session.post(
                 url,
                 data=body,
                 headers={"Content-Type": content_type},
             ) as resp:
-                if resp.status not in (200, 201):
+                if resp.status in (200, 201):
+                    # VoceChat returns a JSON with the new message ID as 'mid'
+                    # or sometimes as raw number if it's text/plain response.
+                    res_text = await resp.text()
+                    try:
+                        res_json = json.loads(res_text)
+                        return str(res_json.get("mid", ""))
+                    except:
+                        return res_text.strip().strip('"')
+                else:
                     text = await resp.text()
                     l.error(
                         f"VoceChat [{self.instance_id}] send failed "
@@ -322,6 +349,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     )
         except Exception as e:
             l.error(f"VoceChat [{self.instance_id}] send error: {e}")
+        return None
 
     async def _upload_file(
         self,

@@ -175,7 +175,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         nickname = sender.get("card") or sender.get("nickname") or user_id
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
-        text, attachments = self._parse_message(event, face_as_emoji=face_as_emoji)
+        text, attachments, reply_id = self._parse_message(event, face_as_emoji=face_as_emoji)
         if not text.strip() and not attachments:
             return
 
@@ -191,13 +191,15 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             user_avatar=avatar_url,
             text=text,
             attachments=attachments,
+            message_id=str(event.get("message_id", "")),
+            reply_parent=reply_id,
         )
         await self.bridge.on_message(msg)
 
     @staticmethod
-    def _parse_message(event: dict, *, face_as_emoji: bool = False) -> tuple[str, list[Attachment]]:
+    def _parse_message(event: dict, *, face_as_emoji: bool = False) -> tuple[str, list[Attachment], str | None]:
         """
-        Parse an OneBot 11 message event into plain text + attachments.
+        Parse an OneBot 11 message event into plain text + attachments + reply_id.
         Always uses the structured ``message`` segment array; CQ-code strings
         in ``raw_message`` are only used as a last-resort text fallback.
         """
@@ -205,10 +207,11 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         # If NapCat sent a plain string instead of an array, treat as text only
         if isinstance(segments, str):
-            return segments, []
+            return segments, [], None
 
         text_parts: list[str] = []
         attachments: list[Attachment] = []
+        reply_id: str | None = None
 
         for seg in segments:
             t = seg.get("type", "")
@@ -289,8 +292,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             elif t == "reply":
                 # Quote/reply — mention the replied-to message ID if available
-                reply_id = d.get("id", "")
-                text_parts.append(f"[Reply:{reply_id}] " if reply_id else "[Reply] ")
+                reply_id = str(d.get("id", ""))
 
             elif t == "forward":
                 # Merged forwarded message chain
@@ -332,7 +334,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         if not text and not attachments:
             text = event.get("raw_message", "")
 
-        return text, attachments
+        return text, attachments, reply_id
 
     # ------------------------------------------------------------------
     # Action helpers
@@ -444,14 +446,18 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         group_id = channel.get("group_id")
         if not group_id:
             l.warning(f"NapCat [{self.instance_id}] send: no group_id in channel {channel}")
-            return
+            return None
 
         if self._ws is None:
             l.warning(f"NapCat [{self.instance_id}] send: not connected, message dropped")
-            return
+            return None
 
         max_size: int = self.config.max_file_size
         segments: list[dict] = []
+
+        reply_to_id = kwargs.get("reply_to_id")
+        if reply_to_id:
+            segments.append({"type": "reply", "data": {"id": str(reply_to_id)}})
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -467,10 +473,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 continue
 
             if att.type == "image":
-                # Download through the bridge so NapCat doesn't need to reach
-                # external CDNs (e.g. Discord CDN, Telegram API) directly.
-                # fetch_attachment() uses att.data directly if already loaded
-                # (e.g. a face GIF), otherwise downloads from att.url.
                 result = await media.fetch_attachment(att, max_size)
                 if result:
                     data_bytes, _ = result
@@ -512,7 +514,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     fname = att.name or "file"
                     mode = self._resolve_send_mode(len(data_bytes))
                     if mode == "base64":
-                        b64 = base64.b64encode(data_bytes).decode()
                         await self._call(
                             "upload_group_file",
                             {
@@ -540,21 +541,16 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {label}"}})
 
         if not segments:
-            return
+            return None
 
-        payload = {
-            "action": "send_group_msg",
-            "params": {
-                "group_id": int(group_id),
-                "message": segments,
-            },
-            "echo": str(uuid.uuid4()),
-        }
-
-        try:
-            await self._ws.send(json.dumps(payload, ensure_ascii=False))
-        except Exception as e:
-            l.error(f"NapCat [{self.instance_id}] send failed: {e}")
+        resp = await self._call("send_group_msg", {
+            "group_id": int(group_id),
+            "message": segments,
+        })
+        if resp and resp.get("status") == "ok":
+            data = resp.get("data") or {}
+            return str(data.get("message_id", ""))
+        return None
 
 
 from drivers.registry import register
