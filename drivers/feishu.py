@@ -1,19 +1,29 @@
 # Feishu / Lark driver via lark-oapi.
 #
-# Receive: Feishu pushes events to an HTTP endpoint you expose.
-#          This driver starts an aiohttp server on a configurable port.
-#          Set that URL in the Feishu developer console under
-#          "Event Subscriptions" → "Request URL".
+# Receive (two modes, controlled by use_long_connection):
+#
+#   HTTP webhook (default, use_long_connection = false):
+#     Feishu pushes events to an HTTP endpoint you expose.
+#     This driver starts an aiohttp server on a configurable port.
+#     Set that URL in the Feishu developer console under
+#     "Event Subscriptions" → "Request URL".
+#
+#   Long connection / WebSocket (use_long_connection = true):
+#     The driver establishes a persistent outbound WebSocket connection
+#     to Feishu's servers; no public HTTP endpoint is required.
+#     Enable this mode in the Feishu developer console under
+#     "Event Subscriptions" → "Use long connection to receive events".
 #
 # Send: uses the Feishu IM v1 create-message API.
 #
 # Config keys (under feishu.<instance_id>):
-#   app_id             – Feishu app ID  (required)
-#   app_secret         – Feishu app secret  (required)
-#   verification_token – Event verification token  (from dev console)
-#   encrypt_key        – Event encryption key  (leave "" to disable)
-#   listen_port        – HTTP port to listen on  (default: 8080)
-#   listen_path        – HTTP path for events    (default: "/event")
+#   app_id               – Feishu app ID  (required)
+#   app_secret           – Feishu app secret  (required)
+#   use_long_connection  – true = WebSocket mode; false = HTTP webhook mode  (default: false)
+#   verification_token   – Event verification token  (HTTP mode only)
+#   encrypt_key          – Event encryption key  (HTTP mode; leave "" to disable)
+#   listen_port          – HTTP port to listen on  (HTTP mode; default: 8080)
+#   listen_path          – HTTP path for events    (HTTP mode; default: "/event")
 #
 # Rule channel keys:
 #   chat_id – Feishu open chat ID, e.g. "oc_xxxxxxxxxxxxxxxxxx"
@@ -21,6 +31,7 @@
 import asyncio
 import io
 import json
+import threading
 
 from aiohttp import web
 import lark_oapi as lark
@@ -38,13 +49,14 @@ from drivers import BaseDriver
 
 
 class FeishuConfig(_DriverConfig):
-    app_id:             str
-    app_secret:         str
-    verification_token: str = ""
-    encrypt_key:        str = ""
-    listen_port:        int = 8080
-    listen_path:        str = "/event"
-    max_file_size:      int = 50 * 1024 * 1024
+    app_id:               str
+    app_secret:           str
+    use_long_connection:  bool = False
+    verification_token:   str = ""
+    encrypt_key:          str = ""
+    listen_port:          int = 8080
+    listen_path:          str = "/event"
+    max_file_size:        int = 50 * 1024 * 1024
 
 l = log.get_logger()
 
@@ -65,27 +77,76 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
         self._loop = asyncio.get_running_loop()
 
-        app_id = self.config.app_id
-        app_secret = self.config.app_secret
-        verification_token = self.config.verification_token
-        encrypt_key = self.config.encrypt_key
-        port = self.config.listen_port
-        path = self.config.listen_path
-
         # Client for outgoing API calls
         self._client = (
             lark.Client.builder()
-            .app_id(app_id)
-            .app_secret(app_secret)
+            .app_id(self.config.app_id)
+            .app_secret(self.config.app_secret)
             .build()
         )
 
-        # Event dispatcher for incoming webhook events
+        # Event dispatcher shared by both receive modes
         self._handler = (
-            lark.EventDispatcherHandler.builder(verification_token, encrypt_key)
+            lark.EventDispatcherHandler.builder(
+                self.config.verification_token,
+                self.config.encrypt_key,
+            )
             .register_p2_im_message_receive_v1(self._on_message_event)
             .build()
         )
+
+        if self.config.use_long_connection:
+            await self._start_long_connection()
+        else:
+            await self._start_http_server()
+
+    # ------------------------------------------------------------------
+    # Receive — long connection (WebSocket) mode
+    # ------------------------------------------------------------------
+
+    async def _start_long_connection(self) -> None:
+        app_id = self.config.app_id
+        app_secret = self.config.app_secret
+        handler = self._handler
+        instance_id = self.instance_id
+
+        def _ws_thread() -> None:
+            # Give the ws client its own event loop so it does not conflict
+            # with the main asyncio loop that already runs the bridge.
+            import lark_oapi.ws.client as _ws_mod
+            thread_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(thread_loop)
+            _ws_mod.loop = thread_loop  # patch module-level loop reference
+
+            ws_client = lark.ws.Client(
+                app_id,
+                app_secret,
+                event_handler=handler,
+                auto_reconnect=True,
+            )
+            l.info(f"Feishu [{instance_id}] WebSocket long connection starting")
+            try:
+                ws_client.start()  # blocks until permanently disconnected
+            except Exception as e:
+                l.error(f"Feishu [{instance_id}] WebSocket error: {e}")
+
+        t = threading.Thread(
+            target=_ws_thread,
+            name=f"feishu-ws-{instance_id}",
+            daemon=True,
+        )
+        t.start()
+        l.info(f"Feishu [{self.instance_id}] WebSocket long connection thread started")
+        # Block the coroutine so the driver stays alive (mirrors HTTP mode).
+        await asyncio.Event().wait()
+
+    # ------------------------------------------------------------------
+    # Receive — HTTP webhook mode
+    # ------------------------------------------------------------------
+
+    async def _start_http_server(self) -> None:
+        port = self.config.listen_port
+        path = self.config.listen_path
 
         web_app = web.Application()
         web_app.router.add_post(path, self._handle_http)
@@ -103,10 +164,6 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             await asyncio.Event().wait()
         finally:
             await runner.cleanup()
-
-    # ------------------------------------------------------------------
-    # Receive — HTTP layer
-    # ------------------------------------------------------------------
 
     async def _handle_http(self, request: web.Request) -> web.Response:
         body = await request.read()

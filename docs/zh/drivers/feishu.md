@@ -1,10 +1,16 @@
 # 飞书 / Lark
 
-飞书驱动器通过飞书事件系统推送的 HTTP Webhook 接收消息，并通过飞书 IM v1 API 使用 [lark-oapi](https://github.com/larksuite/oapi-sdk-python) 发送消息。
+飞书驱动器支持两种接收模式，并通过飞书 IM v1 API 使用 [lark-oapi](https://github.com/larksuite/oapi-sdk-python) 发送消息。
 
 飞书（中国大陆）和 Lark（国际版）使用相同的 API，共用同一驱动器。
 
-## 准备工作
+## 接收模式
+
+### HTTP Webhook（默认）
+
+飞书将事件推送到你暴露的 HTTP 端点，驱动器会在可配置的端口上启动一个 aiohttp 服务器。
+
+**准备工作**
 
 1. 前往[飞书开放平台](https://open.feishu.cn)（或 [Lark 开发者平台](https://open.larksuite.com)）。
 2. 创建一个**自建应用**，并开启 **im:message:receive_v1** 事件订阅。
@@ -16,6 +22,19 @@
 飞书需要从公网访问你的 HTTP 端点。请使用反向代理、内网穿透工具（如 ngrok）或将服务部署在公网服务器上。
 :::
 
+### 长连接 / WebSocket
+
+驱动器向飞书服务器建立持久的出站 WebSocket 连接，无需暴露公网 HTTP 端点，适合本地或有防火墙的部署环境。
+
+**准备工作**
+
+1. 前往[飞书开放平台](https://open.feishu.cn)（或 [Lark 开发者平台](https://open.larksuite.com)）。
+2. 创建一个**自建应用**，并开启 **im:message:receive_v1** 事件订阅。
+3. 在**事件订阅**中，选择**"使用长连接接收事件"**，无需设置请求 URL。
+4. 复制 **App ID** 和 **App Secret**。
+5. 将应用机器人添加到目标群聊。
+6. 在配置中设置 `use_long_connection: true`。
+
 ## 配置项
 
 在 `config.json` 的 `feishu.<实例ID>` 下添加：
@@ -24,10 +43,13 @@
 |---|---|---|---|
 | `app_id` | 是 | — | 飞书/Lark App ID |
 | `app_secret` | 是 | — | 飞书/Lark App Secret |
-| `verification_token` | 否 | `""` | 开发者后台的事件验证 Token |
-| `encrypt_key` | 否 | `""` | 事件加密 Key（留空表示不加密） |
-| `listen_port` | 否 | `8080` | 监听传入事件的 HTTP 端口 |
-| `listen_path` | 否 | `"/event"` | 监听传入事件的 HTTP 路径 |
+| `use_long_connection` | 否 | `false` | `true` = WebSocket 长连接；`false` = HTTP Webhook |
+| `verification_token` | 否 | `""` | 事件验证 Token——仅 HTTP Webhook 模式使用 |
+| `encrypt_key` | 否 | `""` | 事件加密 Key——仅 HTTP Webhook 模式使用（留空表示不加密） |
+| `listen_port` | 否 | `8080` | 监听传入事件的 HTTP 端口——仅 HTTP Webhook 模式使用 |
+| `listen_path` | 否 | `"/event"` | 监听传入事件的 HTTP 路径——仅 HTTP Webhook 模式使用 |
+
+**HTTP Webhook 示例**
 
 ```json
 {
@@ -39,6 +61,20 @@
       "encrypt_key": "",
       "listen_port": 8080,
       "listen_path": "/event"
+    }
+  }
+}
+```
+
+**长连接示例**
+
+```json
+{
+  "feishu": {
+    "fs_main": {
+      "app_id": "cli_xxxxxxxxxxxx",
+      "app_secret": "your_app_secret",
+      "use_long_connection": true
     }
   }
 }

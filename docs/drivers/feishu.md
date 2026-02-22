@@ -1,10 +1,16 @@
 # Feishu / Lark
 
-The Feishu driver receives messages via an HTTP webhook pushed by Feishu's event system and sends via the Feishu IM v1 API using [lark-oapi](https://github.com/larksuite/oapi-sdk-python).
+The Feishu driver supports two receive modes and sends via the Feishu IM v1 API using [lark-oapi](https://github.com/larksuite/oapi-sdk-python).
 
 Feishu (China) and Lark (international) use the same API and the same driver.
 
-## Setup
+## Receive modes
+
+### HTTP webhook (default)
+
+Feishu pushes events to an HTTP endpoint you expose. The driver starts an aiohttp server on a configurable port.
+
+**Setup**
 
 1. Go to the [Feishu Open Platform](https://open.feishu.cn) (or [Lark Developer](https://open.larksuite.com)).
 2. Create a **custom app** and enable the **im:message:receive_v1** event.
@@ -16,6 +22,19 @@ Feishu (China) and Lark (international) use the same API and the same driver.
 Feishu must be able to reach your HTTP endpoint from the internet. Use a reverse proxy, tunnel (e.g. ngrok), or deploy on a public server.
 :::
 
+### Long connection / WebSocket
+
+The driver establishes a persistent outbound WebSocket connection to Feishu's servers. No public HTTP endpoint is required — useful for local or firewalled deployments.
+
+**Setup**
+
+1. Go to the [Feishu Open Platform](https://open.feishu.cn) (or [Lark Developer](https://open.larksuite.com)).
+2. Create a **custom app** and enable the **im:message:receive_v1** event.
+3. Under **Event Subscriptions**, select **"Use long connection to receive events"** instead of setting a request URL.
+4. Copy the **App ID** and **App Secret**.
+5. Add the bot to the target group chat.
+6. Set `use_long_connection: true` in your config.
+
 ## Config keys
 
 Add under `feishu.<instance_id>` in `config.json`:
@@ -24,10 +43,13 @@ Add under `feishu.<instance_id>` in `config.json`:
 |---|---|---|---|
 | `app_id` | Yes | — | Feishu/Lark App ID |
 | `app_secret` | Yes | — | Feishu/Lark App Secret |
-| `verification_token` | No | `""` | Event verification token from the developer console |
-| `encrypt_key` | No | `""` | Event encryption key (leave empty to disable) |
-| `listen_port` | No | `8080` | HTTP port to listen on for incoming events |
-| `listen_path` | No | `"/event"` | HTTP path for incoming events |
+| `use_long_connection` | No | `false` | `true` = WebSocket long connection; `false` = HTTP webhook |
+| `verification_token` | No | `""` | Event verification token — HTTP webhook mode only |
+| `encrypt_key` | No | `""` | Event encryption key — HTTP webhook mode only (leave empty to disable) |
+| `listen_port` | No | `8080` | HTTP port to listen on — HTTP webhook mode only |
+| `listen_path` | No | `"/event"` | HTTP path for incoming events — HTTP webhook mode only |
+
+**HTTP webhook example**
 
 ```json
 {
@@ -39,6 +61,20 @@ Add under `feishu.<instance_id>` in `config.json`:
       "encrypt_key": "",
       "listen_port": 8080,
       "listen_path": "/event"
+    }
+  }
+}
+```
+
+**Long connection example**
+
+```json
+{
+  "feishu": {
+    "fs_main": {
+      "app_id": "cli_xxxxxxxxxxxx",
+      "app_secret": "your_app_secret",
+      "use_long_connection": true
     }
   }
 }
