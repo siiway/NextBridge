@@ -42,6 +42,7 @@ from lark_oapi.api.im.v1 import (
     CreateMessageRequest, CreateMessageRequestBody,
     CreateImageRequest, CreateImageRequestBody,
     CreateFileRequest, CreateFileRequestBody,
+    GetMessageResourceRequest,
 )
 
 import services.logger as log
@@ -248,6 +249,53 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         self._user_cache[open_id] = (name, avatar)
         return name, avatar
 
+    def _parse_post(self, content: dict) -> str:
+        """Parse Feishu 'post' (rich text) content into plain text."""
+        title = content.get("title", "")
+        lines = []
+        if title:
+            lines.append(title)
+
+        post_content = content.get("content", [])
+        for segment_list in post_content:
+            seg_text = ""
+            for seg in segment_list:
+                tag = seg.get("tag")
+                if tag == "text":
+                    seg_text += seg.get("text", "")
+                elif tag == "at":
+                    user_name = seg.get("user_name", "User")
+                    seg_text += f"@{user_name}"
+                elif tag == "a":
+                    href = seg.get("href", "")
+                    text = seg.get("text", "")
+                    seg_text += f"[{text}]({href})" if text else href
+            if seg_text:
+                lines.append(seg_text)
+
+        return "\n".join(lines).strip()
+
+    def _download_resource(self, message_id: str, file_key: str, resource_type: str) -> bytes | None:
+        """Download a message resource (image/file) from Feishu."""
+        try:
+            req = (
+                GetMessageResourceRequest.builder()
+                .message_id(message_id)
+                .file_key(file_key)
+                .type(resource_type)
+                .build()
+            )
+            resp = self._client.im.v1.message_resource.get(req)
+            if resp.success():
+                return resp.file.read()
+            l.error(
+                f"Feishu [{self.instance_id}] resource download failed: "
+                f"code={resp.code} msg={resp.msg}"
+            )
+        except Exception as e:
+            l.error(f"Feishu [{self.instance_id}] resource download error: {e}")
+        return None
+
     def _on_message_event(self, data) -> None:
         """Synchronous callback invoked by lark-oapi inside the executor thread."""
         try:
@@ -255,19 +303,41 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             msg = event.message
             sender = event.sender
 
-            if msg.message_type != "text":
-                return
-
+            mtype = msg.message_type
             content_json = json.loads(msg.content)
-            text = content_json.get("text", "").strip()
-            if not text:
-                return
+            text = ""
+            attachments = []
 
-            # Replace mentions placeholders like @_user_1 with @DisplayName
-            if hasattr(msg, "mentions") and msg.mentions:
-                for m in msg.mentions:
-                    if m.key and m.name:
-                        text = text.replace(m.key, f"@{m.name}")
+            if mtype == "text":
+                text = content_json.get("text", "").strip()
+                # Replace mentions placeholders like @_user_1 with @DisplayName
+                if hasattr(msg, "mentions") and msg.mentions:
+                    for m in msg.mentions:
+                        if m.key and m.name:
+                            text = text.replace(m.key, f"@{m.name}")
+            elif mtype == "post":
+                text = self._parse_post(content_json)
+            elif mtype == "image":
+                image_key = content_json.get("image_key")
+                if image_key:
+                    data_bytes = self._download_resource(msg.message_id, image_key, "image")
+                    if data_bytes:
+                        attachments.append(Attachment(
+                            type="image", url="", data=data_bytes, name=f"{image_key}.png"
+                        ))
+            elif mtype in ("file", "audio", "video", "sticker"):
+                file_key = content_json.get("file_key")
+                file_name = content_json.get("file_name", f"{mtype}_attachment")
+                if file_key:
+                    data_bytes = self._download_resource(msg.message_id, file_key, "file")
+                    if data_bytes:
+                        att_type = "image" if mtype == "sticker" else mtype
+                        attachments.append(Attachment(
+                            type=att_type, url="", data=data_bytes, name=file_name
+                        ))
+
+            if not text and not attachments:
+                return
 
             chat_id = msg.chat_id
             open_id = (
@@ -286,6 +356,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 user_id=open_id,
                 user_avatar=avatar,
                 text=text,
+                attachments=attachments,
             )
 
             if self._loop:
