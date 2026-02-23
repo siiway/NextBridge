@@ -85,7 +85,16 @@ class CustomFormatter(logging.Formatter):
         line = record.lineno
         message = record.getMessage()
 
-        return f"{timestamp} {colored_level} | {file}:{line} | {message}"
+        res = f"{timestamp} {colored_level} | {file}:{line} | {message}"
+        
+        if record.exc_info:
+            if not record.exc_text:
+                record.exc_text = self.formatException(record.exc_info)
+        
+        if record.exc_text:
+            res += "\n" + record.exc_text
+            
+        return res
 
 
 # 创建主 logger

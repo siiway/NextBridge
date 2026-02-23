@@ -101,7 +101,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     async def _on_message(self, message: discord.Message):
         server_id = str(message.guild.id) if message.guild else ""
         channel_id = str(message.channel.id)
-        text = message.content
+        # Use clean_content to get mentions as @Name instead of <@id>
+        text = message.clean_content
 
         attachments: list[Attachment] = []
         for att in message.attachments:
@@ -127,6 +128,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             else ""
         )
 
+        mentions = []
+        for u in message.mentions:
+            mentions.append({"id": str(u.id), "name": u.display_name})
+
         msg = NormalizedMessage(
             platform="discord",
             instance_id=self.instance_id,
@@ -138,6 +143,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             attachments=attachments,
             message_id=str(message.id),
             reply_parent=str(message.reference.message_id) if message.reference else None,
+            mentions=mentions,
         )
         await self.bridge.on_message(msg)
 
@@ -260,6 +266,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             t, c = rich_header.get("title", ""), rich_header.get("content", "")
             prefix = f"**{t}**" + (f" · *{c}*" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
+
+        # Handle mentions: replace @Name with <@id>
+        mentions = kwargs.get("mentions", [])
+        for m in mentions:
+            text = text.replace(f"@{m['name']}", f"<@{m['id']}>")
 
         if is_webhook_send:
             return await self._send_webhook(text, attachments, **kwargs)

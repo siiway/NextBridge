@@ -85,11 +85,97 @@ class Bridge:
         self._senders[instance_id] = send_func
         l.debug(f"Registered sender for instance: {instance_id}")
 
+    async def _handle_bind_command(self, msg: NormalizedMessage):
+        """Generate a 6-digit binding code for the user."""
+        import random
+        code = f"{random.randint(100000, 999999)}"
+        msg_db.create_binding_code(code, msg.instance_id, msg.user_id)
+        
+        sender = self._senders.get(msg.instance_id)
+        if sender:
+            try:
+                await sender(msg.channel, f"Your binding code is: `{code}` (valid for 5 mins). Type `/confirm {code}` on the other platform to link accounts.")
+            except Exception as e:
+                l.error(f"Failed to send bind code back: {e}")
+
+    async def _handle_confirm_command(self, msg: NormalizedMessage):
+        """Confirm a binding code from another platform."""
+        parts = msg.text.split()
+        if len(parts) < 2:
+            sender = self._senders.get(msg.instance_id)
+            if sender:
+                await sender(msg.channel, "Usage: `/confirm <code>`")
+            return
+            
+        code = parts[1]
+        success = msg_db.consume_binding_code(code, msg.instance_id, msg.user_id)
+        
+        sender = self._senders.get(msg.instance_id)
+        if sender:
+            if success:
+                await sender(msg.channel, "✅ Account successfully linked! Mentions will now target you correctly across platforms.")
+            else:
+                await sender(msg.channel, "❌ Invalid or expired binding code.")
+
+    async def _handle_rm_command(self, msg: NormalizedMessage):
+        """Remove account bindings for the user."""
+        parts = msg.text.split()
+        target_inst = parts[1] if len(parts) > 1 else None
+        
+        success = msg_db.remove_user_binding(msg.instance_id, msg.user_id, target_inst)
+        sender = self._senders.get(msg.instance_id)
+        if sender:
+            if success:
+                if target_inst:
+                    await sender(msg.channel, f"🗑️ The binding for `{target_inst}` has been removed.")
+                else:
+                    await sender(msg.channel, "🗑️ All your account bindings have been removed.")
+            else:
+                if target_inst:
+                    await sender(msg.channel, f"❓ No binding found for `{target_inst}` in your account group.")
+                else:
+                    await sender(msg.channel, "❓ You don't have any active account bindings.")
+
+    async def _handle_list_command(self, msg: NormalizedMessage):
+        """List all accounts linked to the user's global identity."""
+        bindings = msg_db.get_all_bindings(msg.instance_id, msg.user_id)
+        sender = self._senders.get(msg.instance_id)
+        if sender:
+            if not bindings:
+                await sender(msg.channel, "❓ You don't have any active account bindings.")
+                return
+            
+            lines = ["🔗 **Linked Accounts:**"]
+            for inst, uid in bindings:
+                name = msg_db.get_user_name(inst, uid) or "Unknown"
+                current = " (Current)" if inst == msg.instance_id and uid == msg.user_id else ""
+                lines.append(f"- `{inst}`: {name} (`{uid}`){current}")
+            
+            await sender(msg.channel, "\n".join(lines))
+
     # ------------------------------------------------------------------
     # Message routing
     # ------------------------------------------------------------------
 
     async def on_message(self, msg: NormalizedMessage):
+        # Handle internal commands
+        if msg.text.startswith("/bind"):
+            await self._handle_bind_command(msg)
+            return
+        if msg.text.startswith("/confirm"):
+            await self._handle_confirm_command(msg)
+            return
+        if msg.text.startswith("/rm"):
+            await self._handle_rm_command(msg)
+            return
+        if msg.text.startswith("/list"):
+            await self._handle_list_command(msg)
+            return
+
+        # Save sender's user mapping
+        if msg.user_id:
+            msg_db.save_user(msg.instance_id, msg.user_id, msg.user)
+
         # Generate or resolve bridge_id for the incoming message
         bridge_id = str(uuid.uuid4())
         if msg.message_id:
@@ -191,6 +277,20 @@ class Bridge:
                 if target_reply_id:
                     extra["reply_to_id"] = target_reply_id
 
+            # Resolve target mentions
+            target_mentions = []
+            for m in msg.mentions:
+                # 1. Try explicit binding first
+                target_uid = msg_db.get_bound_user_id(msg.instance_id, m["id"], target_id)
+                # 2. Fall back to display name match
+                if not target_uid:
+                    target_uid = msg_db.get_user_id_by_name(target_id, m["name"])
+                
+                if target_uid:
+                    target_mentions.append({"id": target_uid, "name": m["name"]})
+            if target_mentions:
+                extra["mentions"] = target_mentions
+
             try:
                 new_msg_id = await sender(target_channel, formatted, attachments=msg.attachments, **extra)
                 if new_msg_id:
@@ -232,6 +332,20 @@ class Bridge:
                 target_reply_id = msg_db.get_platform_msg_id(reply_bridge_id, target_id, str(target_channel))
                 if target_reply_id:
                     extra["reply_to_id"] = target_reply_id
+
+            # Resolve target mentions
+            target_mentions = []
+            for m in msg.mentions:
+                # 1. Try explicit binding first
+                target_uid = msg_db.get_bound_user_id(msg.instance_id, m["id"], target_id)
+                # 2. Fall back to display name match
+                if not target_uid:
+                    target_uid = msg_db.get_user_id_by_name(target_id, m["name"])
+                
+                if target_uid:
+                    target_mentions.append({"id": target_uid, "name": m["name"]})
+            if target_mentions:
+                extra["mentions"] = target_mentions
 
             try:
                 new_msg_id = await sender(target_channel, formatted, attachments=msg.attachments, **extra)

@@ -15,13 +15,15 @@ hero:
 
 features:
   - title: Multi-platform
-    details: Supports QQ (via NapCat), Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack, Google Chat, Mattermost, VoceChat and Rocket.Chat out of the box. New platforms can be added as drivers.
+    details: Supports QQ (via NapCat), Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack, Google Chat, Mattermost, VoceChat and Rocket.Chat out of the box. [View support status](/platform-support).
   - title: Config-driven routing
     details: Define which channels talk to each other using a simple rules file — no code needed. Use "connect" rules to link groups, or "forward" rules for fine-grained control.
   - title: Media bridging
     details: Images, videos, voice messages, and files are automatically downloaded and re-uploaded to the target platform. Configurable per-instance size limits.
   - title: Per-channel message formatting
     details: Customize the message format for each target platform independently. Discord webhooks get native username and avatar; QQ and Telegram get clean text prefixes.
+  - title: User Commands
+    details: Users can bind their accounts across platforms with `/bind` and `/confirm` to ensure perfect cross-platform mentions and notifications. Link multiple identities into a single global ID.
   - title: JSON, YAML, and TOML config
     details: Write your config in whichever format you prefer. Convert between formats at any time with the built-in convert command.
 ---

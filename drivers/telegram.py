@@ -28,6 +28,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -95,6 +96,26 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
         # Media messages use caption instead of text
         text = msg.text or msg.caption or ""
+
+        mentions = []
+        entities = msg.entities or msg.caption_entities or []
+        for ent in entities:
+            if ent.type == "mention":
+                # @username mention
+                # Extract username from text
+                offset = ent.offset
+                length = ent.length
+                username = text[offset:offset+length] # includes @
+                # We don't have ID for @username mentions easily unless we resolve it
+                # But we can store it as name=username
+                mentions.append({"id": username, "name": username[1:]})
+            elif ent.type == "text_mention":
+                # Text link to user
+                user = ent.user
+                if user:
+                    uid = str(user.id)
+                    name = user.full_name or user.username or uid
+                    mentions.append({"id": uid, "name": name})
 
         chat_id = str(msg.chat_id)
         from_user = msg.from_user
@@ -165,6 +186,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             attachments=attachments,
             message_id=str(msg.message_id),
             reply_parent=str(msg.reply_to_message.message_id) if msg.reply_to_message else None,
+            mentions=mentions,
         )
         await self.bridge.on_message(normalized)
 
@@ -235,6 +257,21 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 body = html.escape(text) if text else ""
                 text = f"{header}\n{body}" if body else header
                 parse_mode = "HTML"
+
+        # Handle mentions
+        mentions = kwargs.get("mentions", [])
+        if mentions:
+            # If parse_mode is not yet HTML, we need to escape existing text and switch to HTML
+            if parse_mode != "HTML":
+                text = html.escape(text)
+                parse_mode = "HTML"
+            
+            for m in mentions:
+                # Telegram mention: <a href="tg://user?id=123456">Name</a>
+                # Assuming m['id'] is numeric ID. If it's @username, we just keep @username
+                if m['id'].isdigit():
+                    link = f'<a href="tg://user?id={m["id"]}">{html.escape(m["name"])}</a>'
+                    text = text.replace(f"@{html.escape(m['name'])}", link)
 
         try:
             for att in (attachments or []):

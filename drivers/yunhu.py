@@ -17,6 +17,7 @@
 #   chat_type – "group" or "user" (default "group")
 
 import asyncio
+import re
 from urllib.parse import quote, urlparse
 
 import aiohttp
@@ -26,6 +27,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -171,7 +173,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             if event_type in ("message.receive.normal", "message.receive.instruction"):
                 await self._on_message(event)
         except Exception as e:
-            l.error(f"Yunhu [{self.instance_id}] webhook handler error: {e}")
+            l.error(f"Yunhu [{self.instance_id}] webhook handler error: {e} Traceback: {e.__traceback__}")
 
         # Yunhu expects a 200 with code=0 to acknowledge receipt
         return web.json_response({"code": 0})

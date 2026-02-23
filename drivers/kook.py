@@ -15,6 +15,7 @@
 #   channel_id – KOOK text channel ID
 
 import io
+import re
 
 import khl
 
@@ -22,6 +23,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -75,6 +77,22 @@ class KookDriver(BaseDriver[KookConfig]):
         if not text.strip():
             return
 
+        mentions = []
+        # Parse (met)userId(met) or (met)all(met)
+        # We ignore (met)all(met) for now as it doesn't map to a single user
+        met_matches = re.finditer(r'\(met\)(\d+)\(met\)', text)
+        for match in met_matches:
+            uid = match.group(1)
+            # Try to get display name from cache/DB if we've seen them before
+            name = msg_db.get_user_name(self.instance_id, uid)
+            if not name:
+                # If unknown, we can't easily fetch it without an extra API call
+                # Fallback to ID or generic placeholder
+                name = uid
+            
+            text = text.replace(match.group(0), f"@{name}")
+            mentions.append({"id": uid, "name": name})
+
         normalized = NormalizedMessage(
             platform="kook",
             instance_id=self.instance_id,
@@ -84,6 +102,7 @@ class KookDriver(BaseDriver[KookConfig]):
             user_avatar=avatar,
             text=text,
             attachments=[],
+            mentions=mentions,
         )
         await self.bridge.on_message(normalized)
 
@@ -113,6 +132,13 @@ class KookDriver(BaseDriver[KookConfig]):
             # KOOK uses KMarkdown — same bold/italic syntax as Discord Markdown
             prefix = f"**{t}**" + (f" · *{c}*" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
+
+        has_mention = False
+        mentions = kwargs.get("mentions", [])
+        for m in mentions:
+            if f"@{m['name']}" in text:
+                text = text.replace(f"@{m['name']}", f"(met){m['id']}(met)")
+                has_mention = True
 
         max_size: int = self.config.max_file_size
         has_image = False
@@ -153,8 +179,8 @@ class KookDriver(BaseDriver[KookConfig]):
             return
 
         # Use KMD type when the message contains KMarkdown image syntax or
-        # the rich header uses bold/italic; TEXT otherwise.
-        msg_type = khl.MessageTypes.KMD if (has_image or rich_header) else khl.MessageTypes.TEXT
+        # the rich header uses bold/italic or has mentions; TEXT otherwise.
+        msg_type = khl.MessageTypes.KMD if (has_image or rich_header or has_mention) else khl.MessageTypes.TEXT
 
         try:
             ch = await self._bot.client.fetch_public_channel(channel_id)

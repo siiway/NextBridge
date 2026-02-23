@@ -31,6 +31,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -110,6 +111,31 @@ class SignalDriver(BaseDriver[SignalConfig]):
         text = dm.get("message") or ""
         raw_attachments: list[dict] = dm.get("attachments", [])
 
+        # Process mentions
+        mentions = []
+        raw_mentions = dm.get("mentions", [])
+        # Sort by start index descending to replace text without invalidating other indices
+        raw_mentions.sort(key=lambda m: m.get("start", 0), reverse=True)
+        
+        for m in raw_mentions:
+            uuid = m.get("uuid")
+            number = m.get("number")
+            name = m.get("name")
+            start = m.get("start", 0)
+            length = m.get("length", 0)
+            
+            uid = uuid or number
+            display_name = name or number or "Unknown"
+            
+            if uid:
+                mentions.append({"id": uid, "name": display_name})
+                
+            # Replace text range with @Name
+            # Signal sometimes uses \uFFFC placeholder, sometimes actual text.
+            # We'll replace whatever is there with @Name for bridge readability.
+            if 0 <= start < len(text) and length > 0:
+                text = text[:start] + f"@{display_name}" + text[start+length:]
+
         if not text.strip() and not raw_attachments:
             return
 
@@ -121,7 +147,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             channel = {"recipient": envelope.get("source", "")}
 
         sender     = envelope.get("sourceName") or envelope.get("source", "")
-        sender_id  = envelope.get("source", "")
+        sender_id  = envelope.get("sourceUuid") or envelope.get("source", "")
 
         # Download attachments eagerly so downstream platforms can re-upload them
         attachments: list[Attachment] = []
@@ -157,6 +183,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             user_avatar="",
             text=text,
             attachments=attachments,
+            mentions=mentions,
         )
         await self.bridge.on_message(normalized)
 
@@ -199,6 +226,38 @@ class SignalDriver(BaseDriver[SignalConfig]):
             "number":     number,
             "recipients": [recipient],
         }
+
+        # Handle outgoing mentions
+        mentions = kwargs.get("mentions", [])
+        signal_mentions = []
+        for m in mentions:
+            # Find all occurrences of @Name
+            # Note: This is simple substring matching. It might match substrings in other words.
+            # A regex \b@Name\b might be safer but names can contain anything.
+            # We'll stick to simple find for now.
+            start = 0
+            search = f"@{m['name']}"
+            while True:
+                idx = text.find(search, start)
+                if idx == -1:
+                    break
+                
+                # Signal requires uuid or number
+                # The bridge gives us 'id' which could be either.
+                mention_obj = {"start": idx, "length": len(search)}
+                # Heuristic: UUID is long, number starts with + or is digits
+                # Signal-cli usually handles either in 'uuid' or 'recipient' fields?
+                # Actually v2/send mentions list expects 'uuid' or 'number' key.
+                if len(m['id']) > 20: # simple UUID check
+                    mention_obj["uuid"] = m['id']
+                else:
+                    mention_obj["number"] = m['id']
+                
+                signal_mentions.append(mention_obj)
+                start = idx + len(search)
+        
+        if signal_mentions:
+            payload["mentions"] = signal_mentions
 
         b64_atts: list[str] = []
         for att in (attachments or []):

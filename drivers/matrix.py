@@ -39,6 +39,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -171,6 +172,16 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             if not text.strip():
                 return
 
+            mentions = []
+            # MSC3952: intentional mentions
+            raw_mentions = content.get("m.mentions", {})
+            if isinstance(raw_mentions, dict):
+                user_ids = raw_mentions.get("user_ids", [])
+                for uid in user_ids:
+                    # Try to get display name
+                    name, _ = await self._get_profile(uid)
+                    mentions.append({"id": uid, "name": name})
+
             display_name, avatar = await self._get_profile(str(event.sender))
             await self.bridge.on_message(NormalizedMessage(
                 platform="matrix",
@@ -180,6 +191,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 user_id=str(event.sender),
                 user_avatar=avatar,
                 text=text,
+                mentions=mentions,
             ))
 
         elif isinstance(content, MediaMessageEventContent):
@@ -258,9 +270,30 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
 
         max_size: int = self.config.max_file_size
 
+        mentions = kwargs.get("mentions", [])
+        html_text = text
+        is_html = False
+
+        if mentions:
+            import html
+            # Escape the base text first so we don't double-escape the mention tags later
+            # (Simplistic approach: if we switch to HTML, we should escape the original text)
+            html_text = html.escape(text)
+            for m in mentions:
+                mention_link = f'<a href="https://matrix.to/#/{m["id"]}">{html.escape(m["name"])}</a>'
+                # Replace @Name with link. 
+                # Note: text is already escaped, so we look for @Name
+                # But wait, we need to be careful replacing in escaped text.
+                # Let's assume @Name doesn't contain special chars for now or just replace carefully.
+                html_text = html_text.replace(f"@{html.escape(m['name'])}", mention_link)
+            is_html = True
+
         if text.strip():
             try:
-                await self._client.send_text(room_id, text)
+                if is_html:
+                    await self._client.send_text(room_id, text, html=html_text)
+                else:
+                    await self._client.send_text(room_id, text)
             except Exception as e:
                 l.error(f"Matrix [{self.instance_id}] send text failed: {e}")
 

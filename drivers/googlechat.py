@@ -41,6 +41,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -181,6 +182,21 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         user_id:      str = sender.get("name", "")
         avatar:       str = sender.get("avatarUrl", "")
 
+        mentions = []
+        if "annotations" in message:
+            for ann in message["annotations"]:
+                if ann.get("type") == "USER_MENTION":
+                    user = ann.get("userMention", {}).get("user", {})
+                    uid = user.get("name", "")  # e.g. "users/123456"
+                    uname = user.get("displayName", "")
+                    if uid:
+                        mentions.append({"id": uid, "name": uname})
+                        # Optional: replace <users/ID> in text with @Name if argumentText didn't do it?
+                        # Google Chat text usually comes as "Hello <users/123>"
+                        # We can clean it up for other platforms.
+                        if uname:
+                            text = text.replace(f"<{uid}>", f"@{uname}")
+
         max_size: int = self.config.max_file_size
         attachments: list[Attachment] = []
         for att_raw in message.get("attachments", []):
@@ -200,6 +216,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             user_avatar=avatar,
             text=text,
             attachments=attachments,
+            mentions=mentions,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return web.json_response({"text": ""})
@@ -297,6 +314,12 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             t, c = rich_header.get("title", ""), rich_header.get("content", "")
             prefix = f"*{t}*" + (f" · _{c}_" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
+
+        # Handle mentions: replace @Name with <users/ID>
+        mentions = kwargs.get("mentions", [])
+        for m in mentions:
+            # Google Chat mention format: <users/12345>
+            text = text.replace(f"@{m['name']}", f"<{m['id']}>")
 
         if text.strip():
             await self._post_message(api_url, headers, {"text": text})

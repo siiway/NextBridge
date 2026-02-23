@@ -50,6 +50,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -90,6 +91,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
     def __init__(self, instance_id: str, config: RocketChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
+        self._username_cache: dict[str, str]        = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -149,6 +151,14 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         avatar:   str = body.get("user_avatar", "")
         server:   str = self.config.server_url.rstrip("/")
 
+        mentions = []
+        raw_mentions = body.get("mentions", [])
+        for m in raw_mentions:
+            uid = m.get("_id")
+            uname = m.get("username")
+            if uid and uname:
+                mentions.append({"id": uid, "name": uname})
+
         max_size = self.config.max_file_size
         attachments: list[Attachment] = []
         for att_raw in (body.get("attachments") or []):
@@ -168,6 +178,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             user_avatar=avatar,
             text=text,
             attachments=attachments,
+            mentions=mentions,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return web.json_response({})
@@ -214,6 +225,30 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             l.warning(f"Rocket.Chat [{self.instance_id}] attachment download failed: {e}")
             return Attachment(type=att_type, url=url, name=title, size=-1, data=None)
 
+    async def _get_username(self, user_id: str, server: str) -> str:
+        if user_id in self._username_cache:
+            return self._username_cache[user_id]
+        if self._session is None or not self.config.auth_token:
+            return ""
+
+        username = ""
+        try:
+            async with self._session.get(
+                f"{server}/api/v1/users.info",
+                params={"userId": user_id},
+                headers=self._auth_headers
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    u = data.get("user", {})
+                    username = u.get("username", "")
+        except Exception:
+            pass
+        
+        if username:
+            self._username_cache[user_id] = username
+        return username
+
     # ------------------------------------------------------------------
     # Send — dispatcher
     # ------------------------------------------------------------------
@@ -232,6 +267,14 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         alias  = kwargs.get("rc_alias", "")
         av_url = kwargs.get("rc_avatar", "")
         avatar = av_url if (av_url and av_url.startswith("https://")) else ""
+        server = self.config.server_url.rstrip("/")
+
+        # Handle mentions: replace @Name with @username
+        mentions = kwargs.get("mentions", [])
+        for m in mentions:
+            username = await self._get_username(m["id"], server)
+            if username:
+                text = text.replace(f"@{m['name']}", f"@{username}")
 
         if self.config.send_method == "webhook":
             await self._send_webhook(text, attachments, alias, avatar)

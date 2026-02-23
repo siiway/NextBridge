@@ -308,6 +308,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             content_json = json.loads(msg.content)
             text = ""
             attachments = []
+            mentions = []
 
             if mtype == "text":
                 text = content_json.get("text", "").strip()
@@ -316,6 +317,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                     for m in msg.mentions:
                         if m.key and m.name:
                             text = text.replace(m.key, f"@{m.name}")
+                            mentions.append({"id": m.id, "name": m.name})
             elif mtype == "post":
                 text = self._parse_post(content_json)
             elif mtype == "image":
@@ -360,6 +362,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 attachments=attachments,
                 message_id=msg.message_id,
                 reply_parent=msg.parent_id,
+                mentions=mentions,
             )
 
             if self._loop:
@@ -390,6 +393,12 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             t, c = rich_header.get("title", ""), rich_header.get("content", "")
             prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
             text = f"{prefix}\n{text}" if text else prefix
+
+        # Handle mentions in outgoing text
+        mentions = kwargs.get("mentions", [])
+        for m in mentions:
+            # Feishu mention format: <at user_id="ou_xxxxxx"></at>
+            text = text.replace(f"@{m['name']}", f'<at user_id="{m["id"]}"></at>')
 
         if text.strip():
             mid = await self._send_feishu_msg(chat_id, "text", json.dumps({"text": text}), reply_to_id)

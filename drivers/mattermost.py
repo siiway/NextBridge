@@ -26,6 +26,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -55,6 +56,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         self._session:      aiohttp.ClientSession | None       = None
         self._bot_user_id:  str                                = ""
         self._user_cache:   dict[str, tuple[str, str]]         = {}
+        self._username_cache: dict[str, str]                   = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -160,6 +162,18 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         if post.get("type"):
             return
 
+        mentions = []
+        raw_mentions = data.get("mentions")
+        if raw_mentions:
+            try:
+                mentioned_uids = json.loads(raw_mentions)
+                for uid in mentioned_uids:
+                    # Resolve name
+                    name, _ = await self._get_user_info(uid, server)
+                    mentions.append({"id": uid, "name": name})
+            except Exception:
+                pass
+
         display_name, avatar_url = await self._get_user_info(user_id, server)
 
         max_size: int = self.config.max_file_size
@@ -181,8 +195,28 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             user_avatar=avatar_url,
             text=text,
             attachments=attachments,
+            mentions=mentions,
         )
         await self.bridge.on_message(normalized)
+
+    async def _get_username(self, user_id: str, server: str) -> str:
+        if user_id in self._username_cache:
+            return self._username_cache[user_id]
+        if self._session is None:
+            return ""
+
+        username = ""
+        try:
+            async with self._session.get(f"{server}/api/v4/users/{user_id}") as resp:
+                if resp.status == 200:
+                    u = await resp.json()
+                    username = u.get("username", "")
+        except Exception:
+            pass
+        
+        if username:
+            self._username_cache[user_id] = username
+        return username
 
     async def _get_user_info(
         self, user_id: str, server: str
@@ -286,6 +320,13 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             t, c = rich_header.get("title", ""), rich_header.get("content", "")
             prefix = f"**{t}**" + (f" · *{c}*" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
+
+        # Handle mentions: replace @Name with @username
+        mentions = kwargs.get("mentions", [])
+        for m in mentions:
+            username = await self._get_username(m["id"], server)
+            if username:
+                text = text.replace(f"@{m['name']}", f"@{username}")
 
         file_ids:    list[str] = []
         text_labels: list[str] = []

@@ -30,6 +30,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -138,13 +139,19 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         text: str = activity.get("text") or ""
         # Strip @-mention of the bot from text (Teams prepends it)
         entities = activity.get("entities") or []
+        mentions = []
         for ent in entities:
             if ent.get("type") == "mention":
-                mention_text = (ent.get("mentioned") or {}).get("id", "")
-                # Remove <at>BotName</at> patterns from text
+                mentioned = ent.get("mentioned") or {}
+                m_id = mentioned.get("id", "")
+                m_name = mentioned.get("name", "")
+                
+                # Remove <at>BotName</at> patterns from text if it's the bot
                 mention_tag = ent.get("text", "")
-                if mention_tag and mention_text.startswith("28:"):
+                if mention_tag and m_id.startswith("28:"):
                     text = text.replace(mention_tag, "").strip()
+                elif m_id and m_name:
+                    mentions.append({"id": m_id, "name": m_name})
 
         # Attachments (files shared in Teams appear as contentType file/*)
         max_size: int = self.config.max_file_size
@@ -185,6 +192,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             user_avatar="",
             text=text,
             attachments=attachments,
+            mentions=mentions,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return web.Response(status=200, text="ok")
@@ -232,12 +240,27 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         url = f"{service_url}/v3/conversations/{conversation_id}/activities"
         max_size: int = self.config.max_file_size
 
+        # Handle mentions
+        mentions = kwargs.get("mentions", [])
+        entities = []
+        for m in mentions:
+            mention_text = f"<at>{m['name']}</at>"
+            text = text.replace(f"@{m['name']}", mention_text)
+            entities.append({
+                "type": "mention",
+                "text": mention_text,
+                "mentioned": {"id": m["id"], "name": m["name"]}
+            })
+
         # Send text first
         if text.strip():
-            await self._post_activity(url, headers, {
+            activity = {
                 "type": "message",
                 "text": text,
-            })
+            }
+            if entities:
+                activity["entities"] = entities
+            await self._post_activity(url, headers, activity)
 
         # Send attachments
         for att in (attachments or []):

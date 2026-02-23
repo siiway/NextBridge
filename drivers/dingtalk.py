@@ -42,6 +42,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 _UPLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/upload"
@@ -134,6 +135,17 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         sender_nick = body.get("senderNick", "")
         sender_id = body.get("senderId", "")
 
+        mentions = []
+        at_users = body.get("atUsers", [])
+        for u in at_users:
+            uid = u.get("dingtalkId")
+            if uid:
+                # DingTalk webhook doesn't always give the display name in atUsers
+                # We might need to rely on the senderNick if it's a self-mention or lookup
+                # For now, store ID. The bridge might know the name from previous messages.
+                uname = msg_db.get_user_name(self.instance_id, uid)
+                mentions.append({"id": uid, "name": uname or uid})
+
         msg = NormalizedMessage(
             platform="dingtalk",
             instance_id=self.instance_id,
@@ -142,6 +154,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             user_id=sender_id,
             user_avatar="",
             text=text,
+            mentions=mentions,
         )
         await self.bridge.on_message(msg)
         return web.json_response({})
@@ -171,8 +184,19 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             l.error(f"DingTalk [{self.instance_id}] access token error: {e}")
             return
 
+        # Handle mentions
+        mentions = kwargs.get("mentions", [])
+        at_uids = []
+        for m in mentions:
+            text = text.replace(f"@{m['name']}", f"@{m['id']}")
+            at_uids.append(m["id"])
+
         if text.strip():
-            await self._send_org_msg(open_conv_id, token, "sampleText", {"content": text})
+            # sampleText supports "at" field
+            param = {"content": text}
+            if at_uids:
+                param["at"] = {"atUserIds": at_uids}
+            await self._send_org_msg(open_conv_id, token, "sampleText", param)
 
         max_size = self.config.max_file_size
         for att in (attachments or []):

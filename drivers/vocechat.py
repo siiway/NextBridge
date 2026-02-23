@@ -33,6 +33,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -277,6 +278,19 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             t, c = rich_header.get("title", ""), rich_header.get("content", "")
             prefix = f"**{t}**" + (f" · *{c}*" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
+
+        # Handle mentions: replace @Name with @VoceChatName
+        mentions = kwargs.get("mentions", [])
+        for m in mentions:
+            # We need the user's name on VoceChat to mention them
+            # We have their ID.
+            try:
+                # _get_user_info caches the result
+                name, _ = await self._get_user_info(int(m["id"]), server)
+                if name:
+                    text = text.replace(f"@{m['name']}", f"@{name}")
+            except Exception:
+                pass
 
         if text.strip():
             # Use markdown if rich_header was applied; plain text otherwise

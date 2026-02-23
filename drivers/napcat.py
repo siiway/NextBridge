@@ -29,6 +29,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.db import msg_db
 from drivers import BaseDriver
 
 
@@ -175,7 +176,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         nickname = sender.get("card") or sender.get("nickname") or user_id
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
-        text, attachments, reply_id = self._parse_message(event, face_as_emoji=face_as_emoji)
+        text, attachments, reply_id, mentions = self._parse_message(event, face_as_emoji=face_as_emoji)
         if not text.strip() and not attachments:
             return
 
@@ -193,13 +194,13 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             attachments=attachments,
             message_id=str(event.get("message_id", "")),
             reply_parent=reply_id,
+            mentions=mentions,
         )
         await self.bridge.on_message(msg)
 
-    @staticmethod
-    def _parse_message(event: dict, *, face_as_emoji: bool = False) -> tuple[str, list[Attachment], str | None]:
+    def _parse_message(self, event: dict, *, face_as_emoji: bool = False) -> tuple[str, list[Attachment], str | None, list[dict]]:
         """
-        Parse an OneBot 11 message event into plain text + attachments + reply_id.
+        Parse an OneBot 11 message event into plain text + attachments + reply_id + mentions.
         Always uses the structured ``message`` segment array; CQ-code strings
         in ``raw_message`` are only used as a last-resort text fallback.
         """
@@ -207,11 +208,12 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         # If NapCat sent a plain string instead of an array, treat as text only
         if isinstance(segments, str):
-            return segments, [], None
+            return segments, [], None, []
 
         text_parts: list[str] = []
         attachments: list[Attachment] = []
         reply_id: str | None = None
+        mentions: list[dict] = []
 
         for seg in segments:
             t = seg.get("type", "")
@@ -221,8 +223,17 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 text_parts.append(d.get("text", ""))
 
             elif t == "at":
-                name = d.get("name") or d.get("qq", "")
+                qq = str(d.get("qq", ""))
+                name = d.get("name")
+                if not name and qq != "all":
+                    # Try to look up name in our DB
+                    name = msg_db.get_user_name(self.instance_id, qq)
+                if not name:
+                    name = qq
+                
                 text_parts.append(f"@{name}")
+                if qq and qq != "all":
+                    mentions.append({"id": qq, "name": name})
 
             elif t == "image":
                 url = d.get("url") or d.get("file", "")
@@ -334,7 +345,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         if not text and not attachments:
             text = event.get("raw_message", "")
 
-        return text, attachments, reply_id
+        return text, attachments, reply_id, mentions
 
     # ------------------------------------------------------------------
     # Action helpers
@@ -465,9 +476,35 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
             text = f"{prefix}\n{text}" if text else prefix
 
-        if text:
-            segments.append({"type": "text", "data": {"text": text}})
+        # Process mentions: replace @Name with at segments
+        mentions = kwargs.get("mentions", [])
+        # We process text by splitting it at @mentions to insert segments properly
+        if mentions and text:
+            # Simple approach: if name is in text, replace and split
+            # A more robust way is to build segments array carefully
+            # For now, let's stick to the segments array logic
+            pass
 
+        if text:
+            # We'll build segments by parsing the text for mentions
+            last_idx = 0
+            # Sort mentions by their position in text to process linearly
+            # (In this bridge, we assume name matches exactly @name)
+            for m in mentions:
+                mention_str = f"@{m['name']}"
+                idx = text.find(mention_str, last_idx)
+                if idx != -1:
+                    # Add preceding text
+                    if idx > last_idx:
+                        segments.append({"type": "text", "data": {"text": text[last_idx:idx]}})
+                    # Add mention segment
+                    segments.append({"type": "at", "data": {"qq": m["id"]}})
+                    last_idx = idx + len(mention_str)
+            
+            # Add remaining text
+            if last_idx < len(text):
+                segments.append({"type": "text", "data": {"text": text[last_idx:]}})
+        
         for att in (attachments or []):
             if not att.url and att.data is None:
                 continue

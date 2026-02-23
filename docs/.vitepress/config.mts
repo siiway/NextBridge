@@ -7,6 +7,8 @@ const enSidebar = [
       { text: 'Getting Started', link: '/getting-started' },
       { text: 'Configuration', link: '/configuration' },
       { text: 'Rules', link: '/rules' },
+      { text: 'User Commands', link: '/user-commands' },
+      { text: 'Platform Support', link: '/platform-support' },
     ],
   },
   {
@@ -40,6 +42,8 @@ const zhSidebar = [
       { text: '快速开始', link: '/zh/getting-started' },
       { text: '配置文件', link: '/zh/configuration' },
       { text: '规则配置', link: '/zh/rules' },
+      { text: '用户指令', link: '/zh/user-commands' },
+      { text: '平台支持状态', link: '/zh/platform-support' },
     ],
   },
   {
