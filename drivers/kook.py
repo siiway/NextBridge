@@ -14,6 +14,7 @@
 # Rule channel keys:
 #   channel_id – KOOK text channel ID
 
+from drivers.registry import register
 import io
 import re
 
@@ -28,13 +29,14 @@ from drivers import BaseDriver
 
 
 class KookConfig(_DriverConfig):
-    token:         str
+    token: str
     max_file_size: int = 25 * 1024 * 1024
 
-l = log.get_logger()
+
+logger = log.get_logger()
+
 
 class KookDriver(BaseDriver[KookConfig]):
-
     def __init__(self, instance_id: str, config: KookConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._bot: khl.Bot | None = None
@@ -58,7 +60,7 @@ class KookDriver(BaseDriver[KookConfig]):
         self._bot.client.register(khl.MessageTypes.TEXT, on_msg)
         self._bot.client.register(khl.MessageTypes.KMD, on_msg)
 
-        l.info(f"Kook [{self.instance_id}] starting WebSocket connection")
+        logger.info(f"Kook [{self.instance_id}] starting WebSocket connection")
         await self._bot.start()
 
     # ------------------------------------------------------------------
@@ -80,7 +82,7 @@ class KookDriver(BaseDriver[KookConfig]):
         mentions = []
         # Parse (met)userId(met) or (met)all(met)
         # We ignore (met)all(met) for now as it doesn't map to a single user
-        met_matches = re.finditer(r'\(met\)(\d+)\(met\)', text)
+        met_matches = re.finditer(r"\(met\)(\d+)\(met\)", text)
         for match in met_matches:
             uid = match.group(1)
             # Try to get display name from cache/DB if we've seen them before
@@ -89,7 +91,7 @@ class KookDriver(BaseDriver[KookConfig]):
                 # If unknown, we can't easily fetch it without an extra API call
                 # Fallback to ID or generic placeholder
                 name = uid
-            
+
             text = text.replace(match.group(0), f"@{name}")
             mentions.append({"id": uid, "name": name})
 
@@ -117,13 +119,18 @@ class KookDriver(BaseDriver[KookConfig]):
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
+        reply_to_id = kwargs.get("reply_to_id")
+
         if self._bot is None:
-            l.warning(f"Kook [{self.instance_id}] send: driver not started")
+            logger.warning(
+                f"Kook [{self.instance_id}] send: driver not started")
             return
 
         channel_id = channel.get("channel_id")
         if not channel_id:
-            l.warning(f"Kook [{self.instance_id}] send: no channel_id in channel {channel}")
+            logger.warning(
+                f"Kook [{self.instance_id}] send: no channel_id in channel {channel}"
+            )
             return
 
         rich_header = kwargs.get("rich_header")
@@ -140,31 +147,31 @@ class KookDriver(BaseDriver[KookConfig]):
                 text = text.replace(f"@{m['name']}", f"(met){m['id']}(met)")
                 has_mention = True
 
-        max_size: int = self.config.max_file_size
         has_image = False
         attachment_fragments: list[str] = []
 
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
-                attachment_fragments.append(f"\n[{att.type.capitalize()}: {label}]")
+                attachment_fragments.append(
+                    f"\n[{att.type.capitalize()}: {label}]")
                 continue
 
             data_bytes, mime = result
             fname = media.filename_for(att.name, mime)
 
             try:
-                asset_url = await self._bot.client.create_asset(
-                    io.BytesIO(data_bytes)
-                )
+                asset_url = await self._bot.client.create_asset(io.BytesIO(data_bytes))
             except Exception as e:
-                l.error(f"Kook [{self.instance_id}] asset upload failed: {e}")
+                logger.error(
+                    f"Kook [{self.instance_id}] asset upload failed: {e}")
                 label = att.name or att.url or fname
-                attachment_fragments.append(f"\n[{att.type.capitalize()}: {label}]")
+                attachment_fragments.append(
+                    f"\n[{att.type.capitalize()}: {label}]")
                 continue
 
             if att.type == "image":
@@ -180,14 +187,20 @@ class KookDriver(BaseDriver[KookConfig]):
 
         # Use KMD type when the message contains KMarkdown image syntax or
         # the rich header uses bold/italic or has mentions; TEXT otherwise.
-        msg_type = khl.MessageTypes.KMD if (has_image or rich_header or has_mention) else khl.MessageTypes.TEXT
+        msg_type = (
+            khl.MessageTypes.KMD
+            if (has_image or rich_header or has_mention)
+            else khl.MessageTypes.TEXT
+        )
 
         try:
             ch = await self._bot.client.fetch_public_channel(channel_id)
-            await ch.send(full_text, type=msg_type)
+            if reply_to_id:
+                await ch.send(full_text, type=msg_type, quote=reply_to_id)
+            else:
+                await ch.send(full_text, type=msg_type)
         except Exception as e:
-            l.error(f"Kook [{self.instance_id}] send failed: {e}")
+            logger.error(f"Kook [{self.instance_id}] send failed: {e}")
 
 
-from drivers.registry import register
 register("kook", KookConfig, KookDriver)

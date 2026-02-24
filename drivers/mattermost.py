@@ -17,6 +17,7 @@
 # Rule channel keys:
 #   channel_id – Mattermost channel ID
 
+from drivers.registry import register
 import asyncio
 import json
 
@@ -26,17 +27,16 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.db import msg_db
 from drivers import BaseDriver
 
 
 class MattermostConfig(_DriverConfig):
-    server_url:    str
-    token:         str
+    server_url: str
+    token: str
     max_file_size: int = 50 * 1024 * 1024
 
 
-l = log.get_logger()
+logger = log.get_logger()
 
 
 def _mime_to_att_type(mime: str) -> str:
@@ -50,13 +50,12 @@ def _mime_to_att_type(mime: str) -> str:
 
 
 class MattermostDriver(BaseDriver[MattermostConfig]):
-
     def __init__(self, instance_id: str, config: MattermostConfig, bridge):
         super().__init__(instance_id, config, bridge)
-        self._session:      aiohttp.ClientSession | None       = None
-        self._bot_user_id:  str                                = ""
-        self._user_cache:   dict[str, tuple[str, str]]         = {}
-        self._username_cache: dict[str, str]                   = {}
+        self._session: aiohttp.ClientSession | None = None
+        self._bot_user_id: str = ""
+        self._user_cache: dict[str, tuple[str, str]] = {}
+        self._username_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -64,7 +63,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
 
     async def start(self):
         server = self.config.server_url.rstrip("/")
-        token  = self.config.token
+        token = self.config.token
 
         self._session = aiohttp.ClientSession(
             headers={"Authorization": f"Bearer {token}"}
@@ -76,45 +75,45 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                 if resp.status == 200:
                     me = await resp.json()
                     self._bot_user_id = me.get("id", "")
-                    l.info(
+                    logger.info(
                         f"Mattermost [{self.instance_id}] logged in as "
                         f"{me.get('username', '?')} ({self._bot_user_id})"
                     )
                 else:
-                    l.error(
+                    logger.error(
                         f"Mattermost [{self.instance_id}] /users/me failed "
                         f"HTTP {resp.status}"
                     )
         except Exception as e:
-            l.error(f"Mattermost [{self.instance_id}] /users/me error: {e}")
+            logger.error(
+                f"Mattermost [{self.instance_id}] /users/me error: {e}")
 
         self.bridge.register_sender(self.instance_id, self.send)
 
         ws_url = (
-            server
-            .replace("https://", "wss://")
-            .replace("http://",  "ws://")
+            server.replace("https://", "wss://").replace("http://", "ws://")
         ) + "/api/v4/websocket"
-        l.info(f"Mattermost [{self.instance_id}] connecting to {ws_url}")
+        logger.info(f"Mattermost [{self.instance_id}] connecting to {ws_url}")
 
         try:
             while True:
                 try:
                     async with self._session.ws_connect(ws_url) as ws:
-                        await ws.send_json({
-                            "seq":    1,
-                            "action": "authentication_challenge",
-                            "data":   {"token": token},
-                        })
-                        l.info(f"Mattermost [{self.instance_id}] connected")
+                        await ws.send_json(
+                            {
+                                "seq": 1,
+                                "action": "authentication_challenge",
+                                "data": {"token": token},
+                            }
+                        )
+                        logger.info(
+                            f"Mattermost [{self.instance_id}] connected")
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 try:
-                                    await self._on_event(
-                                        json.loads(msg.data), server
-                                    )
+                                    await self._on_event(json.loads(msg.data), server)
                                 except Exception as e:
-                                    l.error(
+                                    logger.error(
                                         f"Mattermost [{self.instance_id}] "
                                         f"handler error: {e}"
                                     )
@@ -125,11 +124,12 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                             ):
                                 break
                 except aiohttp.ClientError as e:
-                    l.error(
+                    logger.error(
                         f"Mattermost [{self.instance_id}] connection error: {e}"
                     )
 
-                l.info(f"Mattermost [{self.instance_id}] reconnecting in 5 s…")
+                logger.info(
+                    f"Mattermost [{self.instance_id}] reconnecting in 5 s…")
                 await asyncio.sleep(5)
         finally:
             await self._session.close()
@@ -149,10 +149,10 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         except Exception:
             return
 
-        user_id    = post.get("user_id", "")
+        user_id = post.get("user_id", "")
         channel_id = post.get("channel_id", "")
-        text       = post.get("message", "")
-        file_ids   = post.get("file_ids") or []
+        text = post.get("message", "")
+        file_ids = post.get("file_ids") or []
 
         if not channel_id or not user_id:
             return
@@ -176,10 +176,9 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
 
         display_name, avatar_url = await self._get_user_info(user_id, server)
 
-        max_size: int = self.config.max_file_size
         attachments: list[Attachment] = []
         for file_id in file_ids:
-            att = await self._download_file(file_id, server, max_size)
+            att = await self._download_file(file_id, server, self.config.max_file_size)
             if att is not None:
                 attachments.append(att)
 
@@ -213,14 +212,12 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                     username = u.get("username", "")
         except Exception:
             pass
-        
+
         if username:
             self._username_cache[user_id] = username
         return username
 
-    async def _get_user_info(
-        self, user_id: str, server: str
-    ) -> tuple[str, str]:
+    async def _get_user_info(self, user_id: str, server: str) -> tuple[str, str]:
         if user_id in self._user_cache:
             return self._user_cache[user_id]
         if self._session is None:
@@ -228,19 +225,14 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
 
         name, avatar = user_id, ""
         try:
-            async with self._session.get(
-                f"{server}/api/v4/users/{user_id}"
-            ) as resp:
+            async with self._session.get(f"{server}/api/v4/users/{user_id}") as resp:
                 if resp.status == 200:
                     u = await resp.json()
                     full = (
                         f"{u.get('first_name', '')} {u.get('last_name', '')}"
                     ).strip()
-                    name = (
-                        u.get("nickname")
-                        or full
-                        or u.get("username", user_id)
-                    )
+                    name = u.get("nickname") or full or u.get(
+                        "username", user_id)
                     avatar = f"{server}/api/v4/users/{user_id}/image"
         except Exception:
             pass
@@ -261,7 +253,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             ) as resp:
                 if resp.status == 200:
                     info = await resp.json()
-                    ct   = info.get("mime_type", ct)
+                    ct = info.get("mime_type", ct)
                     name = info.get("name", name)
                     size = info.get("size", -1)
         except Exception:
@@ -272,9 +264,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
 
         att_type = _mime_to_att_type(ct)
         try:
-            async with self._session.get(
-                f"{server}/api/v4/files/{file_id}"
-            ) as resp:
+            async with self._session.get(f"{server}/api/v4/files/{file_id}") as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.read()
@@ -284,7 +274,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                     type=att_type, url="", name=name, size=len(data), data=data
                 )
         except Exception as e:
-            l.warning(
+            logger.warning(
                 f"Mattermost [{self.instance_id}] file {file_id} download failed: {e}"
             )
             return None
@@ -295,25 +285,27 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
 
     async def send(
         self,
-        channel:     dict,
-        text:        str,
+        channel: dict,
+        text: str,
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
+        reply_to_id = kwargs.get("reply_to_id")
+
         if self._session is None:
-            l.warning(f"Mattermost [{self.instance_id}] send: driver not started")
+            logger.warning(
+                f"Mattermost [{self.instance_id}] send: driver not started")
             return
 
         channel_id = channel.get("channel_id", "")
         if not channel_id:
-            l.warning(
+            logger.warning(
                 f"Mattermost [{self.instance_id}] send: "
                 f"no channel_id in channel {channel}"
             )
             return
 
         server = self.config.server_url.rstrip("/")
-        max_size: int = self.config.max_file_size
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -328,13 +320,13 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             if username:
                 text = text.replace(f"@{m['name']}", f"@{username}")
 
-        file_ids:    list[str] = []
+        file_ids: list[str] = []
         text_labels: list[str] = []
 
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
                 text_labels.append(f"[{att.type.capitalize()}: {label}]")
@@ -359,6 +351,8 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             return
 
         payload: dict = {"channel_id": channel_id, "message": full_text}
+        if reply_to_id:
+            payload["root_id"] = reply_to_id
         if file_ids:
             payload["file_ids"] = file_ids
 
@@ -368,20 +362,20 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Mattermost [{self.instance_id}] post failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            l.error(f"Mattermost [{self.instance_id}] post error: {e}")
+            logger.error(f"Mattermost [{self.instance_id}] post error: {e}")
 
     async def _upload_file(
         self,
-        server:     str,
+        server: str,
         channel_id: str,
-        data:       bytes,
-        fname:      str,
-        mime:       str,
+        data: bytes,
+        fname: str,
+        mime: str,
     ) -> str | None:
         if self._session is None:
             return None
@@ -389,12 +383,10 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         form.add_field("channel_id", channel_id)
         form.add_field("files", data, filename=fname, content_type=mime)
         try:
-            async with self._session.post(
-                f"{server}/api/v4/files", data=form
-            ) as resp:
+            async with self._session.post(f"{server}/api/v4/files", data=form) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Mattermost [{self.instance_id}] file upload failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
@@ -404,9 +396,9 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                 if infos:
                     return infos[0].get("id")
         except Exception as e:
-            l.error(f"Mattermost [{self.instance_id}] file upload error: {e}")
+            logger.error(
+                f"Mattermost [{self.instance_id}] file upload error: {e}")
         return None
 
 
-from drivers.registry import register
 register("mattermost", MattermostConfig, MattermostDriver)

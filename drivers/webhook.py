@@ -23,6 +23,7 @@
 # The "rich_header" kwarg (if present) is applied as a [Title · Content] prefix
 # to "text" and is not included as a separate field.
 
+from drivers.registry import register
 from typing import Literal
 
 import aiohttp
@@ -35,15 +36,15 @@ from drivers import BaseDriver
 
 
 class WebhookConfig(_DriverConfig):
-    url:     str
-    method:  Literal["POST", "PUT", "PATCH"] = "POST"
-    headers: dict[str, str]                  = Field(default_factory=dict)
+    url: str
+    method: Literal["POST", "PUT", "PATCH"] = "POST"
+    headers: dict[str, str] = Field(default_factory=dict)
 
-l = log.get_logger()
+
+logger = log.get_logger()
 
 
 class WebhookDriver(BaseDriver[WebhookConfig]):
-
     def __init__(self, instance_id: str, config: WebhookConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
@@ -55,7 +56,9 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
     async def start(self):
         self._session = aiohttp.ClientSession()
         self.bridge.register_sender(self.instance_id, self.send)
-        l.info(f"Webhook [{self.instance_id}] send-only, targeting {self.config.url}")
+        logger.info(
+            f"Webhook [{self.instance_id}] send-only, targeting {self.config.url}"
+        )
 
     # ------------------------------------------------------------------
     # Send
@@ -69,7 +72,9 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
         **kwargs,
     ):
         if self._session is None:
-            l.warning(f"Webhook [{self.instance_id}] session not ready, message dropped")
+            logger.warning(
+                f"Webhook [{self.instance_id}] session not ready, message dropped"
+            )
             return
 
         rich_header = kwargs.pop("rich_header", None)
@@ -98,16 +103,17 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
         headers = {"Content-Type": "application/json", **self.config.headers}
 
         try:
-            async with self._session.request(self.config.method, self.config.url, json=payload, headers=headers) as resp:
+            async with self._session.request(
+                self.config.method, self.config.url, json=payload, headers=headers
+            ) as resp:
                 if resp.status not in (200, 201, 202, 204):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Webhook [{self.instance_id}] send failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            l.error(f"Webhook [{self.instance_id}] send failed: {e}")
+            logger.error(f"Webhook [{self.instance_id}] send failed: {e}")
 
 
-from drivers.registry import register
 register("webhook", WebhookConfig, WebhookDriver)

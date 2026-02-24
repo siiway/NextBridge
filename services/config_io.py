@@ -5,6 +5,7 @@ Format is always inferred from the file extension:
   .yaml / .yml → YAML  (requires pyyaml)
   .toml        → TOML  (read: stdlib tomllib; write: tomli-w)
 """
+
 from __future__ import annotations
 
 import json
@@ -32,6 +33,7 @@ def load_config(path: Path) -> dict[str, Any]:
     ext = path.suffix.lower()
     if ext in _YAML_EXTS:
         import yaml  # pyyaml
+
         with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     if ext in _TOML_EXTS:
@@ -48,11 +50,15 @@ def save_config(data: dict[str, Any], path: Path) -> None:
     ext = path.suffix.lower()
     if ext in _YAML_EXTS:
         import yaml  # pyyaml
+
         with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            yaml.dump(
+                data, f, allow_unicode=True, sort_keys=False, default_flow_style=False
+            )
         return
     if ext in _TOML_EXTS:
         import tomli_w
+
         with open(path, "wb") as f:
             tomli_w.dump(data, f)
         return

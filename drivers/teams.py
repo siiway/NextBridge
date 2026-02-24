@@ -19,6 +19,7 @@
 #                     (e.g. "https://smba.trafficmanager.net/amer/")
 #   conversation_id – Value of activity.conversation.id
 
+from drivers.registry import register
 import asyncio
 import json
 import time
@@ -30,28 +31,24 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.db import msg_db
 from drivers import BaseDriver
 
 
 class TeamsConfig(_DriverConfig):
-    app_id:        str
-    app_secret:    str
-    listen_port:   int = 3978
-    listen_path:   str = "/api/messages"
+    app_id: str
+    app_secret: str
+    listen_port: int = 3978
+    listen_path: str = "/api/messages"
     max_file_size: int = 20 * 1024 * 1024
 
 
-l = log.get_logger()
+logger = log.get_logger()
 
-_TOKEN_URL = (
-    "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
-)
+_TOKEN_URL = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
 _SCOPE = "https://api.botframework.com/.default"
 
 
 class TeamsDriver(BaseDriver[TeamsConfig]):
-
     def __init__(self, instance_id: str, config: TeamsConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
@@ -72,7 +69,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", self.config.listen_port)
         await site.start()
-        l.info(
+        logger.info(
             f"Teams [{self.instance_id}] listening on "
             f"0.0.0.0:{self.config.listen_port}{self.config.listen_path}"
         )
@@ -93,16 +90,16 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         if self._session is None:
             return ""
         data = {
-            "grant_type":    "client_credentials",
-            "client_id":     self.config.app_id,
+            "grant_type": "client_credentials",
+            "client_id": self.config.app_id,
             "client_secret": self.config.app_secret,
-            "scope":         _SCOPE,
+            "scope": _SCOPE,
         }
         try:
             async with self._session.post(_TOKEN_URL, data=data) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Teams [{self.instance_id}] token fetch failed "
                         f"HTTP {resp.status}: {body}"
                     )
@@ -112,7 +109,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
                 self._token_expires = time.time() + js.get("expires_in", 3600)
                 return self._access_token
         except Exception as e:
-            l.error(f"Teams [{self.instance_id}] token fetch error: {e}")
+            logger.error(f"Teams [{self.instance_id}] token fetch error: {e}")
             return ""
 
     # ------------------------------------------------------------------
@@ -145,7 +142,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
                 mentioned = ent.get("mentioned") or {}
                 m_id = mentioned.get("id", "")
                 m_name = mentioned.get("name", "")
-                
+
                 # Remove <at>BotName</at> patterns from text if it's the bot
                 mention_tag = ent.get("text", "")
                 if mention_tag and m_id.startswith("28:"):
@@ -154,13 +151,15 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
                     mentions.append({"id": m_id, "name": m_name})
 
         # Attachments (files shared in Teams appear as contentType file/*)
-        max_size: int = self.config.max_file_size
+
         attachments: list[Attachment] = []
-        for att_raw in (activity.get("attachments") or []):
+        for att_raw in activity.get("attachments") or []:
             ct = att_raw.get("contentType", "")
-            if ct in ("application/vnd.microsoft.card.adaptive",
-                       "application/vnd.microsoft.card.thumbnail",
-                       "application/vnd.microsoft.card.hero"):
+            if ct in (
+                "application/vnd.microsoft.card.adaptive",
+                "application/vnd.microsoft.card.thumbnail",
+                "application/vnd.microsoft.card.hero",
+            ):
                 # Card attachments — skip, already reflected in text
                 continue
             url = att_raw.get("contentUrl", "")
@@ -173,7 +172,8 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             elif ct.startswith("audio/"):
                 att_type = "voice"
             attachments.append(
-                Attachment(type=att_type, url=url, name=name, size=-1, data=None)
+                Attachment(type=att_type, url=url,
+                           name=name, size=-1, data=None)
             )
 
         if not text.strip() and not attachments:
@@ -208,14 +208,17 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
+        reply_to_id = kwargs.get("reply_to_id")
+
         if self._session is None:
-            l.warning(f"Teams [{self.instance_id}] send: driver not started")
+            logger.warning(
+                f"Teams [{self.instance_id}] send: driver not started")
             return
 
-        service_url     = channel.get("service_url", "").rstrip("/")
+        service_url = channel.get("service_url", "").rstrip("/")
         conversation_id = channel.get("conversation_id", "")
         if not service_url or not conversation_id:
-            l.warning(
+            logger.warning(
                 f"Teams [{self.instance_id}] send: missing service_url or "
                 f"conversation_id in channel {channel}"
             )
@@ -223,12 +226,14 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
 
         token = await self._get_token()
         if not token:
-            l.error(f"Teams [{self.instance_id}] send: could not obtain access token")
+            logger.error(
+                f"Teams [{self.instance_id}] send: could not obtain access token"
+            )
             return
 
         headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type":  "application/json",
+            "Content-Type": "application/json",
         }
 
         rich_header = kwargs.get("rich_header")
@@ -238,7 +243,6 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             text = f"{prefix}\n{text}" if text else prefix
 
         url = f"{service_url}/v3/conversations/{conversation_id}/activities"
-        max_size: int = self.config.max_file_size
 
         # Handle mentions
         mentions = kwargs.get("mentions", [])
@@ -246,11 +250,13 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         for m in mentions:
             mention_text = f"<at>{m['name']}</at>"
             text = text.replace(f"@{m['name']}", mention_text)
-            entities.append({
-                "type": "mention",
-                "text": mention_text,
-                "mentioned": {"id": m["id"], "name": m["name"]}
-            })
+            entities.append(
+                {
+                    "type": "mention",
+                    "text": mention_text,
+                    "mentioned": {"id": m["id"], "name": m["name"]},
+                }
+            )
 
         # Send text first
         if text.strip():
@@ -258,21 +264,26 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
                 "type": "message",
                 "text": text,
             }
+            if reply_to_id:
+                activity["replyToId"] = reply_to_id
             if entities:
                 activity["entities"] = entities
             await self._post_activity(url, headers, activity)
 
         # Send attachments
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
-                await self._post_activity(url, headers, {
+                act = {
                     "type": "message",
                     "text": f"[{att.type.capitalize()}: {label}]",
-                })
+                }
+                if reply_to_id:
+                    act["replyToId"] = reply_to_id
+                await self._post_activity(url, headers, act)
                 continue
 
             data_bytes, mime = result
@@ -280,44 +291,55 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
 
             if mime.startswith("image/"):
                 import base64 as _b64
+
                 b64 = _b64.b64encode(data_bytes).decode()
                 card = {
                     "type": "AdaptiveCard",
                     "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
                     "version": "1.3",
-                    "body": [{
-                        "type": "Image",
-                        "url": f"data:{mime};base64,{b64}",
-                        "altText": fname,
-                    }],
+                    "body": [
+                        {
+                            "type": "Image",
+                            "url": f"data:{mime};base64,{b64}",
+                            "altText": fname,
+                        }
+                    ],
                 }
-                await self._post_activity(url, headers, {
+                act = {
                     "type": "message",
-                    "attachments": [{
-                        "contentType": "application/vnd.microsoft.card.adaptive",
-                        "content": card,
-                    }],
-                })
+                    "attachments": [
+                        {
+                            "contentType": "application/vnd.microsoft.card.adaptive",
+                            "content": card,
+                        }
+                    ],
+                }
+                if reply_to_id:
+                    act["replyToId"] = reply_to_id
+                await self._post_activity(url, headers, act)
             else:
                 # Non-image: post a text label (Teams files require SharePoint)
                 label = att.name or att.url or fname
-                await self._post_activity(url, headers, {
+                act = {
                     "type": "message",
                     "text": f"[{att.type.capitalize()}: {label}]",
-                })
+                }
+                if reply_to_id:
+                    act["replyToId"] = reply_to_id
+                await self._post_activity(url, headers, act)
 
     async def _post_activity(self, url: str, headers: dict, body: dict) -> None:
         try:
             async with self._session.post(url, json=body, headers=headers) as resp:
                 if resp.status not in (200, 201):
                     text = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Teams [{self.instance_id}] post activity failed "
                         f"HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            l.error(f"Teams [{self.instance_id}] post activity error: {e}")
+            logger.error(
+                f"Teams [{self.instance_id}] post activity error: {e}")
 
 
-from drivers.registry import register
 register("teams", TeamsConfig, TeamsDriver)

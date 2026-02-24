@@ -18,6 +18,7 @@
 #   max_file_size – Max bytes per attachment when sending (default 8 MB,
 #                   Discord webhook limit)
 
+from drivers.registry import register
 import io
 import json
 from pathlib import Path
@@ -37,19 +38,19 @@ from drivers import BaseDriver
 
 
 class DiscordConfig(_DriverConfig):
-    send_method:                         Literal["webhook", "bot"] = "webhook"
-    webhook_url:                         str                       = ""
-    bot_token:                           str                       = ""
-    max_file_size:                       int                       = 8 * 1024 * 1024
-    send_as_bot_when_using_cqface_emoji: CoercedBool               = False
+    send_method: Literal["webhook", "bot"] = "webhook"
+    webhook_url: str = ""
+    bot_token: str = ""
+    max_file_size: int = 8 * 1024 * 1024
+    send_as_bot_when_using_cqface_emoji: CoercedBool = False
 
-l = log.get_logger()
 
-_CQFACE_RE = re.compile(r':cqface(\d+):')
+logger = log.get_logger()
+
+_CQFACE_RE = re.compile(r":cqface(\d+):")
 
 
 class DiscordDriver(BaseDriver[DiscordConfig]):
-
     def __init__(self, instance_id: str, config: DiscordConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: discord.Client | None = None
@@ -71,7 +72,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._session = aiohttp.ClientSession()
 
         if not self._bot_token:
-            l.warning(
+            logger.warning(
                 f"Discord [{self.instance_id}] no bot_token configured — "
                 "receive disabled, send-only via webhook"
             )
@@ -83,7 +84,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         @self._client.event
         async def on_ready():
-            l.info(f"Discord [{self.instance_id}] logged in as {self._client.user}")
+            logger.info(
+                f"Discord [{self.instance_id}] logged in as {self._client.user}"
+            )
 
         @self._client.event
         async def on_message(message: discord.Message):
@@ -142,7 +145,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             text=text,
             attachments=attachments,
             message_id=str(message.id),
-            reply_parent=str(message.reference.message_id) if message.reference else None,
+            reply_parent=str(message.reference.message_id)
+            if message.reference
+            else None,
             mentions=mentions,
         )
         await self.bridge.on_message(msg)
@@ -164,13 +169,15 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._emoji_db = {}
         try:
             raw = json.loads(
-                (Path(get_data_path()) / "discord_emojis.json").read_text(encoding="utf-8")
+                (Path(get_data_path()) / "discord_emojis.json").read_text(
+                    encoding="utf-8"
+                )
             )
             if isinstance(raw, dict) and "items" in raw:
                 # Discord API export format
                 for item in raw["items"]:
                     name = item.get("name", "")
-                    eid  = item.get("id", "")
+                    eid = item.get("id", "")
                     if name and eid:
                         self._emoji_db[name] = eid
             elif isinstance(raw, dict):
@@ -180,13 +187,15 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                         self._emoji_db[f"cqface{face_id}"] = entry
                     elif isinstance(entry, dict):
                         name = entry.get("name", f"cqface{face_id}")
-                        eid  = entry.get("id", "")
+                        eid = entry.get("id", "")
                         if eid:
                             self._emoji_db[name] = eid
         except FileNotFoundError:
             pass
         except Exception as exc:
-            l.warning(f"Discord [{self.instance_id}] failed to read emoji DB: {exc}")
+            logger.warning(
+                f"Discord [{self.instance_id}] failed to read emoji DB: {exc}"
+            )
 
         return self._emoji_db
 
@@ -238,7 +247,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
-        has_cqface = bool(re.search(r':cqface\d+:', text))
+        has_cqface = bool(re.search(r":cqface\d+:", text))
         force_bot = (
             has_cqface
             and self.config.send_as_bot_when_using_cqface_emoji
@@ -247,9 +256,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         # Resolve the send path first so we know which format override to apply
         is_webhook_send = (
-            self._send_method == "webhook"
-            and self._webhook_url
-            and not force_bot
+            self._send_method == "webhook" and self._webhook_url and not force_bot
         )
 
         # Apply send-path-specific msg_format override if provided
@@ -277,7 +284,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         elif self._client is not None:
             return await self._send_bot(channel, text, attachments, **kwargs)
         else:
-            l.warning(f"Discord [{self.instance_id}] no send method available")
+            logger.warning(f"Discord [{self.instance_id}] no send method available")
             return None
 
     async def _send_webhook(
@@ -289,8 +296,6 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         if self._session is None or self._webhook_url is None:
             return None
 
-        max_size: int = self.config.max_file_size
-
         payload: dict = {"content": text}
         if title := kwargs.get("webhook_title"):
             payload["username"] = title
@@ -299,10 +304,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         # Download each attachment; collect as (bytes, mime, filename) triples
         files: list[tuple[bytes, str, str]] = []
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
@@ -313,7 +318,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 ref = f"({att.url})" if att.url else ""
                 payload["content"] += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
-        url = self._webhook_url + ("&" if "?" in self._webhook_url else "?") + "wait=true"
+        url = (
+            self._webhook_url + ("&" if "?" in self._webhook_url else "?") + "wait=true"
+        )
 
         try:
             if files:
@@ -330,16 +337,20 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                         data = await resp.json()
                         return str(data.get("id", ""))
                     body = await resp.text()
-                    l.error(f"Discord [{self.instance_id}] webhook error {resp.status}: {body}")
+                    logger.error(
+                        f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
+                    )
             else:
                 async with self._session.post(url, json=payload) as resp:
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
                         return str(data.get("id", ""))
                     body = await resp.text()
-                    l.error(f"Discord [{self.instance_id}] webhook error {resp.status}: {body}")
+                    logger.error(
+                        f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
+                    )
         except Exception as e:
-            l.error(f"Discord [{self.instance_id}] webhook exception: {e}")
+            logger.error(f"Discord [{self.instance_id}] webhook exception: {e}")
         return None
 
     async def _send_bot(
@@ -353,24 +364,26 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return None
         channel_id = channel.get("channel_id")
         if not channel_id:
-            l.warning(f"Discord [{self.instance_id}] send_bot: no channel_id")
+            logger.warning(f"Discord [{self.instance_id}] send_bot: no channel_id")
             return None
         ch = self._client.get_channel(int(channel_id))
         if ch is None:
-            l.warning(f"Discord [{self.instance_id}] channel {channel_id} not in cache")
+            logger.warning(
+                f"Discord [{self.instance_id}] channel {channel_id} not in cache"
+            )
             return None
 
-        max_size: int = self.config.max_file_size
-
         discord_files: list[discord.File] = []
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
-                discord_files.append(discord.File(io.BytesIO(data_bytes), filename=fname))
+                discord_files.append(
+                    discord.File(io.BytesIO(data_bytes), filename=fname)
+                )
             else:
                 label = att.name or att.url
                 ref = f"({att.url})" if att.url else ""
@@ -382,8 +395,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             try:
                 # We need a partial message for reference
                 reference = discord.MessageReference(
-                    message_id=int(reply_to_id),
-                    channel_id=int(channel_id)
+                    message_id=int(reply_to_id), channel_id=int(channel_id)
                 )
             except (ValueError, TypeError):
                 pass
@@ -392,9 +404,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             sent = await ch.send(text or None, files=discord_files, reference=reference)
             return str(sent.id)
         except Exception as e:
-            l.error(f"Discord [{self.instance_id}] send error: {e}")
+            logger.error(f"Discord [{self.instance_id}] send error: {e}")
         return None
 
 
-from drivers.registry import register
 register("discord", DiscordConfig, DiscordDriver)

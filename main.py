@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-import services.error  # installs global uncaught-exception hook
+import services.error  # noqa: F401
 import services.logger as log
 import services.util as u
 import services.config_io as config_io
@@ -15,7 +15,7 @@ from services.bridge import bridge
 
 import drivers as _drivers_pkg
 
-l = log.get_logger()
+logger = log.get_logger()
 
 
 def _load_all_drivers() -> None:
@@ -57,16 +57,18 @@ async def main():
     _load_all_drivers()
     from drivers.registry import all_drivers
 
-    l.info("NextBridge starting…")
+    logger.info("NextBridge starting…")
 
     bridge.load_rules()
 
     config_path = config_io.find_config(Path(u.get_data_path()))
     if config_path is None:
-        l.critical(f"No config file found in: {u.get_data_path()} (tried config.json / .yaml / .toml)")
+        logger.critical(
+            f"No config file found in: {u.get_data_path()} (tried config.json / .yaml / .toml)"
+        )
         return
 
-    l.info(f"Loading config from: {config_path}")
+    logger.info(f"Loading config from: {config_path}")
     raw: dict = config_io.load_config(config_path)
 
     bridge.load_sensitive_values(raw)
@@ -79,9 +81,11 @@ async def main():
     for platform, (config_cls, _) in registry.items():
         for inst_id, inst_raw in raw.get(platform, {}).items():
             try:
-                validated.setdefault(platform, {})[inst_id] = config_cls.model_validate(inst_raw)
+                validated.setdefault(platform, {})[inst_id] = config_cls.model_validate(
+                    inst_raw
+                )
             except ValidationError as exc:
-                l.critical(f"Config error in {platform}.{inst_id}:\n{exc}")
+                logger.critical(f"Config error in {platform}.{inst_id}:\n{exc}")
                 config_ok = False
 
     if not config_ok:
@@ -92,7 +96,7 @@ async def main():
             return
         exc = task.exception()
         if exc is not None:
-            l.error(f"Driver '{task.get_name()}' crashed: {exc}")
+            logger.error(f"Driver '{task.get_name()}' crashed: {exc}")
 
     driver_tasks: list[asyncio.Task] = []
     for platform, (_, driver_cls) in registry.items():
@@ -101,30 +105,34 @@ async def main():
             task = asyncio.create_task(drv.start(), name=f"{platform}/{inst_id}")
             task.add_done_callback(_on_task_done)
             driver_tasks.append(task)
-            l.info(f"Registered driver: {platform}/{inst_id}")
+            logger.info(f"Registered driver: {platform}/{inst_id}")
 
     if not driver_tasks:
-        l.error("No drivers configured — nothing to do, exiting.")
+        logger.error("No drivers configured — nothing to do, exiting.")
         return
 
     try:
         results = await asyncio.gather(*driver_tasks, return_exceptions=True)
         for task, result in zip(driver_tasks, results):
             if isinstance(result, Exception):
-                l.error(f"Driver '{task.get_name()}' exited with error: {result}")
+                logger.error(f"Driver '{task.get_name()}' exited with error: {result}")
     except asyncio.CancelledError:
-        l.info("NextBridge shutting down…")
+        logger.info("NextBridge shutting down…")
         for task in driver_tasks:
             task.cancel()
         await asyncio.gather(*driver_tasks, return_exceptions=True)
-        l.info("NextBridge stopped.")
+        logger.info("NextBridge stopped.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(prog="nextbridge", description="NextBridge chat bridge")
+    parser = argparse.ArgumentParser(
+        prog="nextbridge", description="NextBridge chat bridge"
+    )
     subparsers = parser.add_subparsers(dest="command")
 
-    conv = subparsers.add_parser("convert", help="Convert a config file between formats (json/yaml/toml)")
+    conv = subparsers.add_parser(
+        "convert", help="Convert a config file between formats (json/yaml/toml)"
+    )
     conv.add_argument("src", help="Source config file (e.g. config.json)")
     conv.add_argument("dst", help="Destination config file (e.g. config.yaml)")
 

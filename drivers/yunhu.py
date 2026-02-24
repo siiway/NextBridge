@@ -16,8 +16,8 @@
 #   chat_id   – Yunhu chat (group) ID
 #   chat_type – "group" or "user" (default "group")
 
+from drivers.registry import register
 import asyncio
-import re
 from urllib.parse import quote, urlparse
 
 import aiohttp
@@ -27,18 +27,18 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.db import msg_db
 from drivers import BaseDriver
 
 
 class YunhuConfig(_DriverConfig):
-    token:        str = ""
+    token: str = ""
     webhook_port: int = 8765
     webhook_path: str = "/yunhu-webhook"
-    proxy_host:   str = ""
+    proxy_host: str = ""
     max_file_size: int = 10 * 1024 * 1024
 
-l = log.get_logger()
+
+logger = log.get_logger()
 
 _SEND_URL = "https://chat-go.jwzhd.com/open-apis/v1/bot/send"
 _IMAGE_UPLOAD_URL = "https://chat-go.jwzhd.com/open-apis/v1/image/upload"
@@ -54,7 +54,6 @@ _PROXY_MEDIA_SUFFIXES = (".discordapp.com", ".discordapp.net", ".discord.com")
 
 
 class YunhuDriver(BaseDriver[YunhuConfig]):
-
     def __init__(self, instance_id: str, config: YunhuConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._token: str = config.token
@@ -68,7 +67,9 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
 
         if not self._token:
-            l.warning(f"Yunhu [{self.instance_id}] no token configured — send disabled")
+            logger.warning(
+                f"Yunhu [{self.instance_id}] no token configured — send disabled"
+            )
 
         self._session = aiohttp.ClientSession()
 
@@ -81,7 +82,8 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        l.info(f"Yunhu [{self.instance_id}] webhook listening on :{port}{path}")
+        logger.info(
+            f"Yunhu [{self.instance_id}] webhook listening on :{port}{path}")
 
         await asyncio.Event().wait()  # run indefinitely
 
@@ -116,9 +118,15 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             hostname = urlparse(url).hostname or ""
         except Exception:
             return url
-        if any(hostname == s.lstrip(".") or hostname.endswith(s) for s in _YUNHU_CDN_SUFFIXES):
+        if any(
+            hostname == s.lstrip(".") or hostname.endswith(s)
+            for s in _YUNHU_CDN_SUFFIXES
+        ):
             return url  # Yunhu's own CDN — no proxy needed on the send side
-        if any(hostname == s.lstrip(".") or hostname.endswith(s) for s in _PROXY_MEDIA_SUFFIXES):
+        if any(
+            hostname == s.lstrip(".") or hostname.endswith(s)
+            for s in _PROXY_MEDIA_SUFFIXES
+        ):
             return f"{host}/media?url={quote(url, safe='')}"
         return url  # unknown domain — pass through unchanged
 
@@ -144,7 +152,8 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             key_name = "fileKey"
 
         form = aiohttp.FormData()
-        form.add_field(field, data_bytes, filename=filename, content_type=content_type)
+        form.add_field(field, data_bytes, filename=filename,
+                       content_type=content_type)
 
         try:
             async with self._session.post(url, data=form) as resp:
@@ -152,12 +161,16 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                     res = await resp.json()
                     if res.get("code") == 1:
                         return res.get("data", {}).get(key_name)
-                    l.error(f"Yunhu [{self.instance_id}] upload failed API error: {res}")
+                    logger.error(
+                        f"Yunhu [{self.instance_id}] upload failed API error: {res}"
+                    )
                 else:
                     body = await resp.text()
-                    l.error(f"Yunhu [{self.instance_id}] upload failed HTTP {resp.status}: {body}")
+                    logger.error(
+                        f"Yunhu [{self.instance_id}] upload failed HTTP {resp.status}: {body}"
+                    )
         except Exception as e:
-            l.error(f"Yunhu [{self.instance_id}] upload error: {e}")
+            logger.error(f"Yunhu [{self.instance_id}] upload error: {e}")
         return None
 
     # ------------------------------------------------------------------
@@ -173,7 +186,9 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             if event_type in ("message.receive.normal", "message.receive.instruction"):
                 await self._on_message(event)
         except Exception as e:
-            l.error(f"Yunhu [{self.instance_id}] webhook handler error: {e} Traceback: {e.__traceback__}")
+            logger.error(
+                f"Yunhu [{self.instance_id}] webhook handler error: {e} Traceback: {e.__traceback__}"
+            )
 
         # Yunhu expects a 200 with code=0 to acknowledge receipt
         return web.json_response({"code": 0})
@@ -201,12 +216,14 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             url = self._proxy_pfp(content.get("imageUrl", ""))
             name = content.get("imageName", "image.jpg")
             if url:
-                attachments.append(Attachment(type="image", url=url, name=name))
+                attachments.append(Attachment(
+                    type="image", url=url, name=name))
         elif content_type == "video":
             url = self._proxy_pfp(content.get("videoUrl", ""))
             name = content.get("videoName", "video.mp4")
             if url:
-                attachments.append(Attachment(type="video", url=url, name=name))
+                attachments.append(Attachment(
+                    type="video", url=url, name=name))
         elif content_type == "file":
             url = self._proxy_pfp(content.get("fileUrl", ""))
             name = content.get("fileName", "file")
@@ -248,19 +265,24 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
     ):
         chat_id = channel.get("chat_id")
         if not chat_id:
-            l.warning(f"Yunhu [{self.instance_id}] send: no chat_id in channel {channel}")
+            logger.warning(
+                f"Yunhu [{self.instance_id}] send: no chat_id in channel {channel}"
+            )
             return None
         if not self._token:
-            l.warning(f"Yunhu [{self.instance_id}] send: no token, message dropped")
+            logger.warning(
+                f"Yunhu [{self.instance_id}] send: no token, message dropped"
+            )
             return None
         if self._session is None:
-            l.warning(f"Yunhu [{self.instance_id}] send: session not ready, message dropped")
+            logger.warning(
+                f"Yunhu [{self.instance_id}] send: session not ready, message dropped"
+            )
             return None
 
         chat_type: str = channel.get("chat_type", "group")
         reply_to_id = kwargs.get("reply_to_id")
         first_msg_id = None
-        max_size: int = self.config.max_file_size
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -279,27 +301,35 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             return p
 
         if text:
-            payloads.append(_add_common({
-                "contentType": "text",
-                "content": {"text": text},
-            }))
+            payloads.append(
+                _add_common(
+                    {
+                        "contentType": "text",
+                        "content": {"text": text},
+                    }
+                )
+            )
 
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
             # Fetch the data first
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
                 fallback = f"[{att.type.capitalize()}: {label}]"
                 if payloads and payloads[0]["contentType"] == "text":
                     payloads[0]["content"]["text"] += f"\n{fallback}"
                 else:
-                    payloads.append(_add_common({
-                        "contentType": "text",
-                        "content": {"text": fallback},
-                    }))
+                    payloads.append(
+                        _add_common(
+                            {
+                                "contentType": "text",
+                                "content": {"text": fallback},
+                            }
+                        )
+                    )
                 continue
 
             data_bytes, mime = result
@@ -312,27 +342,43 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 if payloads and payloads[0]["contentType"] == "text":
                     payloads[0]["content"]["text"] += f"\n{fallback}"
                 else:
-                    payloads.append(_add_common({
-                        "contentType": "text",
-                        "content": {"text": fallback},
-                    }))
+                    payloads.append(
+                        _add_common(
+                            {
+                                "contentType": "text",
+                                "content": {"text": fallback},
+                            }
+                        )
+                    )
                 continue
 
             if att.type == "image":
-                payloads.append(_add_common({
-                    "contentType": "image",
-                    "content": {"imageKey": key},
-                }))
+                payloads.append(
+                    _add_common(
+                        {
+                            "contentType": "image",
+                            "content": {"imageKey": key},
+                        }
+                    )
+                )
             elif att.type == "video":
-                payloads.append(_add_common({
-                    "contentType": "video",
-                    "content": {"videoKey": key},
-                }))
+                payloads.append(
+                    _add_common(
+                        {
+                            "contentType": "video",
+                            "content": {"videoKey": key},
+                        }
+                    )
+                )
             else:  # voice / file / unknown
-                payloads.append(_add_common({
-                    "contentType": "file",
-                    "content": {"fileKey": key},
-                }))
+                payloads.append(
+                    _add_common(
+                        {
+                            "contentType": "file",
+                            "content": {"fileKey": key},
+                        }
+                    )
+                )
 
         if not payloads:
             return None
@@ -350,26 +396,29 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                         if data.get("code") in (0, 1):
                             # Try both messageId and msgId at various depths
                             d = data.get("data", {})
-                            mid = (d.get("messageId") or 
-                                   d.get("msgId") or 
-                                   d.get("messageInfo", {}).get("msgId") or
-                                   d.get("messageInfo", {}).get("messageId"))
-                            
-                            if mid and not first_msg_id: 
+                            mid = (
+                                d.get("messageId")
+                                or d.get("msgId")
+                                or d.get("messageInfo", {}).get("msgId")
+                                or d.get("messageInfo", {}).get("messageId")
+                            )
+
+                            if mid and not first_msg_id:
                                 first_msg_id = str(mid)
                         else:
-                            l.error(f"Yunhu [{self.instance_id}] send failed API error: {data}")
+                            logger.error(
+                                f"Yunhu [{self.instance_id}] send failed API error: {data}"
+                            )
                     else:
                         body = await resp.text()
-                        l.error(
+                        logger.error(
                             f"Yunhu [{self.instance_id}] send failed "
                             f"HTTP {resp.status}: {body}"
                         )
             except Exception as e:
-                l.error(f"Yunhu [{self.instance_id}] send failed: {e}")
+                logger.error(f"Yunhu [{self.instance_id}] send failed: {e}")
 
         return first_msg_id
 
 
-from drivers.registry import register
 register("yunhu", YunhuConfig, YunhuDriver)

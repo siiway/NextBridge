@@ -5,12 +5,12 @@ from datetime import datetime
 
 # ANSI 颜色码
 COLORS = {
-    'DBG': '\033[36m',   # 青蓝
-    'INF': '\033[32m',   # 绿色
-    'WRN': '\033[33m',   # 黄色
-    'ERR': '\033[31m',   # 红色
-    'CRT': '\033[91m\033[1m',  # 亮红加粗
-    'RST': '\033[0m'
+    "DBG": "\033[36m",  # 青蓝
+    "INF": "\033[32m",  # 绿色
+    "WRN": "\033[33m",  # 黄色
+    "ERR": "\033[31m",  # 红色
+    "CRT": "\033[91m\033[1m",  # 亮红加粗
+    "RST": "\033[0m",
 }
 
 # 是否为终端
@@ -53,27 +53,27 @@ class MaskingFilter(logging.Filter):
 
 class CustomFormatter(logging.Formatter):
     replaces = {
-        'DEBUG': '[DBG]',
-        'INFO': '[INF]',
-        'WARNING': '[WRN]',
-        'ERROR': '[ERR]',
-        'CRITICAL': '[CRT]'
+        "DEBUG": "[DBG]",
+        "INFO": "[INF]",
+        "WARNING": "[WRN]",
+        "ERROR": "[ERR]",
+        "CRITICAL": "[CRT]",
     }
 
     def format(self, record):
-        timestamp = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         levelname = record.levelname
 
         # 获取替换后的级别字符串，如 [DBG]
-        level = self.replaces.get(levelname, f'[{levelname}]')
+        level = self.replaces.get(levelname, f"[{levelname}]")
 
-        if level.startswith('[') and len(level) >= 4:
+        if level.startswith("[") and len(level) >= 4:
             color_key = level[1:4]
         else:
             color_key = levelname.upper()[:3]
 
         if IS_TTY and color_key in COLORS:
-            colored_level = COLORS[color_key] + level + COLORS['RST']
+            colored_level = COLORS[color_key] + level + COLORS["RST"]
         else:
             colored_level = level
 
@@ -86,19 +86,19 @@ class CustomFormatter(logging.Formatter):
         message = record.getMessage()
 
         res = f"{timestamp} {colored_level} | {file}:{line} | {message}"
-        
+
         if record.exc_info:
             if not record.exc_text:
                 record.exc_text = self.formatException(record.exc_info)
-        
+
         if record.exc_text:
             res += "\n" + record.exc_text
-            
+
         return res
 
 
 # 创建主 logger
-logger = logging.getLogger('app')
+logger = logging.getLogger("app")
 logger.setLevel(logging.DEBUG)
 logger.addFilter(MaskingFilter())
 
@@ -116,10 +116,10 @@ console_handler.setLevel(logging.INFO)  # 控制台只输出 INFO 及以上
 logger.addHandler(console_handler)
 
 # 添加文件处理器（记录所有 DEBUG 及以上日志）
-file_handler = logging.FileHandler(LOG_FILE_PATH, encoding='utf-8')
+file_handler = logging.FileHandler(LOG_FILE_PATH, encoding="utf-8")
 file_formatter = logging.Formatter(
-    '[%(asctime)s] [%(levelname)s] | %(filename)s:%(lineno)d | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    "[%(asctime)s] [%(levelname)s] | %(filename)s:%(lineno)d | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 file_handler.setFormatter(file_formatter)
 file_handler.setLevel(logging.DEBUG)  # 文件记录所有级别

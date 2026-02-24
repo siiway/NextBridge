@@ -28,6 +28,7 @@
 # Rule channel keys:
 #   chat_id – Feishu open chat ID, e.g. "oc_xxxxxxxxxxxxxxxxxx"
 
+from drivers.registry import register
 import asyncio
 import io
 import json
@@ -39,11 +40,15 @@ from aiohttp import web
 import lark_oapi as lark
 from lark_oapi.api.contact.v3 import GetUserRequest
 from lark_oapi.api.im.v1 import (
-    CreateMessageRequest, CreateMessageRequestBody,
-    CreateImageRequest, CreateImageRequestBody,
-    CreateFileRequest, CreateFileRequestBody,
+    CreateMessageRequest,
+    CreateMessageRequestBody,
+    CreateImageRequest,
+    CreateImageRequestBody,
+    CreateFileRequest,
+    CreateFileRequestBody,
     GetMessageResourceRequest,
-    ReplyMessageRequest, ReplyMessageRequestBody,
+    ReplyMessageRequest,
+    ReplyMessageRequestBody,
 )
 
 import services.logger as log
@@ -54,18 +59,19 @@ from drivers import BaseDriver
 
 
 class FeishuConfig(_DriverConfig):
-    app_id:               str
-    app_secret:           str
-    use_long_connection:  bool = False
-    verification_token:   str = ""
-    encrypt_key:          str = ""
-    listen_port:          int = 8080
-    listen_path:          str = "/event"
-    max_file_size:        int = 50 * 1024 * 1024
+    app_id: str
+    app_secret: str
+    use_long_connection: bool = False
+    verification_token: str = ""
+    encrypt_key: str = ""
+    listen_port: int = 8080
+    listen_path: str = "/event"
+    max_file_size: int = 50 * 1024 * 1024
 
-l = log.get_logger()
 
-_WSS_URL_RE = re.compile(r'wss://\S+')
+logger = log.get_logger()
+
+_WSS_URL_RE = re.compile(r"wss://\S+")
 
 
 class _LarkLogBridge(logging.Handler):
@@ -74,17 +80,16 @@ class _LarkLogBridge(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         msg = _WSS_URL_RE.sub("wss://***", record.getMessage())
         if record.levelno >= logging.ERROR:
-            l.error("Feishu WS: %s", msg)
+            logger.error("Feishu WS: %s", msg)
         elif record.levelno >= logging.WARNING:
-            l.warning("Feishu WS: %s", msg)
+            logger.warning("Feishu WS: %s", msg)
         elif record.levelno >= logging.INFO:
-            l.info("Feishu WS: %s", msg)
+            logger.info("Feishu WS: %s", msg)
         else:
-            l.debug("Feishu WS: %s", msg)
+            logger.debug("Feishu WS: %s", msg)
 
 
 class FeishuDriver(BaseDriver[FeishuConfig]):
-
     def __init__(self, instance_id: str, config: FeishuConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: lark.Client | None = None
@@ -138,6 +143,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             # Give the ws client its own event loop so it does not conflict
             # with the main asyncio loop that already runs the bridge.
             import lark_oapi.ws.client as _ws_mod
+
             thread_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(thread_loop)
             _ws_mod.loop = thread_loop  # patch module-level loop reference
@@ -154,11 +160,12 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 event_handler=handler,
                 auto_reconnect=True,
             )
-            l.info(f"Feishu [{instance_id}] WebSocket long connection starting")
+            logger.info(
+                f"Feishu [{instance_id}] WebSocket long connection starting")
             try:
                 ws_client.start()  # blocks until permanently disconnected
             except Exception as e:
-                l.error(f"Feishu [{instance_id}] WebSocket error: {e}")
+                logger.error(f"Feishu [{instance_id}] WebSocket error: {e}")
 
         t = threading.Thread(
             target=_ws_thread,
@@ -166,7 +173,9 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             daemon=True,
         )
         t.start()
-        l.info(f"Feishu [{self.instance_id}] WebSocket long connection thread started")
+        logger.info(
+            f"Feishu [{self.instance_id}] WebSocket long connection thread started"
+        )
         # Block the coroutine so the driver stays alive (mirrors HTTP mode).
         await asyncio.Event().wait()
 
@@ -185,9 +194,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        l.info(
-            f"Feishu [{self.instance_id}] HTTP server listening on "
-            f"0.0.0.0:{port}{path}"
+        logger.info(
+            f"Feishu [{self.instance_id}] HTTP server listening on 0.0.0.0:{port}{path}"
         )
 
         try:
@@ -204,9 +212,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         )
         # lark-oapi's do() is synchronous; run in thread pool to avoid blocking
         loop = asyncio.get_running_loop()
-        resp = await loop.run_in_executor(
-            None, lambda: self._handler.do(raw_req)
-        )
+        resp = await loop.run_in_executor(None, lambda: self._handler.do(raw_req))
         return web.Response(
             body=resp.body,
             status=resp.status_code,
@@ -240,12 +246,13 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 name = u.name or open_id
                 avatar = (u.avatar.avatar_72 if u.avatar else "") or ""
             else:
-                l.info(
+                logger.info(
                     f"Feishu [{self.instance_id}] user info fetch failed for "
                     f"{open_id}: code={resp.code} msg={resp.msg}"
                 )
         except Exception as e:
-            l.info(f"Feishu [{self.instance_id}] user info fetch error: {e}")
+            logger.info(
+                f"Feishu [{self.instance_id}] user info fetch error: {e}")
 
         self._user_cache[open_id] = (name, avatar)
         return name, avatar
@@ -276,7 +283,9 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
 
         return "\n".join(lines).strip()
 
-    def _download_resource(self, message_id: str, file_key: str, resource_type: str) -> bytes | None:
+    def _download_resource(
+        self, message_id: str, file_key: str, resource_type: str
+    ) -> bytes | None:
         """Download a message resource (image/file) from Feishu."""
         try:
             req = (
@@ -289,12 +298,13 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             resp = self._client.im.v1.message_resource.get(req)
             if resp.success():
                 return resp.file.read()
-            l.error(
+            logger.error(
                 f"Feishu [{self.instance_id}] resource download failed: "
                 f"code={resp.code} msg={resp.msg}"
             )
         except Exception as e:
-            l.error(f"Feishu [{self.instance_id}] resource download error: {e}")
+            logger.error(
+                f"Feishu [{self.instance_id}] resource download error: {e}")
         return None
 
     def _on_message_event(self, data) -> None:
@@ -323,33 +333,43 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             elif mtype == "image":
                 image_key = content_json.get("image_key")
                 if image_key:
-                    data_bytes = self._download_resource(msg.message_id, image_key, "image")
+                    data_bytes = self._download_resource(
+                        msg.message_id, image_key, "image"
+                    )
                     if data_bytes:
-                        attachments.append(Attachment(
-                            type="image", url="", data=data_bytes, name=f"{image_key}.png"
-                        ))
+                        attachments.append(
+                            Attachment(
+                                type="image",
+                                url="",
+                                data=data_bytes,
+                                name=f"{image_key}.png",
+                            )
+                        )
             elif mtype in ("file", "audio", "video", "sticker"):
                 file_key = content_json.get("file_key")
-                file_name = content_json.get("file_name", f"{mtype}_attachment")
+                file_name = content_json.get(
+                    "file_name", f"{mtype}_attachment")
                 if file_key:
-                    data_bytes = self._download_resource(msg.message_id, file_key, "file")
+                    data_bytes = self._download_resource(
+                        msg.message_id, file_key, "file"
+                    )
                     if data_bytes:
                         att_type = "image" if mtype == "sticker" else mtype
-                        attachments.append(Attachment(
-                            type=att_type, url="", data=data_bytes, name=file_name
-                        ))
+                        attachments.append(
+                            Attachment(
+                                type=att_type, url="", data=data_bytes, name=file_name
+                            )
+                        )
 
             if not text and not attachments:
                 return
 
             chat_id = msg.chat_id
-            open_id = (
-                sender.sender_id.open_id
-                if sender and sender.sender_id
-                else ""
-            )
+            open_id = sender.sender_id.open_id if sender and sender.sender_id else ""
 
-            display_name, avatar = self._fetch_user_info(open_id) if open_id else (open_id, "")
+            display_name, avatar = (
+                self._fetch_user_info(open_id) if open_id else (open_id, "")
+            )
 
             normalized = NormalizedMessage(
                 platform="feishu",
@@ -370,19 +390,28 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                     self.bridge.on_message(normalized), self._loop
                 )
         except Exception as e:
-            l.error(f"Feishu [{self.instance_id}] event parse error: {e}")
+            logger.error(f"Feishu [{self.instance_id}] event parse error: {e}")
 
     # ------------------------------------------------------------------
     # Send
     # ------------------------------------------------------------------
 
-    async def send(self, channel: dict, text: str, attachments: list[Attachment] | None = None, **kwargs):
+    async def send(
+        self,
+        channel: dict,
+        text: str,
+        attachments: list[Attachment] | None = None,
+        **kwargs,
+    ):
         chat_id = channel.get("chat_id")
         if not chat_id:
-            l.warning(f"Feishu [{self.instance_id}] send: no chat_id in channel {channel}")
+            logger.warning(
+                f"Feishu [{self.instance_id}] send: no chat_id in channel {channel}"
+            )
             return None
         if self._client is None:
-            l.warning(f"Feishu [{self.instance_id}] send: driver not started")
+            logger.warning(
+                f"Feishu [{self.instance_id}] send: driver not started")
             return None
 
         reply_to_id = kwargs.get("reply_to_id")
@@ -398,25 +427,31 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         mentions = kwargs.get("mentions", [])
         for m in mentions:
             # Feishu mention format: <at user_id="ou_xxxxxx"></at>
-            text = text.replace(f"@{m['name']}", f'<at user_id="{m["id"]}"></at>')
+            text = text.replace(
+                f"@{m['name']}", f'<at user_id="{m["id"]}"></at>')
 
         if text.strip():
-            mid = await self._send_feishu_msg(chat_id, "text", json.dumps({"text": text}), reply_to_id)
-            if not first_msg_id: first_msg_id = mid
+            mid = await self._send_feishu_msg(
+                chat_id, "text", json.dumps({"text": text}), reply_to_id
+            )
+            if not first_msg_id:
+                first_msg_id = mid
 
-        max_size = self.config.max_file_size
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
                 mid = await self._send_feishu_msg(
-                    chat_id, "text",
-                    json.dumps({"text": f"[{att.type.capitalize()}: {label}]"}),
-                    reply_to_id
+                    chat_id,
+                    "text",
+                    json.dumps(
+                        {"text": f"[{att.type.capitalize()}: {label}]"}),
+                    reply_to_id,
                 )
-                if not first_msg_id: first_msg_id = mid
+                if not first_msg_id:
+                    first_msg_id = mid
                 continue
 
             data_bytes, mime = result
@@ -425,29 +460,46 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             if mime.startswith("image/"):
                 key = await self._upload_image(data_bytes)
                 if key:
-                    mid = await self._send_feishu_msg(chat_id, "image", json.dumps({"image_key": key}), reply_to_id)
-                    if not first_msg_id: first_msg_id = mid
+                    mid = await self._send_feishu_msg(
+                        chat_id, "image", json.dumps(
+                            {"image_key": key}), reply_to_id
+                    )
+                    if not first_msg_id:
+                        first_msg_id = mid
                 else:
                     mid = await self._send_feishu_msg(
-                        chat_id, "text", json.dumps({"text": f"[Image: {fname}]"}), reply_to_id
+                        chat_id,
+                        "text",
+                        json.dumps({"text": f"[Image: {fname}]"}),
+                        reply_to_id,
                     )
-                    if not first_msg_id: first_msg_id = mid
+                    if not first_msg_id:
+                        first_msg_id = mid
             else:
                 key = await self._upload_file(data_bytes, fname)
                 if key:
-                    mid = await self._send_feishu_msg(chat_id, "file", json.dumps({"file_key": key}), reply_to_id)
-                    if not first_msg_id: first_msg_id = mid
+                    mid = await self._send_feishu_msg(
+                        chat_id, "file", json.dumps(
+                            {"file_key": key}), reply_to_id
+                    )
+                    if not first_msg_id:
+                        first_msg_id = mid
                 else:
                     mid = await self._send_feishu_msg(
-                        chat_id, "text",
-                        json.dumps({"text": f"[{att.type.capitalize()}: {fname}]"}),
-                        reply_to_id
+                        chat_id,
+                        "text",
+                        json.dumps(
+                            {"text": f"[{att.type.capitalize()}: {fname}]"}),
+                        reply_to_id,
                     )
-                    if not first_msg_id: first_msg_id = mid
+                    if not first_msg_id:
+                        first_msg_id = mid
 
         return first_msg_id
 
-    async def _send_feishu_msg(self, chat_id: str, msg_type: str, content: str, reply_to_id: str | None = None) -> str | None:
+    async def _send_feishu_msg(
+        self, chat_id: str, msg_type: str, content: str, reply_to_id: str | None = None
+    ) -> str | None:
         if reply_to_id:
             req = (
                 ReplyMessageRequest.builder()
@@ -488,12 +540,12 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             if resp.success():
                 return resp.data.message_id
 
-            l.error(
+            logger.error(
                 f"Feishu [{self.instance_id}] send failed: "
                 f"code={resp.code} msg={resp.msg}"
             )
         except Exception as e:
-            l.error(f"Feishu [{self.instance_id}] send error: {e}")
+            logger.error(f"Feishu [{self.instance_id}] send error: {e}")
         return None
 
     async def _upload_image(self, data: bytes) -> str | None:
@@ -511,12 +563,13 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             )
             if resp.success():
                 return resp.data.image_key
-            l.error(
+            logger.error(
                 f"Feishu [{self.instance_id}] image upload failed: "
                 f"code={resp.code} msg={resp.msg}"
             )
         except Exception as e:
-            l.error(f"Feishu [{self.instance_id}] image upload error: {e}")
+            logger.error(
+                f"Feishu [{self.instance_id}] image upload error: {e}")
         return None
 
     async def _upload_file(self, data: bytes, fname: str) -> str | None:
@@ -535,14 +588,13 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             )
             if resp.success():
                 return resp.data.file_key
-            l.error(
+            logger.error(
                 f"Feishu [{self.instance_id}] file upload failed: "
                 f"code={resp.code} msg={resp.msg}"
             )
         except Exception as e:
-            l.error(f"Feishu [{self.instance_id}] file upload error: {e}")
+            logger.error(f"Feishu [{self.instance_id}] file upload error: {e}")
         return None
 
 
-from drivers.registry import register
 register("feishu", FeishuConfig, FeishuDriver)

@@ -12,9 +12,9 @@
 #   stream_threshold – If > 0, force stream mode when file exceeds this many bytes,
 #                      regardless of file_send_mode (default 0 = disabled)
 
+from drivers.registry import register
 import asyncio
 import base64
-import hashlib
 import json
 import math
 import uuid
@@ -34,14 +34,15 @@ from drivers import BaseDriver
 
 
 class NapCatConfig(_DriverConfig):
-    ws_url:           str                         = "ws://127.0.0.1:3001"
-    ws_token:         str                         = ""
-    max_file_size:    int                         = 10 * 1024 * 1024
-    file_send_mode:   Literal["stream", "base64"] = "stream"
-    cqface_mode:      Literal["gif", "emoji"]     = "gif"
-    stream_threshold: int                         = 0
+    ws_url: str = "ws://127.0.0.1:3001"
+    ws_token: str = ""
+    max_file_size: int = 10 * 1024 * 1024
+    file_send_mode: Literal["stream", "base64"] = "stream"
+    cqface_mode: Literal["gif", "emoji"] = "gif"
+    stream_threshold: int = 0
 
-l = log.get_logger()
+
+logger = log.get_logger()
 
 # ---------------------------------------------------------------------------
 # CQ face GIF database
@@ -72,14 +73,14 @@ def _load_face_gif(face_id_raw) -> bytes | None:
         if face_id < 0:
             raise ValueError("negative id")
     except (TypeError, ValueError):
-        l.warning(f"Invalid face ID {face_id_raw!r} — ignored")
+        logger.warning(f"Invalid face ID {face_id_raw!r} — ignored")
         return None
 
     candidate = (_FACE_DB / f"{face_id}.gif").resolve()
 
     # Layer 2 path-traversal guard.
     if not candidate.is_relative_to(_FACE_DB):
-        l.warning(f"Face path {candidate} escapes database dir — blocked")
+        logger.warning(f"Face path {candidate} escapes database dir — blocked")
         return None
 
     if not candidate.is_file():
@@ -88,12 +89,11 @@ def _load_face_gif(face_id_raw) -> bytes | None:
     try:
         return candidate.read_bytes()
     except OSError as e:
-        l.error(f"Failed to read face GIF {candidate}: {e}")
+        logger.error(f"Failed to read face GIF {candidate}: {e}")
         return None
 
 
 class NapCatDriver(BaseDriver[NapCatConfig]):
-
     def __init__(self, instance_id: str, config: NapCatConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -112,22 +112,24 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             sep = "&" if "?" in ws_url else "?"
             ws_url = f"{ws_url}{sep}access_token={self.config.ws_token}"
 
-        l.info(f"NapCat [{self.instance_id}] connecting to {ws_url}")
+        logger.info(f"NapCat [{self.instance_id}] connecting to {ws_url}")
 
         while True:
             try:
                 async with websockets.connect(ws_url) as ws:
                     self._ws = ws
-                    l.info(f"NapCat [{self.instance_id}] connected")
+                    logger.info(f"NapCat [{self.instance_id}] connected")
                     await self._listen(ws)
             except websockets.exceptions.ConnectionClosedOK:
-                l.info(f"NapCat [{self.instance_id}] connection closed normally")
+                logger.info(
+                    f"NapCat [{self.instance_id}] connection closed normally")
             except Exception as e:
-                l.error(f"NapCat [{self.instance_id}] connection error: {e}")
+                logger.error(
+                    f"NapCat [{self.instance_id}] connection error: {e}")
             finally:
                 self._ws = None
 
-            l.info(f"NapCat [{self.instance_id}] reconnecting in 5 s…")
+            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5 s…")
             await asyncio.sleep(5)
 
     # ------------------------------------------------------------------
@@ -148,9 +150,10 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     continue
                 await self._handle(data)
             except json.JSONDecodeError:
-                l.warning(f"NapCat [{self.instance_id}] invalid JSON received")
+                logger.warning(
+                    f"NapCat [{self.instance_id}] invalid JSON received")
             except Exception as e:
-                l.error(f"NapCat [{self.instance_id}] handler error: {e}")
+                logger.error(f"NapCat [{self.instance_id}] handler error: {e}")
 
     async def _handle(self, data: dict):
         # Action responses carry an "echo" field — ignore them
@@ -176,7 +179,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         nickname = sender.get("card") or sender.get("nickname") or user_id
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
-        text, attachments, reply_id, mentions = self._parse_message(event, face_as_emoji=face_as_emoji)
+        text, attachments, reply_id, mentions = self._parse_message(
+            event, face_as_emoji=face_as_emoji
+        )
         if not text.strip() and not attachments:
             return
 
@@ -198,7 +203,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         )
         await self.bridge.on_message(msg)
 
-    def _parse_message(self, event: dict, *, face_as_emoji: bool = False) -> tuple[str, list[Attachment], str | None, list[dict]]:
+    def _parse_message(
+        self, event: dict, *, face_as_emoji: bool = False
+    ) -> tuple[str, list[Attachment], str | None, list[dict]]:
         """
         Parse an OneBot 11 message event into plain text + attachments + reply_id + mentions.
         Always uses the structured ``message`` segment array; CQ-code strings
@@ -230,7 +237,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     name = msg_db.get_user_name(self.instance_id, qq)
                 if not name:
                     name = qq
-                
+
                 text_parts.append(f"@{name}")
                 if qq and qq != "all":
                     mentions.append({"id": qq, "name": name})
@@ -238,17 +245,20 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             elif t == "image":
                 url = d.get("url") or d.get("file", "")
                 name = d.get("file", "image.jpg")
-                attachments.append(Attachment(type="image", url=url, name=name))
+                attachments.append(Attachment(
+                    type="image", url=url, name=name))
 
             elif t == "record":  # voice message
                 url = d.get("url") or d.get("file", "")
                 name = d.get("file", "voice.amr")
-                attachments.append(Attachment(type="voice", url=url, name=name))
+                attachments.append(Attachment(
+                    type="voice", url=url, name=name))
 
             elif t == "video":
                 url = d.get("url") or d.get("file", "")
                 name = d.get("file", "video.mp4")
-                attachments.append(Attachment(type="video", url=url, name=name))
+                attachments.append(Attachment(
+                    type="video", url=url, name=name))
 
             elif t == "file":
                 url = d.get("url") or d.get("path", "")
@@ -258,7 +268,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     size = int(d.get("file_size", d.get("size", -1)))
                 except (TypeError, ValueError):
                     size = -1
-                attachments.append(Attachment(type="file", url=url, name=name, size=size))
+                attachments.append(
+                    Attachment(type="file", url=url, name=name, size=size)
+                )
 
             elif t == "face":
                 face_id_raw = d.get("id", "")
@@ -272,7 +284,10 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     if gif_data is not None:
                         # face_id is validated integer at this point
                         name = f"face_{int(face_id_raw)}.gif"
-                        attachments.append(Attachment(type="image", url="", name=name, data=gif_data))
+                        attachments.append(
+                            Attachment(type="image", url="",
+                                       name=name, data=gif_data)
+                        )
 
             elif t == "json":
                 # Rich JSON message (contact card, news, mini-app, etc.)
@@ -280,7 +295,10 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 # human-readable summary provided by the QQ client.
                 raw_json = d.get("data", "")
                 try:
-                    obj = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+                    obj = (
+                        json.loads(raw_json) if isinstance(
+                            raw_json, str) else raw_json
+                    )
                     prompt = obj.get("prompt", "").strip()
                     if prompt:
                         text_parts.append(f"[{prompt}]")
@@ -290,8 +308,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                         for key in ("news", "music", "contact", "detail_1"):
                             sub = meta.get(key)
                             if isinstance(sub, dict):
-                                title = sub.get("title") or sub.get("nickname") or ""
-                                desc  = sub.get("desc")  or sub.get("tag")      or ""
+                                title = sub.get("title") or sub.get(
+                                    "nickname") or ""
+                                desc = sub.get("desc") or sub.get("tag") or ""
                                 parts = [p for p in (title, desc) if p]
                                 if parts:
                                     text_parts.append(f"[{': '.join(parts)}]")
@@ -318,23 +337,28 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             elif t == "share":
                 # URL share card
                 title = d.get("title", "").strip()
-                url   = d.get("url",   "").strip()
+                url = d.get("url", "").strip()
                 if title and url:
                     text_parts.append(f"[Share: {title}] {url}")
                 elif url:
                     text_parts.append(f"[Share] {url}")
 
             elif t == "location":
-                name    = d.get("name",    "").strip()
+                name = d.get("name", "").strip()
                 address = d.get("address", "").strip()
-                parts   = [p for p in (name, address) if p]
-                text_parts.append(f"[Location: {', '.join(parts)}]" if parts else "[Location]")
+                parts = [p for p in (name, address) if p]
+                text_parts.append(
+                    f"[Location: {', '.join(parts)}]" if parts else "[Location]"
+                )
 
             elif t == "music":
-                title  = d.get("title",  "").strip()
+                title = d.get("title", "").strip()
                 singer = d.get("singer", d.get("author", "")).strip()
                 if title:
-                    text_parts.append(f"[Music: {title}" + (f" — {singer}" if singer else "") + "]")
+                    text_parts.append(
+                        f"[Music: {title}" +
+                        (f" — {singer}" if singer else "") + "]"
+                    )
                 else:
                     text_parts.append("[Music]")
 
@@ -360,7 +384,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             return "stream"
         return self.config.file_send_mode
 
-    async def _call(self, action: str, params: dict, timeout: float = 30.0) -> dict | None:
+    async def _call(
+        self, action: str, params: dict, timeout: float = 30.0
+    ) -> dict | None:
         """Send a OneBot action and await its echo response."""
         if self._ws is None:
             return None
@@ -372,11 +398,13 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             await self._ws.send(json.dumps(payload, ensure_ascii=False))
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
-            l.warning(f"NapCat [{self.instance_id}] action '{action}' timed out")
+            logger.warning(
+                f"NapCat [{self.instance_id}] action '{action}' timed out")
             self._pending.pop(echo, None)
             return None
         except Exception as e:
-            l.error(f"NapCat [{self.instance_id}] action '{action}' error: {e}")
+            logger.error(
+                f"NapCat [{self.instance_id}] action '{action}' error: {e}")
             self._pending.pop(echo, None)
             return None
 
@@ -397,36 +425,42 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         # Upload all chunks (NapCat param is "filename", not "file_name")
         for i in range(total_chunks):
-            chunk = data_bytes[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE]
+            chunk = data_bytes[i * CHUNK_SIZE: (i + 1) * CHUNK_SIZE]
             b64 = base64.b64encode(chunk).decode()
 
-            resp = await self._call("upload_file_stream", {
-                "stream_id": stream_id,
-                "filename": filename,
-                "chunk_index": i,
-                "total_chunks": total_chunks,
-                "chunk_data": b64,
-            })
+            resp = await self._call(
+                "upload_file_stream",
+                {
+                    "stream_id": stream_id,
+                    "filename": filename,
+                    "chunk_index": i,
+                    "total_chunks": total_chunks,
+                    "chunk_data": b64,
+                },
+            )
             if resp is None:
-                l.warning(
+                logger.warning(
                     f"NapCat [{self.instance_id}] stream upload chunk {i}/{total_chunks} "
                     f"got no response for '{filename}'"
                 )
                 return None
             if resp.get("status") == "failed":
-                l.warning(
+                logger.warning(
                     f"NapCat [{self.instance_id}] stream upload failed at chunk "
                     f"{i}/{total_chunks}: {resp.get('msg', '')}"
                 )
                 return None
 
         # Trigger completion in a separate request (is_complete + no chunk_data)
-        resp = await self._call("upload_file_stream", {
-            "stream_id": stream_id,
-            "is_complete": True,
-        })
+        resp = await self._call(
+            "upload_file_stream",
+            {
+                "stream_id": stream_id,
+                "is_complete": True,
+            },
+        )
         if resp is None or resp.get("status") == "failed":
-            l.warning(
+            logger.warning(
                 f"NapCat [{self.instance_id}] stream upload completion failed "
                 f"for '{filename}': {resp}"
             )
@@ -435,7 +469,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         data = resp.get("data") or {}
         file_path = data.get("file_path")
         if not file_path:
-            l.warning(
+            logger.warning(
                 f"NapCat [{self.instance_id}] stream upload complete but "
                 f"no file_path in response: {resp}"
             )
@@ -456,19 +490,23 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
     ):
         group_id = channel.get("group_id")
         if not group_id:
-            l.warning(f"NapCat [{self.instance_id}] send: no group_id in channel {channel}")
+            logger.warning(
+                f"NapCat [{self.instance_id}] send: no group_id in channel {channel}"
+            )
             return None
 
         if self._ws is None:
-            l.warning(f"NapCat [{self.instance_id}] send: not connected, message dropped")
+            logger.warning(
+                f"NapCat [{self.instance_id}] send: not connected, message dropped"
+            )
             return None
 
-        max_size: int = self.config.max_file_size
         segments: list[dict] = []
 
         reply_to_id = kwargs.get("reply_to_id")
         if reply_to_id:
-            segments.append({"type": "reply", "data": {"id": str(reply_to_id)}})
+            segments.append(
+                {"type": "reply", "data": {"id": str(reply_to_id)}})
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -496,56 +534,90 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 if idx != -1:
                     # Add preceding text
                     if idx > last_idx:
-                        segments.append({"type": "text", "data": {"text": text[last_idx:idx]}})
+                        segments.append(
+                            {"type": "text", "data": {
+                                "text": text[last_idx:idx]}}
+                        )
                     # Add mention segment
                     segments.append({"type": "at", "data": {"qq": m["id"]}})
                     last_idx = idx + len(mention_str)
-            
+
             # Add remaining text
             if last_idx < len(text):
-                segments.append({"type": "text", "data": {"text": text[last_idx:]}})
-        
-        for att in (attachments or []):
+                segments.append(
+                    {"type": "text", "data": {"text": text[last_idx:]}})
+
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
             if att.type == "image":
-                result = await media.fetch_attachment(att, max_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size)
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
-                    segments.append({"type": "image", "data": {"file": f"base64://{b64}"}})
+                    segments.append(
+                        {"type": "image", "data": {"file": f"base64://{b64}"}}
+                    )
                 else:
-                    segments.append({"type": "text", "data": {"text": f"\n[图片] {att.url or att.name}"}})
+                    segments.append(
+                        {
+                            "type": "text",
+                            "data": {"text": f"\n[图片] {att.url or att.name}"},
+                        }
+                    )
 
             elif att.type == "voice":
-                result = await media.fetch_attachment(att, max_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size)
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
-                    segments.append({"type": "record", "data": {"file": f"base64://{b64}"}})
+                    segments.append(
+                        {"type": "record", "data": {"file": f"base64://{b64}"}}
+                    )
                 else:
-                    segments.append({"type": "text", "data": {"text": f"\n[语音] {att.url or att.name}"}})
+                    segments.append(
+                        {
+                            "type": "text",
+                            "data": {"text": f"\n[语音] {att.url or att.name}"},
+                        }
+                    )
 
             elif att.type == "video":
-                result = await media.fetch_attachment(att, max_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size)
                 if result:
                     data_bytes, _ = result
                     mode = self._resolve_send_mode(len(data_bytes))
                     if mode == "base64":
                         b64 = base64.b64encode(data_bytes).decode()
-                        segments.append({"type": "video", "data": {"file": f"base64://{b64}"}})
+                        segments.append(
+                            {"type": "video", "data": {"file": f"base64://{b64}"}}
+                        )
                     else:  # stream
-                        file_path = await self._upload_file_stream(data_bytes, att.name or "video.mp4")
+                        file_path = await self._upload_file_stream(
+                            data_bytes, att.name or "video.mp4"
+                        )
                         if file_path:
-                            segments.append({"type": "video", "data": {"file": file_path}})
+                            segments.append(
+                                {"type": "video", "data": {"file": file_path}}
+                            )
                         else:
-                            segments.append({"type": "text", "data": {"text": f"\n[视频] {att.url or att.name}"}})
+                            segments.append(
+                                {
+                                    "type": "text",
+                                    "data": {"text": f"\n[视频] {att.url or att.name}"},
+                                }
+                            )
                 else:
-                    segments.append({"type": "text", "data": {"text": f"\n[视频] {att.url or att.name}"}})
+                    segments.append(
+                        {
+                            "type": "text",
+                            "data": {"text": f"\n[视频] {att.url or att.name}"},
+                        }
+                    )
 
             else:  # file
-                result = await media.fetch_attachment(att, max_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size)
                 if result:
                     data_bytes, _ = result
                     fname = att.name or "file"
@@ -572,23 +644,35 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                             )
                         else:
                             label = att.url or att.name
-                            segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {label}"}})
+                            segments.append(
+                                {
+                                    "type": "text",
+                                    "data": {"text": f"\n[文件: {att.name}] {label}"},
+                                }
+                            )
                 else:
                     label = att.url or att.name
-                    segments.append({"type": "text", "data": {"text": f"\n[文件: {att.name}] {label}"}})
+                    segments.append(
+                        {
+                            "type": "text",
+                            "data": {"text": f"\n[文件: {att.name}] {label}"},
+                        }
+                    )
 
         if not segments:
             return None
 
-        resp = await self._call("send_group_msg", {
-            "group_id": int(group_id),
-            "message": segments,
-        })
+        resp = await self._call(
+            "send_group_msg",
+            {
+                "group_id": int(group_id),
+                "message": segments,
+            },
+        )
         if resp and resp.get("status") == "ok":
             data = resp.get("data") or {}
             return str(data.get("message_id", ""))
         return None
 
 
-from drivers.registry import register
 register("napcat", NapCatConfig, NapCatDriver)

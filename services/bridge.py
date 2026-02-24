@@ -9,15 +9,22 @@ import services.logger as log
 from services.message import NormalizedMessage
 from services.db import msg_db
 
-l = log.get_logger()
+logger = log.get_logger()
 
 # Config keys whose values are treated as credentials and must never appear in
 # outgoing messages.  Matched as substrings against lower-cased key names.
-_SENSITIVE_KEY_PATTERNS = ("token", "secret", "password", "webhook_url", "webhook_path", "access_token")
+_SENSITIVE_KEY_PATTERNS = (
+    "token",
+    "secret",
+    "password",
+    "webhook_url",
+    "webhook_path",
+    "access_token",
+)
 
 # Rich-header tag: <richheader title="..." content="..."/>
-_RICHHEADER_RE = re.compile(r'<richheader\b([^/]*)/>',  re.IGNORECASE)
-_ATTR_RE        = re.compile(r'(\w+)="([^"]*)"')
+_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
+_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 
 
 def _parse_richheader(text: str) -> tuple[str, dict | None]:
@@ -32,7 +39,7 @@ def _parse_richheader(text: str) -> tuple[str, dict | None]:
     if not m:
         return text, None
     attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[:m.start()] + text[m.end():]).strip()
+    clean = (text[: m.start()] + text[m.end() :]).strip()
     return clean, attrs or None
 
 
@@ -40,7 +47,11 @@ def _collect_sensitive(obj, found: set[str]) -> None:
     """Recursively extract sensitive string values from the config dict."""
     if isinstance(obj, dict):
         for k, v in obj.items():
-            if isinstance(v, str) and v and any(p in k.lower() for p in _SENSITIVE_KEY_PATTERNS):
+            if (
+                isinstance(v, str)
+                and v
+                and any(p in k.lower() for p in _SENSITIVE_KEY_PATTERNS)
+            ):
                 found.add(v)
             else:
                 _collect_sensitive(v, found)
@@ -72,31 +83,37 @@ class Bridge:
         with open(rules_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         self._rules = data.get("rules", [])
-        l.info(f"Loaded {len(self._rules)} bridge rule(s)")
+        logger.info(f"Loaded {len(self._rules)} bridge rule(s)")
 
     def load_sensitive_values(self, config: dict):
         found: set[str] = set()
         _collect_sensitive(config, found)
         self._sensitive = frozenset(found)
         log.register_sensitive(self._sensitive)
-        l.info(f"Loaded {len(self._sensitive)} sensitive value(s) for leak detection")
+        logger.info(
+            f"Loaded {len(self._sensitive)} sensitive value(s) for leak detection"
+        )
 
     def register_sender(self, instance_id: str, send_func: Callable):
         self._senders[instance_id] = send_func
-        l.debug(f"Registered sender for instance: {instance_id}")
+        logger.debug(f"Registered sender for instance: {instance_id}")
 
     async def _handle_bind_command(self, msg: NormalizedMessage):
         """Generate a 6-digit binding code for the user."""
         import random
+
         code = f"{random.randint(100000, 999999)}"
         msg_db.create_binding_code(code, msg.instance_id, msg.user_id)
-        
+
         sender = self._senders.get(msg.instance_id)
         if sender:
             try:
-                await sender(msg.channel, f"Your binding code is: `{code}` (valid for 5 mins). Type `/confirm {code}` on the other platform to link accounts.")
+                await sender(
+                    msg.channel,
+                    f"Your binding code is: `{code}` (valid for 5 mins). Type `/confirm {code}` on the other platform to link accounts.",
+                )
             except Exception as e:
-                l.error(f"Failed to send bind code back: {e}")
+                logger.error(f"Failed to send bind code back: {e}")
 
     async def _handle_confirm_command(self, msg: NormalizedMessage):
         """Confirm a binding code from another platform."""
@@ -106,14 +123,17 @@ class Bridge:
             if sender:
                 await sender(msg.channel, "Usage: `/confirm <code>`")
             return
-            
+
         code = parts[1]
         success = msg_db.consume_binding_code(code, msg.instance_id, msg.user_id)
-        
+
         sender = self._senders.get(msg.instance_id)
         if sender:
             if success:
-                await sender(msg.channel, "✅ Account successfully linked! Mentions will now target you correctly across platforms.")
+                await sender(
+                    msg.channel,
+                    "✅ Account successfully linked! Mentions will now target you correctly across platforms.",
+                )
             else:
                 await sender(msg.channel, "❌ Invalid or expired binding code.")
 
@@ -121,20 +141,30 @@ class Bridge:
         """Remove account bindings for the user."""
         parts = msg.text.split()
         target_inst = parts[1] if len(parts) > 1 else None
-        
+
         success = msg_db.remove_user_binding(msg.instance_id, msg.user_id, target_inst)
         sender = self._senders.get(msg.instance_id)
         if sender:
             if success:
                 if target_inst:
-                    await sender(msg.channel, f"🗑️ The binding for `{target_inst}` has been removed.")
+                    await sender(
+                        msg.channel,
+                        f"🗑️ The binding for `{target_inst}` has been removed.",
+                    )
                 else:
-                    await sender(msg.channel, "🗑️ All your account bindings have been removed.")
+                    await sender(
+                        msg.channel, "🗑️ All your account bindings have been removed."
+                    )
             else:
                 if target_inst:
-                    await sender(msg.channel, f"❓ No binding found for `{target_inst}` in your account group.")
+                    await sender(
+                        msg.channel,
+                        f"❓ No binding found for `{target_inst}` in your account group.",
+                    )
                 else:
-                    await sender(msg.channel, "❓ You don't have any active account bindings.")
+                    await sender(
+                        msg.channel, "❓ You don't have any active account bindings."
+                    )
 
     async def _handle_list_command(self, msg: NormalizedMessage):
         """List all accounts linked to the user's global identity."""
@@ -142,15 +172,21 @@ class Bridge:
         sender = self._senders.get(msg.instance_id)
         if sender:
             if not bindings:
-                await sender(msg.channel, "❓ You don't have any active account bindings.")
+                await sender(
+                    msg.channel, "❓ You don't have any active account bindings."
+                )
                 return
-            
+
             lines = ["🔗 **Linked Accounts:**"]
             for inst, uid in bindings:
                 name = msg_db.get_user_name(inst, uid) or "Unknown"
-                current = " (Current)" if inst == msg.instance_id and uid == msg.user_id else ""
+                current = (
+                    " (Current)"
+                    if inst == msg.instance_id and uid == msg.user_id
+                    else ""
+                )
                 lines.append(f"- `{inst}`: {name} (`{uid}`){current}")
-            
+
             await sender(msg.channel, "\n".join(lines))
 
     # ------------------------------------------------------------------
@@ -179,7 +215,9 @@ class Bridge:
         # Generate or resolve bridge_id for the incoming message
         bridge_id = str(uuid.uuid4())
         if msg.message_id:
-            msg_db.save_mapping(bridge_id, msg.instance_id, str(msg.channel), msg.message_id)
+            msg_db.save_mapping(
+                bridge_id, msg.instance_id, str(msg.channel), msg.message_id
+            )
 
         reply_bridge_id = None
         if msg.reply_parent:
@@ -213,22 +251,24 @@ class Bridge:
                 return False
         return True
 
-    def _build_formatted(self, msg: NormalizedMessage, msg_cfg: dict) -> tuple[str, dict]:
+    def _build_formatted(
+        self, msg: NormalizedMessage, msg_cfg: dict
+    ) -> tuple[str, dict]:
         """Return (formatted_text, extra_kwargs) for a given msg config block."""
         fmt = msg_cfg.get("msg_format", "{msg}")
         ctx = {
-            "platform":    msg.platform,
+            "platform": msg.platform,
             "instance_id": msg.instance_id,
-            "from":        msg.instance_id,
-            "username":    msg.user,
-            "user_id":     msg.user_id,
+            "from": msg.instance_id,
+            "username": msg.user,
+            "user_id": msg.user_id,
             "user_avatar": msg.user_avatar,
-            "msg":         msg.text,
+            "msg": msg.text,
         }
         try:
             formatted = fmt.format(**ctx)
         except KeyError as e:
-            l.warning(f"msg_format missing key {e}; using raw text")
+            logger.warning(f"msg_format missing key {e}; using raw text")
             formatted = msg.text
 
         formatted, rich_header = _parse_richheader(formatted)
@@ -250,7 +290,13 @@ class Bridge:
     def _is_sensitive(self, text: str) -> bool:
         return bool(self._sensitive) and any(s in text for s in self._sensitive)
 
-    async def _dispatch(self, msg: NormalizedMessage, rule: dict, bridge_id: str, reply_bridge_id: str | None = None):
+    async def _dispatch(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+        reply_bridge_id: str | None = None,
+    ):
         formatted, extra = self._build_formatted(msg, rule.get("msg", {}))
 
         for target_id, target_channel in rule.get("to", {}).items():
@@ -259,7 +305,7 @@ class Bridge:
                 continue
 
             if self._is_sensitive(formatted):
-                l.warning(
+                logger.warning(
                     f"Message to '{target_id}' blocked: text contains a sensitive "
                     f"value from config (token/secret/webhook). Possible credential leak."
                 )
@@ -267,13 +313,15 @@ class Bridge:
 
             sender = self._senders.get(target_id)
             if sender is None:
-                l.warning(f"No sender registered for instance '{target_id}'")
+                logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
 
             # Resolve target reply ID
             target_reply_id = None
             if reply_bridge_id:
-                target_reply_id = msg_db.get_platform_msg_id(reply_bridge_id, target_id, str(target_channel))
+                target_reply_id = msg_db.get_platform_msg_id(
+                    reply_bridge_id, target_id, str(target_channel)
+                )
                 if target_reply_id:
                     extra["reply_to_id"] = target_reply_id
 
@@ -281,24 +329,36 @@ class Bridge:
             target_mentions = []
             for m in msg.mentions:
                 # 1. Try explicit binding first
-                target_uid = msg_db.get_bound_user_id(msg.instance_id, m["id"], target_id)
+                target_uid = msg_db.get_bound_user_id(
+                    msg.instance_id, m["id"], target_id
+                )
                 # 2. Fall back to display name match
                 if not target_uid:
                     target_uid = msg_db.get_user_id_by_name(target_id, m["name"])
-                
+
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
             if target_mentions:
                 extra["mentions"] = target_mentions
 
             try:
-                new_msg_id = await sender(target_channel, formatted, attachments=msg.attachments, **extra)
+                new_msg_id = await sender(
+                    target_channel, formatted, attachments=msg.attachments, **extra
+                )
                 if new_msg_id:
-                    msg_db.save_mapping(bridge_id, target_id, str(target_channel), str(new_msg_id))
+                    msg_db.save_mapping(
+                        bridge_id, target_id, str(target_channel), str(new_msg_id)
+                    )
             except Exception as e:
-                l.error(f"Failed to send to '{target_id}': {e}")
+                logger.error(f"Failed to send to '{target_id}': {e}")
 
-    async def _dispatch_connect(self, msg: NormalizedMessage, rule: dict, bridge_id: str, reply_bridge_id: str | None = None):
+    async def _dispatch_connect(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+        reply_bridge_id: str | None = None,
+    ):
         """Fan-out to every channel in the connect rule except the source."""
         global_msg_cfg = rule.get("msg", {})
 
@@ -315,7 +375,7 @@ class Bridge:
             formatted, extra = self._build_formatted(msg, merged_msg_cfg)
 
             if self._is_sensitive(formatted):
-                l.warning(
+                logger.warning(
                     f"Message to '{target_id}' blocked: text contains a sensitive "
                     f"value from config (token/secret/webhook). Possible credential leak."
                 )
@@ -323,13 +383,15 @@ class Bridge:
 
             sender = self._senders.get(target_id)
             if sender is None:
-                l.warning(f"No sender registered for instance '{target_id}'")
+                logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
 
             # Resolve target reply ID
             target_reply_id = None
             if reply_bridge_id:
-                target_reply_id = msg_db.get_platform_msg_id(reply_bridge_id, target_id, str(target_channel))
+                target_reply_id = msg_db.get_platform_msg_id(
+                    reply_bridge_id, target_id, str(target_channel)
+                )
                 if target_reply_id:
                     extra["reply_to_id"] = target_reply_id
 
@@ -337,22 +399,28 @@ class Bridge:
             target_mentions = []
             for m in msg.mentions:
                 # 1. Try explicit binding first
-                target_uid = msg_db.get_bound_user_id(msg.instance_id, m["id"], target_id)
+                target_uid = msg_db.get_bound_user_id(
+                    msg.instance_id, m["id"], target_id
+                )
                 # 2. Fall back to display name match
                 if not target_uid:
                     target_uid = msg_db.get_user_id_by_name(target_id, m["name"])
-                
+
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
             if target_mentions:
                 extra["mentions"] = target_mentions
 
             try:
-                new_msg_id = await sender(target_channel, formatted, attachments=msg.attachments, **extra)
+                new_msg_id = await sender(
+                    target_channel, formatted, attachments=msg.attachments, **extra
+                )
                 if new_msg_id:
-                    msg_db.save_mapping(bridge_id, target_id, str(target_channel), str(new_msg_id))
+                    msg_db.save_mapping(
+                        bridge_id, target_id, str(target_channel), str(new_msg_id)
+                    )
             except Exception as e:
-                l.error(f"Failed to send to '{target_id}': {e}")
+                logger.error(f"Failed to send to '{target_id}': {e}")
 
 
 # Shared singleton used by all drivers

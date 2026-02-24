@@ -22,6 +22,7 @@
 #                           webhook events, or from the DingTalk developer
 #                           console for the group)
 
+from drivers.registry import register
 import asyncio
 import base64
 import hashlib
@@ -49,26 +50,26 @@ _UPLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/upload"
 
 
 class DingTalkConfig(_DriverConfig):
-    app_key:        str
-    app_secret:     str
-    robot_code:     str
+    app_key: str
+    app_secret: str
+    robot_code: str
     signing_secret: str = ""
-    listen_port:    int = 8082
-    listen_path:    str = "/dingtalk/event"
-    max_file_size:  int = 20 * 1024 * 1024
+    listen_port: int = 8082
+    listen_path: str = "/dingtalk/event"
+    max_file_size: int = 20 * 1024 * 1024
 
-l = log.get_logger()
+
+logger = log.get_logger()
 
 _DINGTALK_ENDPOINT = "api.dingtalk.com"
 
 
 class DingTalkDriver(BaseDriver[DingTalkConfig]):
-
     def __init__(self, instance_id: str, config: DingTalkConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._oauth_client: OAuthClient | None = None
         self._robot_client: RobotClient | None = None
-        self._session:      aiohttp.ClientSession | None = None
+        self._session: aiohttp.ClientSession | None = None
         self._access_token: str = ""
         self._token_expires_at: float = 0.0
 
@@ -94,7 +95,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        l.info(
+        logger.info(
             f"DingTalk [{self.instance_id}] HTTP server listening on "
             f"0.0.0.0:{port}{path}"
         )
@@ -120,7 +121,9 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             ts = request.headers.get("timestamp", "")
             sig = request.headers.get("sign", "")
             if not _verify_sign(ts, self.config.signing_secret, sig):
-                l.warning(f"DingTalk [{self.instance_id}] webhook signature mismatch")
+                logger.warning(
+                    f"DingTalk [{self.instance_id}] webhook signature mismatch"
+                )
                 return web.json_response({"message": "forbidden"}, status=403)
 
         if body.get("msgtype") != "text":
@@ -163,10 +166,17 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
     # Send
     # ------------------------------------------------------------------
 
-    async def send(self, channel: dict, text: str, attachments: list[Attachment] | None = None, **kwargs):
+    async def send(
+        self,
+        channel: dict,
+        text: str,
+        attachments: list[Attachment] | None = None,
+        **kwargs,
+    ):
+        reply_to_id = kwargs.get("reply_to_id")
         open_conv_id = channel.get("open_conversation_id")
         if not open_conv_id:
-            l.warning(
+            logger.warning(
                 f"DingTalk [{self.instance_id}] send: "
                 f"no open_conversation_id in channel {channel}"
             )
@@ -178,10 +188,13 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
             text = f"{prefix}\n{text}" if text else prefix
 
+        if reply_to_id:
+            text = f"> [Reply]\n{text}"
+
         try:
             token = await self._get_access_token()
         except Exception as e:
-            l.error(f"DingTalk [{self.instance_id}] access token error: {e}")
+            logger.error(f"DingTalk [{self.instance_id}] access token error: {e}")
             return
 
         # Handle mentions
@@ -198,8 +211,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 param["at"] = {"atUserIds": at_uids}
             await self._send_org_msg(open_conv_id, token, "sampleText", param)
 
-        max_size = self.config.max_file_size
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
@@ -211,11 +223,13 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 continue
 
             # All other attachments: download bytes and upload to DingTalk
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
                 await self._send_org_msg(
-                    open_conv_id, token, "sampleText",
+                    open_conv_id,
+                    token,
+                    "sampleText",
                     {"content": f"[{att.type.capitalize()}: {label}]"},
                 )
                 continue
@@ -223,25 +237,33 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             data_bytes, mime = result
             fname = media.filename_for(att.name, mime)
             media_type = "voice" if mime.startswith("audio/") else "file"
-            media_id = await self._upload_media(token, data_bytes, fname, mime, media_type)
+            media_id = await self._upload_media(
+                token, data_bytes, fname, mime, media_type
+            )
 
             if not media_id:
                 label = att.name or fname
                 await self._send_org_msg(
-                    open_conv_id, token, "sampleText",
+                    open_conv_id,
+                    token,
+                    "sampleText",
                     {"content": f"[{att.type.capitalize()}: {label}]"},
                 )
                 continue
 
             if media_type == "voice":
                 await self._send_org_msg(
-                    open_conv_id, token, "sampleAudio",
+                    open_conv_id,
+                    token,
+                    "sampleAudio",
                     {"mediaId": media_id, "duration": "0"},
                 )
             else:
                 ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "bin"
                 await self._send_org_msg(
-                    open_conv_id, token, "sampleFile",
+                    open_conv_id,
+                    token,
+                    "sampleFile",
                     {"mediaId": media_id, "fileName": fname, "fileType": ext},
                 )
 
@@ -264,7 +286,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 ),
             )
         except Exception as e:
-            l.error(f"DingTalk [{self.instance_id}] send failed ({msg_key}): {e}")
+            logger.error(f"DingTalk [{self.instance_id}] send failed ({msg_key}): {e}")
 
     async def _upload_media(
         self,
@@ -290,12 +312,12 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                     js = await resp.json(content_type=None)
                     return js.get("mediaId")
                 body = await resp.text()
-                l.error(
+                logger.error(
                     f"DingTalk [{self.instance_id}] media upload failed "
                     f"HTTP {resp.status}: {body[:200]}"
                 )
         except Exception as e:
-            l.error(f"DingTalk [{self.instance_id}] media upload error: {e}")
+            logger.error(f"DingTalk [{self.instance_id}] media upload error: {e}")
         return None
 
     # ------------------------------------------------------------------
@@ -316,13 +338,14 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         )
         self._access_token = resp.body.access_token
         self._token_expires_at = time.monotonic() + (resp.body.expire_in or 7200)
-        l.debug(f"DingTalk [{self.instance_id}] access token refreshed")
+        logger.debug(f"DingTalk [{self.instance_id}] access token refreshed")
         return self._access_token
 
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _verify_sign(timestamp: str, secret: str, sign: str) -> bool:
     """Verify DingTalk webhook HMAC-SHA256 signature."""
@@ -342,5 +365,4 @@ def _verify_sign(timestamp: str, secret: str, sign: str) -> bool:
         return False
 
 
-from drivers.registry import register
 register("dingtalk", DingTalkConfig, DingTalkDriver)

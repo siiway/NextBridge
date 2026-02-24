@@ -23,6 +23,7 @@
 #   gid – VoceChat group/channel ID  (integer or string)
 #   uid – VoceChat user ID for DMs   (integer or string)
 
+from drivers.registry import register
 import asyncio
 import json
 
@@ -33,19 +34,18 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.db import msg_db
 from drivers import BaseDriver
 
 
 class VoceChatConfig(_DriverConfig):
-    server_url:    str
-    api_key:       str
-    listen_port:   int = 8091
-    listen_path:   str = "/vocechat/webhook"
+    server_url: str
+    api_key: str
+    listen_port: int = 8091
+    listen_path: str = "/vocechat/webhook"
     max_file_size: int = 50 * 1024 * 1024
 
 
-l = log.get_logger()
+logger = log.get_logger()
 
 
 def _mime_to_att_type(mime: str) -> str:
@@ -59,11 +59,11 @@ def _mime_to_att_type(mime: str) -> str:
 
 
 class VoceChatDriver(BaseDriver[VoceChatConfig]):
-
     def __init__(self, instance_id: str, config: VoceChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
-        self._session:    aiohttp.ClientSession | None = None
-        self._user_cache: dict[int, tuple[str, str]]   = {}  # uid → (name, avatar)
+        self._session: aiohttp.ClientSession | None = None
+        # uid → (name, avatar)
+        self._user_cache: dict[int, tuple[str, str]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -76,13 +76,13 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
 
         app = web.Application()
-        app.router.add_get(self.config.listen_path,  self._handle_health)
+        app.router.add_get(self.config.listen_path, self._handle_health)
         app.router.add_post(self.config.listen_path, self._handle_event)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", self.config.listen_port)
         await site.start()
-        l.info(
+        logger.info(
             f"VoceChat [{self.instance_id}] webhook listening on "
             f"0.0.0.0:{self.config.listen_port}{self.config.listen_path}"
         )
@@ -104,7 +104,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
 
     async def _handle_event(self, request: web.Request) -> web.Response:
         try:
-            body  = await request.read()
+            body = await request.read()
             event = json.loads(body)
         except Exception:
             return web.Response(status=400, text="Bad JSON")
@@ -119,9 +119,9 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             return
 
         content_type: str = detail.get("content_type", "")
-        content:      str = detail.get("content", "") or ""
-        from_uid:     int = event.get("from_uid", 0)
-        target:       dict = event.get("target", {})
+        content: str = detail.get("content", "") or ""
+        from_uid: int = event.get("from_uid", 0)
+        target: dict = event.get("target", {})
 
         # Derive the channel dict from the target
         if "gid" in target:
@@ -132,16 +132,15 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         else:
             return
 
-        server   = self.config.server_url.rstrip("/")
-        max_size = self.config.max_file_size
+        server = self.config.server_url.rstrip("/")
 
-        text        = ""
+        text = ""
         attachments: list[Attachment] = []
 
         if content_type in ("text/plain", "text/markdown"):
             text = content.strip()
         elif content_type == "vocechat/file":
-            att = await self._fetch_file_msg(content, server, max_size)
+            att = await self._fetch_file_msg(content, server, self.config.max_file_size)
             if att:
                 attachments.append(att)
         else:
@@ -163,7 +162,9 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             text=text,
             attachments=attachments,
             message_id=str(event.get("mid", "")),
-            reply_parent=str(detail.get("parent_mid", "")) if detail.get("parent_mid") else None,
+            reply_parent=str(detail.get("parent_mid", ""))
+            if detail.get("parent_mid")
+            else None,
         )
         await self.bridge.on_message(normalized)
 
@@ -181,16 +182,16 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             ) as resp:
                 if resp.status == 200:
                     u = await resp.json(content_type=None)
-                    name   = u.get("name") or str(uid)
+                    name = u.get("name") or str(uid)
                     avatar = f"{server}/api/resource/avatar?uid={uid}"
                 else:
                     body = await resp.text()
-                    l.warning(
+                    logger.warning(
                         f"VoceChat [{self.instance_id}] user lookup for uid={uid} "
                         f"failed HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            l.warning(
+            logger.warning(
                 f"VoceChat [{self.instance_id}] user lookup for uid={uid} error: {e}"
             )
 
@@ -217,12 +218,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     return None
                 data = await resp.read()
                 if len(data) > max_size:
-                    l.debug(
+                    logger.debug(
                         f"VoceChat [{self.instance_id}] file {path!r} "
                         f"exceeds size limit"
                     )
                     return None
-                ct   = resp.content_type or "application/octet-stream"
+                ct = resp.content_type or "application/octet-stream"
                 name = path.rsplit("/", 1)[-1] or "attachment"
                 return Attachment(
                     type=_mime_to_att_type(ct),
@@ -232,9 +233,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     data=data,
                 )
         except Exception as e:
-            l.warning(
-                f"VoceChat [{self.instance_id}] file download failed: {e}"
-            )
+            logger.warning(
+                f"VoceChat [{self.instance_id}] file download failed: {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -243,26 +243,26 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
 
     async def send(
         self,
-        channel:     dict,
-        text:        str,
+        channel: dict,
+        text: str,
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
         if self._session is None:
-            l.warning(f"VoceChat [{self.instance_id}] send: driver not started")
+            logger.warning(
+                f"VoceChat [{self.instance_id}] send: driver not started")
             return None
 
         gid = channel.get("gid")
         uid = channel.get("uid")
         if gid is None and uid is None:
-            l.warning(
+            logger.warning(
                 f"VoceChat [{self.instance_id}] send: "
                 f"no gid or uid in channel {channel}"
             )
             return None
 
-        server   = self.config.server_url.rstrip("/")
-        max_size = self.config.max_file_size
+        server = self.config.server_url.rstrip("/")
 
         endpoint = (
             f"{server}/api/bot/send_to_group/{gid}"
@@ -296,21 +296,23 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             # Use markdown if rich_header was applied; plain text otherwise
             ct = "text/markdown" if rich_header else "text/plain"
             mid = await self._post_message(endpoint, text.encode(), ct, reply_to_id)
-            if not first_msg_id: first_msg_id = mid
+            if not first_msg_id:
+                first_msg_id = mid
 
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
                 mid = await self._post_message(
                     endpoint,
                     f"[{att.type.capitalize()}: {label}]".encode(),
                     "text/plain",
-                    reply_to_id
+                    reply_to_id,
                 )
-                if not first_msg_id: first_msg_id = mid
+                if not first_msg_id:
+                    first_msg_id = mid
                 continue
 
             data_bytes, mime = result
@@ -318,17 +320,21 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             file_path = await self._upload_file(server, data_bytes, fname, mime)
             if file_path:
                 body = json.dumps({"path": file_path}).encode()
-                mid = await self._post_message(endpoint, body, "vocechat/file", reply_to_id)
-                if not first_msg_id: first_msg_id = mid
+                mid = await self._post_message(
+                    endpoint, body, "vocechat/file", reply_to_id
+                )
+                if not first_msg_id:
+                    first_msg_id = mid
             else:
                 label = att.name or fname
                 mid = await self._post_message(
                     endpoint,
                     f"[{att.type.capitalize()}: {label}]".encode(),
                     "text/plain",
-                    reply_to_id
+                    reply_to_id,
                 )
-                if not first_msg_id: first_msg_id = mid
+                if not first_msg_id:
+                    first_msg_id = mid
 
         return first_msg_id
 
@@ -353,24 +359,24 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     try:
                         res_json = json.loads(res_text)
                         return str(res_json.get("mid", ""))
-                    except:
+                    except Exception:
                         return res_text.strip().strip('"')
                 else:
                     text = await resp.text()
-                    l.error(
+                    logger.error(
                         f"VoceChat [{self.instance_id}] send failed "
                         f"HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            l.error(f"VoceChat [{self.instance_id}] send error: {e}")
+            logger.error(f"VoceChat [{self.instance_id}] send error: {e}")
         return None
 
     async def _upload_file(
         self,
         server: str,
-        data:   bytes,
-        fname:  str,
-        mime:   str,
+        data: bytes,
+        fname: str,
+        mime: str,
     ) -> str | None:
         """Upload a file using VoceChat's two-step API and return its path."""
         if self._session is None:
@@ -384,20 +390,21 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"VoceChat [{self.instance_id}] file prepare failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
                     return None
                 file_id = (await resp.text()).strip().strip('"')
         except Exception as e:
-            l.error(f"VoceChat [{self.instance_id}] file prepare error: {e}")
+            logger.error(
+                f"VoceChat [{self.instance_id}] file prepare error: {e}")
             return None
 
         # Step 2: upload — multipart with file_id, chunk_data, chunk_is_last
         form = aiohttp.FormData()
-        form.add_field("file_id",       file_id)
-        form.add_field("chunk_data",    data, filename=fname, content_type=mime)
+        form.add_field("file_id", file_id)
+        form.add_field("chunk_data", data, filename=fname, content_type=mime)
         form.add_field("chunk_is_last", "true")
         try:
             async with self._session.post(
@@ -405,7 +412,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"VoceChat [{self.instance_id}] file upload failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
@@ -413,9 +420,9 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 js = await resp.json(content_type=None)
                 return js.get("path")
         except Exception as e:
-            l.error(f"VoceChat [{self.instance_id}] file upload error: {e}")
+            logger.error(
+                f"VoceChat [{self.instance_id}] file upload error: {e}")
             return None
 
 
-from drivers.registry import register
 register("vocechat", VoceChatConfig, VoceChatDriver)

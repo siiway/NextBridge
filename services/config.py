@@ -4,7 +4,7 @@ import services.util as u
 import services.logger as log
 import services.config_io as config_io
 
-l = log.get_logger()
+logger = log.get_logger()
 
 _config_cache = None
 _config_path: Path | None = None
@@ -33,7 +33,7 @@ def get(key: str, default=None):
     try:
         config = _load_config()
     except Exception as e:
-        l.warning(f"Failed to load config file! Error: {e}")
+        logger.warning(f"Failed to load config file! Error: {e}")
         return default
 
     keys = key.split(".")

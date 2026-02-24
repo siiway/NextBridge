@@ -40,6 +40,7 @@
 #   rc_alias  – Display name override  (e.g. "{username}")
 #   rc_avatar – Avatar URL override    (e.g. "{user_avatar}", must be HTTPS)
 
+from drivers.registry import register
 import asyncio
 
 import aiohttp
@@ -50,21 +51,20 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.db import msg_db
 from drivers import BaseDriver
 
 
 class RocketChatConfig(_DriverConfig):
-    send_method:   str = "api"   # "api" or "webhook"
+    send_method: str = "api"  # "api" or "webhook"
     # API send mode (and receive attachment downloads)
-    server_url:    str = ""
-    auth_token:    str = ""
-    user_id:       str = ""
+    server_url: str = ""
+    auth_token: str = ""
+    user_id: str = ""
     # Webhook send mode
-    webhook_url:   str = ""
+    webhook_url: str = ""
     # Listener (receive side)
-    listen_port:   int = 8093
-    listen_path:   str = "/rocketchat/webhook"
+    listen_port: int = 8093
+    listen_path: str = "/rocketchat/webhook"
     webhook_token: str = ""
     max_file_size: int = 50 * 1024 * 1024
 
@@ -83,15 +83,14 @@ class RocketChatConfig(_DriverConfig):
         return self
 
 
-l = log.get_logger()
+logger = log.get_logger()
 
 
 class RocketChatDriver(BaseDriver[RocketChatConfig]):
-
     def __init__(self, instance_id: str, config: RocketChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
-        self._username_cache: dict[str, str]        = {}
+        self._username_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -107,7 +106,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", self.config.listen_port)
         await site.start()
-        l.info(
+        logger.info(
             f"Rocket.Chat [{self.instance_id}] listening on "
             f"0.0.0.0:{self.config.listen_port}{self.config.listen_path} "
             f"(send_method={self.config.send_method})"
@@ -123,7 +122,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
     def _auth_headers(self) -> dict:
         return {
             "X-Auth-Token": self.config.auth_token,
-            "X-User-Id":    self.config.user_id,
+            "X-User-Id": self.config.user_id,
         }
 
     # ------------------------------------------------------------------
@@ -138,18 +137,20 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
 
         if self.config.webhook_token:
             if body.get("token", "") != self.config.webhook_token:
-                l.warning(f"Rocket.Chat [{self.instance_id}] webhook token mismatch")
+                logger.warning(
+                    f"Rocket.Chat [{self.instance_id}] webhook token mismatch"
+                )
                 return web.json_response({"error": "forbidden"}, status=403)
 
         sender_id: str = body.get("user_id", "")
         if sender_id == self.config.user_id:
             return web.json_response({})
 
-        text:     str = body.get("text", "").strip()
-        room_id:  str = body.get("channel_id") or body.get("rid", "")
+        text: str = body.get("text", "").strip()
+        room_id: str = body.get("channel_id") or body.get("rid", "")
         username: str = body.get("user_name", sender_id)
-        avatar:   str = body.get("user_avatar", "")
-        server:   str = self.config.server_url.rstrip("/")
+        avatar: str = body.get("user_avatar", "")
+        server: str = self.config.server_url.rstrip("/")
 
         mentions = []
         raw_mentions = body.get("mentions", [])
@@ -159,10 +160,11 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             if uid and uname:
                 mentions.append({"id": uid, "name": uname})
 
-        max_size = self.config.max_file_size
         attachments: list[Attachment] = []
-        for att_raw in (body.get("attachments") or []):
-            att = await self._parse_attachment(att_raw, server, max_size)
+        for att_raw in body.get("attachments") or []:
+            att = await self._parse_attachment(
+                att_raw, server, self.config.max_file_size
+            )
             if att is not None:
                 attachments.append(att)
 
@@ -186,10 +188,11 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
     async def _parse_attachment(
         self, att_raw: dict, server: str, max_size: int
     ) -> Attachment | None:
-        title      = att_raw.get("title") or att_raw.get("description") or "attachment"
-        image_url  = att_raw.get("image_url", "")
-        video_url  = att_raw.get("video_url", "")
-        audio_url  = att_raw.get("audio_url", "")
+        title = att_raw.get("title") or att_raw.get(
+            "description") or "attachment"
+        image_url = att_raw.get("image_url", "")
+        video_url = att_raw.get("video_url", "")
+        audio_url = att_raw.get("audio_url", "")
         title_link = att_raw.get("title_link", "")
 
         if image_url:
@@ -212,17 +215,25 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         try:
             async with self._session.get(url, headers=self._auth_headers) as resp:
                 if resp.status != 200:
-                    return Attachment(type=att_type, url=url, name=title, size=-1, data=None)
+                    return Attachment(
+                        type=att_type, url=url, name=title, size=-1, data=None
+                    )
                 data = await resp.read()
                 if len(data) > max_size:
-                    l.debug(
+                    logger.debug(
                         f"Rocket.Chat [{self.instance_id}] attachment "
                         f"{title!r} exceeds size limit, skipping data"
                     )
-                    return Attachment(type=att_type, url=url, name=title, size=len(data), data=None)
-                return Attachment(type=att_type, url="", name=title, size=len(data), data=data)
+                    return Attachment(
+                        type=att_type, url=url, name=title, size=len(data), data=None
+                    )
+                return Attachment(
+                    type=att_type, url="", name=title, size=len(data), data=data
+                )
         except Exception as e:
-            l.warning(f"Rocket.Chat [{self.instance_id}] attachment download failed: {e}")
+            logger.warning(
+                f"Rocket.Chat [{self.instance_id}] attachment download failed: {e}"
+            )
             return Attachment(type=att_type, url=url, name=title, size=-1, data=None)
 
     async def _get_username(self, user_id: str, server: str) -> str:
@@ -236,7 +247,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             async with self._session.get(
                 f"{server}/api/v1/users.info",
                 params={"userId": user_id},
-                headers=self._auth_headers
+                headers=self._auth_headers,
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -244,7 +255,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                     username = u.get("username", "")
         except Exception:
             pass
-        
+
         if username:
             self._username_cache[user_id] = username
         return username
@@ -255,16 +266,19 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
 
     async def send(
         self,
-        channel:     dict,
-        text:        str,
+        channel: dict,
+        text: str,
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
+        reply_to_id = kwargs.get("reply_to_id")
+
         if self._session is None:
-            l.warning(f"Rocket.Chat [{self.instance_id}] send: driver not started")
+            logger.warning(
+                f"Rocket.Chat [{self.instance_id}] send: driver not started")
             return
 
-        alias  = kwargs.get("rc_alias", "")
+        alias = kwargs.get("rc_alias", "")
         av_url = kwargs.get("rc_avatar", "")
         avatar = av_url if (av_url and av_url.startswith("https://")) else ""
         server = self.config.server_url.rstrip("/")
@@ -277,17 +291,19 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                 text = text.replace(f"@{m['name']}", f"@{username}")
 
         if self.config.send_method == "webhook":
-            await self._send_webhook(text, attachments, alias, avatar)
+            await self._send_webhook(text, attachments, alias, avatar, reply_to_id)
         else:
             room_id = channel.get("room_id", "")
             if not room_id:
-                l.warning(
+                logger.warning(
                     f"Rocket.Chat [{self.instance_id}] send: "
                     f"no room_id in channel {channel}"
                 )
                 return
             server = self.config.server_url.rstrip("/")
-            await self._send_api(server, room_id, text, attachments, alias, avatar)
+            await self._send_api(
+                server, room_id, text, attachments, alias, avatar, reply_to_id
+            )
 
     # ------------------------------------------------------------------
     # Send — API mode
@@ -295,43 +311,53 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
 
     async def _send_api(
         self,
-        server:      str,
-        room_id:     str,
-        text:        str,
+        server: str,
+        room_id: str,
+        text: str,
         attachments: list[Attachment] | None,
-        alias:       str,
-        avatar:      str,
+        alias: str,
+        avatar: str,
+        reply_to_id: str | None = None,
     ) -> None:
-        max_size = self.config.max_file_size
 
         if text.strip():
-            await self._api_post_message(server, room_id, text, alias, avatar)
+            await self._api_post_message(
+                server, room_id, text, alias, avatar, reply_to_id
+            )
 
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
                 await self._api_post_message(
-                    server, room_id,
+                    server,
+                    room_id,
                     f"[{att.type.capitalize()}: {label}]",
-                    alias, avatar,
+                    alias,
+                    avatar,
+                    reply_to_id,
                 )
                 continue
             data_bytes, mime = result
             fname = media.filename_for(att.name, mime)
-            await self._api_upload_file(server, room_id, data_bytes, fname, mime)
+            await self._api_upload_file(
+                server, room_id, data_bytes, fname, mime, reply_to_id
+            )
 
     async def _api_post_message(
         self,
-        server:  str,
+        server: str,
         room_id: str,
-        text:    str,
-        alias:   str = "",
-        avatar:  str = "",
+        text: str,
+        alias: str = "",
+        avatar: str = "",
+        reply_to_id: str | None = None,
     ) -> None:
         payload: dict = {"roomId": room_id, "text": text}
+        if reply_to_id:
+            payload["tmid"] = reply_to_id
         if alias:
             payload["alias"] = alias
         if avatar:
@@ -344,17 +370,25 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Rocket.Chat [{self.instance_id}] post failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            l.error(f"Rocket.Chat [{self.instance_id}] post error: {e}")
+            logger.error(f"Rocket.Chat [{self.instance_id}] post error: {e}")
 
     async def _api_upload_file(
-        self, server: str, room_id: str, data: bytes, fname: str, mime: str
+        self,
+        server: str,
+        room_id: str,
+        data: bytes,
+        fname: str,
+        mime: str,
+        reply_to_id: str | None = None,
     ) -> None:
         form = aiohttp.FormData()
+        if reply_to_id:
+            form.add_field("tmid", reply_to_id)
         form.add_field("file", data, filename=fname, content_type=mime)
         try:
             async with self._session.post(
@@ -364,12 +398,13 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Rocket.Chat [{self.instance_id}] file upload failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            l.error(f"Rocket.Chat [{self.instance_id}] file upload error: {e}")
+            logger.error(
+                f"Rocket.Chat [{self.instance_id}] file upload error: {e}")
 
     # ------------------------------------------------------------------
     # Send — Webhook mode
@@ -377,12 +412,12 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
 
     async def _send_webhook(
         self,
-        text:        str,
+        text: str,
         attachments: list[Attachment] | None,
-        username:    str,
-        icon_url:    str,
+        username: str,
+        icon_url: str,
+        reply_to_id: str | None = None,
     ) -> None:
-        max_size = self.config.max_file_size
 
         # Build RC webhook attachment objects for each media item.
         # Incoming webhooks cannot upload bytes, so we use URL-based rendering
@@ -390,20 +425,22 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         wh_attachments: list[dict] = []
         fallback_labels: list[str] = []
 
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             if att.url:
                 entry: dict = {"title": att.name or att.url}
                 if att.type == "image":
-                    entry["image_url"]  = att.url
+                    entry["image_url"] = att.url
                     entry["title_link"] = att.url
                 else:
                     entry["title_link"] = att.url
                 wh_attachments.append(entry)
             else:
                 # bytes only, no URL — can't render via incoming webhook
-                fallback_labels.append(f"[{att.type.capitalize()}: {att.name or 'attachment'}]")
+                fallback_labels.append(
+                    f"[{att.type.capitalize()}: {att.name or 'attachment'}]"
+                )
 
         # Append byte-only fallback labels to the text body
         full_text = text
@@ -423,6 +460,8 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             payload["icon_url"] = icon_url
         if wh_attachments:
             payload["attachments"] = wh_attachments
+        if reply_to_id:
+            payload["tmid"] = reply_to_id
 
         try:
             async with self._session.post(
@@ -430,13 +469,13 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Rocket.Chat [{self.instance_id}] webhook post failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            l.error(f"Rocket.Chat [{self.instance_id}] webhook post error: {e}")
+            logger.error(
+                f"Rocket.Chat [{self.instance_id}] webhook post error: {e}")
 
 
-from drivers.registry import register
 register("rocketchat", RocketChatConfig, RocketChatDriver)

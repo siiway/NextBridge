@@ -16,6 +16,7 @@
 # Rule channel keys:
 #   room_id – Matrix room ID, e.g. "!abc123:matrix.org"
 
+from drivers.registry import register
 from mautrix.client import Client
 from mautrix.types import (
     AudioInfo,
@@ -39,15 +40,14 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.db import msg_db
 from drivers import BaseDriver
 
 
 class MatrixConfig(_DriverConfig):
-    homeserver:    str
-    user_id:       str
-    password:      str = ""
-    access_token:  str = ""
+    homeserver: str
+    user_id: str
+    password: str = ""
+    access_token: str = ""
     max_file_size: int = 10 * 1024 * 1024
 
     @model_validator(mode="after")
@@ -56,13 +56,14 @@ class MatrixConfig(_DriverConfig):
             raise ValueError("requires 'password' or 'access_token'")
         return self
 
-l = log.get_logger()
+
+logger = log.get_logger()
 
 _FILE_TYPES = {
     "image": MessageType.IMAGE,
     "video": MessageType.VIDEO,
     "voice": MessageType.AUDIO,
-    "file":  MessageType.FILE,
+    "file": MessageType.FILE,
 }
 
 
@@ -78,7 +79,6 @@ def _make_info(att_type: str, mime: str, size: int) -> FileInfo:
 
 
 class MatrixDriver(BaseDriver[MatrixConfig]):
-
     def __init__(self, instance_id: str, config: MatrixConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: Client | None = None
@@ -89,7 +89,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
 
     async def start(self):
         homeserver = self.config.homeserver.rstrip("/")
-        user_id    = self.config.user_id
+        user_id = self.config.user_id
 
         self._client = Client(mxid=UserID(user_id), base_url=homeserver)
 
@@ -104,23 +104,24 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     store_access_token=True,
                 )
             except Exception as e:
-                l.error(f"Matrix [{self.instance_id}] login failed: {e}")
+                logger.error(f"Matrix [{self.instance_id}] login failed: {e}")
                 return
 
         # Skip the initial sync batch so historical messages are not bridged
         self._client.ignore_first_sync = True
         self._client.ignore_initial_sync = True
 
-        self._client.add_event_handler(EventType.ROOM_MESSAGE, self._on_message)
+        self._client.add_event_handler(
+            EventType.ROOM_MESSAGE, self._on_message)
 
         # Register only after the client is fully ready so send() is never
         # called while self._client is None (e.g. after a config error above).
         self.bridge.register_sender(self.instance_id, self.send)
-        l.info(f"Matrix [{self.instance_id}] starting sync")
+        logger.info(f"Matrix [{self.instance_id}] starting sync")
         try:
             await self._client.start(filter_data=None)
         except Exception as e:
-            l.error(f"Matrix [{self.instance_id}] sync loop error: {e}")
+            logger.error(f"Matrix [{self.instance_id}] sync loop error: {e}")
             raise
 
     # ------------------------------------------------------------------
@@ -183,16 +184,18 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     mentions.append({"id": uid, "name": name})
 
             display_name, avatar = await self._get_profile(str(event.sender))
-            await self.bridge.on_message(NormalizedMessage(
-                platform="matrix",
-                instance_id=self.instance_id,
-                channel={"room_id": str(event.room_id)},
-                user=display_name,
-                user_id=str(event.sender),
-                user_avatar=avatar,
-                text=text,
-                mentions=mentions,
-            ))
+            await self.bridge.on_message(
+                NormalizedMessage(
+                    platform="matrix",
+                    instance_id=self.instance_id,
+                    channel={"room_id": str(event.room_id)},
+                    user=display_name,
+                    user_id=str(event.sender),
+                    user_avatar=avatar,
+                    text=text,
+                    mentions=mentions,
+                )
+            )
 
         elif isinstance(content, MediaMessageEventContent):
             msgtype = content.msgtype
@@ -205,12 +208,13 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             else:
                 att_type = "file"
 
-            max_size: int = self.config.max_file_size
-
             # Honour declared size before downloading
-            declared = getattr(content.info, "size", None) if content.info else None
-            if declared and declared > max_size:
-                l.debug(f"Matrix [{self.instance_id}] skipping {content.body!r}: {declared} > {max_size}")
+            declared = getattr(content.info, "size",
+                               None) if content.info else None
+            if declared and declared > self.config.max_file_size:
+                logger.debug(
+                    f"Matrix [{self.instance_id}] skipping {content.body!r}: {declared} > {self.config.max_file_size}"
+                )
                 return
 
             att_data: bytes | None = None
@@ -219,27 +223,37 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             if mxc and self._client:
                 try:
                     raw = await self._client.download_media(mxc)
-                    if len(raw) <= max_size:
+                    if len(raw) <= self.config.max_file_size:
                         att_data = raw
                     else:
-                        l.debug(f"Matrix [{self.instance_id}] {content.body!r} exceeds size limit")
+                        logger.debug(
+                            f"Matrix [{self.instance_id}] {content.body!r} exceeds size limit"
+                        )
                         return
                 except Exception as e:
-                    l.warning(f"Matrix [{self.instance_id}] media download failed: {e}")
+                    logger.warning(
+                        f"Matrix [{self.instance_id}] media download failed: {e}"
+                    )
                     att_url = self._mxc_to_http(str(mxc))
 
             display_name, avatar = await self._get_profile(str(event.sender))
             fname = getattr(content, "filename", None) or content.body or ""
-            await self.bridge.on_message(NormalizedMessage(
-                platform="matrix",
-                instance_id=self.instance_id,
-                channel={"room_id": str(event.room_id)},
-                user=display_name,
-                user_id=str(event.sender),
-                user_avatar=avatar,
-                text="",
-                attachments=[Attachment(type=att_type, url=att_url, name=fname, data=att_data)],
-            ))
+            await self.bridge.on_message(
+                NormalizedMessage(
+                    platform="matrix",
+                    instance_id=self.instance_id,
+                    channel={"room_id": str(event.room_id)},
+                    user=display_name,
+                    user_id=str(event.sender),
+                    user_avatar=avatar,
+                    text="",
+                    attachments=[
+                        Attachment(
+                            type=att_type, url=att_url, name=fname, data=att_data
+                        )
+                    ],
+                )
+            )
 
     # ------------------------------------------------------------------
     # Send
@@ -252,13 +266,23 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         attachments: list[Attachment] | None = None,
         **kwargs,
     ):
+        reply_to_id = kwargs.get("reply_to_id")
+        reply_to_event_id = None
+        if reply_to_id:
+            from mautrix.types import EventID
+
+            reply_to_event_id = EventID(reply_to_id)
+
         if self._client is None:
-            l.warning(f"Matrix [{self.instance_id}] send: driver not started")
+            logger.warning(
+                f"Matrix [{self.instance_id}] send: driver not started")
             return
 
         room_id = channel.get("room_id")
         if not room_id:
-            l.warning(f"Matrix [{self.instance_id}] send: no room_id in channel {channel}")
+            logger.warning(
+                f"Matrix [{self.instance_id}] send: no room_id in channel {channel}"
+            )
             return
 
         rich_header = kwargs.get("rich_header")
@@ -268,43 +292,51 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             prefix = f"**{t}**" + (f" · *{c}*" if c else "")
             text = f"{prefix}\n{text}" if text else prefix
 
-        max_size: int = self.config.max_file_size
-
         mentions = kwargs.get("mentions", [])
         html_text = text
         is_html = False
 
         if mentions:
             import html
+
             # Escape the base text first so we don't double-escape the mention tags later
             # (Simplistic approach: if we switch to HTML, we should escape the original text)
             html_text = html.escape(text)
             for m in mentions:
                 mention_link = f'<a href="https://matrix.to/#/{m["id"]}">{html.escape(m["name"])}</a>'
-                # Replace @Name with link. 
+                # Replace @Name with link.
                 # Note: text is already escaped, so we look for @Name
                 # But wait, we need to be careful replacing in escaped text.
                 # Let's assume @Name doesn't contain special chars for now or just replace carefully.
-                html_text = html_text.replace(f"@{html.escape(m['name'])}", mention_link)
+                html_text = html_text.replace(
+                    f"@{html.escape(m['name'])}", mention_link
+                )
             is_html = True
 
         if text.strip():
             try:
                 if is_html:
-                    await self._client.send_text(room_id, text, html=html_text)
+                    await self._client.send_text(
+                        room_id, text, html=html_text, reply_to=reply_to_event_id
+                    )
                 else:
-                    await self._client.send_text(room_id, text)
+                    await self._client.send_text(
+                        room_id, text, reply_to=reply_to_event_id
+                    )
             except Exception as e:
-                l.error(f"Matrix [{self.instance_id}] send text failed: {e}")
+                logger.error(
+                    f"Matrix [{self.instance_id}] send text failed: {e}")
 
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
-                await self._send_fallback(room_id, f"[{att.type.capitalize()}: {label}]")
+                await self._send_fallback(
+                    room_id, f"[{att.type.capitalize()}: {label}]", reply_to_event_id
+                )
                 continue
 
             data_bytes, mime = result
@@ -318,9 +350,11 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     size=len(data_bytes),
                 )
             except Exception as e:
-                l.error(f"Matrix [{self.instance_id}] upload failed: {e}")
+                logger.error(f"Matrix [{self.instance_id}] upload failed: {e}")
                 label = att.name or att.url or fname
-                await self._send_fallback(room_id, f"[{att.type.capitalize()}: {label}]")
+                await self._send_fallback(
+                    room_id, f"[{att.type.capitalize()}: {label}]", reply_to_event_id
+                )
                 continue
 
             try:
@@ -330,18 +364,22 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     info=_make_info(att.type, mime, len(data_bytes)),
                     file_name=fname,
                     file_type=_FILE_TYPES.get(att.type, MessageType.FILE),
+                    reply_to=reply_to_event_id,
                 )
             except Exception as e:
-                l.error(f"Matrix [{self.instance_id}] send media failed: {e}")
+                logger.error(
+                    f"Matrix [{self.instance_id}] send media failed: {e}")
 
-    async def _send_fallback(self, room_id: str, body: str) -> None:
+    async def _send_fallback(
+        self, room_id: str, body: str, reply_to_event_id=None
+    ) -> None:
         if self._client is None:
             return
         try:
-            await self._client.send_text(room_id, body)
+            await self._client.send_text(room_id, body, reply_to=reply_to_event_id)
         except Exception as e:
-            l.error(f"Matrix [{self.instance_id}] fallback send failed: {e}")
+            logger.error(
+                f"Matrix [{self.instance_id}] fallback send failed: {e}")
 
 
-from drivers.registry import register
 register("matrix", MatrixConfig, MatrixDriver)

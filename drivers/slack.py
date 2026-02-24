@@ -24,6 +24,7 @@
 #   channel_id – Slack channel ID, e.g. "C1234567890"
 #                (ignored when send_method="webhook"; channel is fixed by the webhook URL)
 
+from drivers.registry import register
 import asyncio
 import hashlib
 import hmac as _hmac
@@ -48,16 +49,18 @@ from drivers import BaseDriver
 
 
 class SlackConfig(_DriverConfig):
-    bot_token:            str                       = ""
-    app_token:            str                       = ""
-    send_method:          Literal["bot", "webhook"] = "bot"
-    incoming_webhook_url: str                       = ""
-    signing_secret:       str                       = ""
-    listen_port:          int                       = 0
-    listen_path:          str                       = "/slack/events"
-    max_file_size:        int                       = 50 * 1024 * 1024
+    bot_token: str = ""
+    app_token: str = ""
+    send_method: Literal["bot", "webhook"] = "bot"
+    incoming_webhook_url: str = ""
+    signing_secret: str = ""
+    listen_port: int = 0
+    listen_path: str = "/slack/events"
+    max_file_size: int = 50 * 1024 * 1024
 
-l = log.get_logger()
+
+logger = log.get_logger()
+
 
 def _mime_to_att_type(mime: str) -> str:
     if mime.startswith("image/"):
@@ -79,35 +82,39 @@ def _verify_slack_signature(signing_secret: str, headers, body: bytes) -> bool:
     except (ValueError, TypeError):
         return False
     base = f"v0:{timestamp}:{body.decode('utf-8', errors='replace')}"
-    expected = "v0=" + _hmac.new(
-        signing_secret.encode(),
-        base.encode(),
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "v0="
+        + _hmac.new(
+            signing_secret.encode(),
+            base.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+    )
     return _hmac.compare_digest(expected, signature)
 
 
 class SlackDriver(BaseDriver[SlackConfig]):
-
     def __init__(self, instance_id: str, config: SlackConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._web: AsyncWebClient | None = None
         self._sm: SocketModeClient | None = None
         self._session: aiohttp.ClientSession | None = None
-        self._user_cache: dict[str, tuple[str, str]] = {}  # user_id → (name, avatar_url)
+        self._user_cache: dict[
+            str, tuple[str, str]
+        ] = {}  # user_id → (name, avatar_url)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self):
-        bot_token      = self.config.bot_token
-        app_token      = self.config.app_token
-        send_method    = self.config.send_method
-        webhook_url    = self.config.incoming_webhook_url
+        bot_token = self.config.bot_token
+        app_token = self.config.app_token
+        send_method = self.config.send_method
+        webhook_url = self.config.incoming_webhook_url
         signing_secret = self.config.signing_secret
-        listen_port    = self.config.listen_port
-        listen_path    = self.config.listen_path
+        listen_port = self.config.listen_port
+        listen_path = self.config.listen_path
 
         # Register early so the bridge can route to us; individual send helpers
         # guard against uninitialized state.
@@ -127,7 +134,8 @@ class SlackDriver(BaseDriver[SlackConfig]):
             self._sm.socket_mode_request_listeners.append(self._on_request)
             try:
                 await self._sm.connect_to_new_endpoint()
-                l.info(f"Slack [{self.instance_id}] Socket Mode connected")
+                logger.info(
+                    f"Slack [{self.instance_id}] Socket Mode connected")
                 await asyncio.Event().wait()
             finally:
                 await self._sm.close()
@@ -142,7 +150,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             await runner.setup()
             site = web.TCPSite(runner, "0.0.0.0", listen_port)
             await site.start()
-            l.info(
+            logger.info(
                 f"Slack [{self.instance_id}] Events API listening on "
                 f"0.0.0.0:{listen_port}{listen_path}"
             )
@@ -155,21 +163,25 @@ class SlackDriver(BaseDriver[SlackConfig]):
 
         # ------ Send-only mode -----------------------------------------------
         if send_method == "webhook" and not webhook_url:
-            l.error(
+            logger.error(
                 f"Slack [{self.instance_id}] send_method='webhook' requires incoming_webhook_url"
             )
             return
         if send_method != "webhook" and not bot_token:
-            l.error(f"Slack [{self.instance_id}] send_method='bot' requires bot_token")
+            logger.error(
+                f"Slack [{self.instance_id}] send_method='bot' requires bot_token"
+            )
             return
-        l.info(f"Slack [{self.instance_id}] running in send-only mode")
+        logger.info(f"Slack [{self.instance_id}] running in send-only mode")
         # Session stays open; task completes and send() continues to work via the bridge.
 
     # ------------------------------------------------------------------
     # Receive — Socket Mode
     # ------------------------------------------------------------------
 
-    async def _on_request(self, client: SocketModeClient, req: SocketModeRequest) -> None:
+    async def _on_request(
+        self, client: SocketModeClient, req: SocketModeRequest
+    ) -> None:
         # Acknowledge immediately — Slack requires this within 3 seconds
         await client.send_socket_mode_response(
             SocketModeResponse(envelope_id=req.envelope_id)
@@ -186,7 +198,9 @@ class SlackDriver(BaseDriver[SlackConfig]):
     async def _handle_events_api(self, request: web.Request) -> web.Response:
         body = await request.read()
 
-        if self.config.signing_secret and not _verify_slack_signature(self.config.signing_secret, request.headers, body):
+        if self.config.signing_secret and not _verify_slack_signature(
+            self.config.signing_secret, request.headers, body
+        ):
             return web.Response(status=403, text="Invalid signature")
 
         try:
@@ -216,19 +230,18 @@ class SlackDriver(BaseDriver[SlackConfig]):
         if event.get("bot_id") or event.get("subtype"):
             return
 
-        text       = event.get("text", "")
+        text = event.get("text", "")
         channel_id = event.get("channel", "")
-        user_id    = event.get("user", "")
+        user_id = event.get("user", "")
 
         if not channel_id or not user_id:
             return
 
         display_name, user_avatar = await self._get_user_info(user_id)
 
-        max_size: int = self.config.max_file_size
         attachments: list[Attachment] = []
         for f in event.get("files", []):
-            att = await self._download_file(f, max_size)
+            att = await self._download_file(f, self.config.max_file_size)
             if att is not None:
                 attachments.append(att)
 
@@ -245,7 +258,9 @@ class SlackDriver(BaseDriver[SlackConfig]):
             text=text,
             attachments=attachments,
             message_id=str(event.get("ts", "")),
-            reply_parent=str(event.get("thread_ts", "")) if event.get("thread_ts") else None,
+            reply_parent=str(event.get("thread_ts", ""))
+            if event.get("thread_ts")
+            else None,
         )
         await self.bridge.on_message(normalized)
 
@@ -265,23 +280,19 @@ class SlackDriver(BaseDriver[SlackConfig]):
                 or u.get("name")
                 or user_id
             )
-            avatar = (
-                profile.get("image_192")
-                or profile.get("image_72")
-                or ""
-            )
+            avatar = profile.get("image_192") or profile.get("image_72") or ""
         except Exception:
             name, avatar = user_id, ""
         self._user_cache[user_id] = (name, avatar)
         return name, avatar
 
     async def _download_file(self, f: dict, max_size: int) -> Attachment | None:
-        url  = f.get("url_private_download") or f.get("url_private", "")
+        url = f.get("url_private_download") or f.get("url_private", "")
         mime = f.get("mimetype", "application/octet-stream")
         name = f.get("name") or f.get("title") or "attachment"
         size = f.get("size", -1)
 
-        if not url or (size > 0 and size > max_size):
+        if not url or (size > 0 and size > self.config.max_file_size):
             return None
 
         if not self.config.bot_token or self._session is None:
@@ -289,13 +300,15 @@ class SlackDriver(BaseDriver[SlackConfig]):
 
         try:
             async with self._session.get(
-                url, headers={"Authorization": f"Bearer {self.config.bot_token}"}
+                url, headers={
+                    "Authorization": f"Bearer {self.config.bot_token}"}
             ) as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.read()
         except Exception as e:
-            l.warning(f"Slack [{self.instance_id}] file download failed: {e}")
+            logger.warning(
+                f"Slack [{self.instance_id}] file download failed: {e}")
             return None
 
         if len(data) > max_size:
@@ -352,14 +365,16 @@ class SlackDriver(BaseDriver[SlackConfig]):
     ):
         channel_id = channel.get("channel_id")
         if not channel_id:
-            l.warning(f"Slack [{self.instance_id}] send: no channel_id in channel {channel}")
+            logger.warning(
+                f"Slack [{self.instance_id}] send: no channel_id in channel {channel}"
+            )
             return None
         if self._web is None:
-            l.warning(f"Slack [{self.instance_id}] send: bot_token not configured")
+            logger.warning(
+                f"Slack [{self.instance_id}] send: bot_token not configured")
             return None
 
-        max_size: int = self.config.max_file_size
-        title: str  = kwargs.get("webhook_title", "") or ""
+        title: str = kwargs.get("webhook_title", "") or ""
         avatar: str = kwargs.get("webhook_avatar", "") or ""
         has_identity = bool(title or avatar)
         reply_to_id = kwargs.get("reply_to_id")
@@ -381,14 +396,16 @@ class SlackDriver(BaseDriver[SlackConfig]):
                 resp = await self._web.chat_postMessage(**_post_kwargs(text))
                 if resp.get("ok"):
                     mid = resp.get("ts")
-                    if not first_msg_id: first_msg_id = str(mid)
+                    if not first_msg_id:
+                        first_msg_id = str(mid)
             except Exception as e:
-                l.error(f"Slack [{self.instance_id}] chat_postMessage failed: {e}")
+                logger.error(
+                    f"Slack [{self.instance_id}] chat_postMessage failed: {e}")
 
-        for att in (attachments or []):
+        for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, max_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 try:
                     label = att.name or att.url or ""
@@ -397,7 +414,8 @@ class SlackDriver(BaseDriver[SlackConfig]):
                     )
                     if resp.get("ok"):
                         mid = resp.get("ts")
-                        if not first_msg_id: first_msg_id = str(mid)
+                        if not first_msg_id:
+                            first_msg_id = str(mid)
                 except Exception:
                     pass
                 continue
@@ -413,19 +431,23 @@ class SlackDriver(BaseDriver[SlackConfig]):
                         filename=fname,
                         content=data_bytes,
                     )
-                    permalink = (file_resp.get("file") or {}).get("permalink", "")
+                    permalink = (file_resp.get("file") or {}
+                                 ).get("permalink", "")
                     if permalink:
-                        resp = await self._web.chat_postMessage(**_post_kwargs(permalink))
+                        resp = await self._web.chat_postMessage(
+                            **_post_kwargs(permalink)
+                        )
                         if resp.get("ok"):
                             mid = resp.get("ts")
-                            if not first_msg_id: first_msg_id = str(mid)
+                            if not first_msg_id:
+                                first_msg_id = str(mid)
                     else:
                         # Fallback: post to channel directly (no custom identity)
                         resp = await self._web.files_upload_v2(
                             channel=channel_id,
                             filename=fname,
                             content=data_bytes,
-                            thread_ts=reply_to_id
+                            thread_ts=reply_to_id,
                         )
                         # v2 returns a list of files or a single file object
                         # It's harder to get the ts of the resulting message here directly if it's multiple
@@ -434,10 +456,11 @@ class SlackDriver(BaseDriver[SlackConfig]):
                         channel=channel_id,
                         filename=fname,
                         content=data_bytes,
-                        thread_ts=reply_to_id
+                        thread_ts=reply_to_id,
                     )
             except Exception as e:
-                l.error(f"Slack [{self.instance_id}] file upload failed: {e}")
+                logger.error(
+                    f"Slack [{self.instance_id}] file upload failed: {e}")
 
         return first_msg_id
 
@@ -448,15 +471,18 @@ class SlackDriver(BaseDriver[SlackConfig]):
     ):
         webhook_url = self.config.incoming_webhook_url
         if not webhook_url:
-            l.warning(f"Slack [{self.instance_id}] send: no incoming_webhook_url configured")
+            logger.warning(
+                f"Slack [{self.instance_id}] send: no incoming_webhook_url configured"
+            )
             return
         if self._session is None:
-            l.warning(f"Slack [{self.instance_id}] send: driver not started")
+            logger.warning(
+                f"Slack [{self.instance_id}] send: driver not started")
             return
 
         # Incoming webhooks are text-only; append attachment labels inline
         full_text = text or ""
-        for att in (attachments or []):
+        for att in attachments or []:
             label = att.name or att.url or ""
             full_text += f"\n[{att.type.capitalize()}: {label}]"
 
@@ -469,13 +495,14 @@ class SlackDriver(BaseDriver[SlackConfig]):
             async with self._session.post(webhook_url, json=payload) as resp:
                 if resp.status not in (200, 204):
                     body = await resp.text()
-                    l.error(
+                    logger.error(
                         f"Slack [{self.instance_id}] incoming webhook error "
                         f"HTTP {resp.status}: {body}"
                     )
         except Exception as e:
-            l.error(f"Slack [{self.instance_id}] incoming webhook request failed: {e}")
+            logger.error(
+                f"Slack [{self.instance_id}] incoming webhook request failed: {e}"
+            )
 
 
-from drivers.registry import register
 register("slack", SlackConfig, SlackDriver)
