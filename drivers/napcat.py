@@ -23,7 +23,7 @@ from pathlib import Path
 import websockets
 import websockets.exceptions
 
-from typing import Literal
+from typing import Any, Literal
 
 import services.logger as log
 import services.media as media
@@ -96,7 +96,7 @@ def _load_face_gif(face_id_raw) -> bytes | None:
 class NapCatDriver(BaseDriver[NapCatConfig]):
     def __init__(self, instance_id: str, config: NapCatConfig, bridge):
         super().__init__(instance_id, config, bridge)
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: Any = None  # websockets connection (type varies by version)
         # echo_id → Future; used to await responses for specific actions
         self._pending: dict[str, asyncio.Future] = {}
 
