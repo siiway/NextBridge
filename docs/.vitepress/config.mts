@@ -89,7 +89,7 @@ export default defineConfig({
         ],
         sidebar: enSidebar,
         editLink: {
-          pattern: "https://github.com/siiway/homepage/edit/main/docs/:path",
+          pattern: "https://github.com/siiway/NextBridge/edit/main/docs/:path",
           text: "Edit this page on GitHub",
         },
         lastUpdated: {
@@ -108,7 +108,7 @@ export default defineConfig({
         ],
         sidebar: zhSidebar,
         editLink: {
-          pattern: "https://github.com/siiway/homepage/edit/main/docs/:path",
+          pattern: "https://github.com/siiway/NextBridge/edit/main/docs/:path",
           text: "在 GitHub 上编辑本页",
         },
         lastUpdated: {
