@@ -70,7 +70,7 @@ _FILE_TYPES = {
 }
 
 
-def _make_info(att_type: str, mime: str, size: int) -> FileInfo:
+def _make_info(att_type: str, mime: str, size: int) -> FileInfo | ImageInfo | VideoInfo | AudioInfo:
     kwargs = {"mimetype": mime, "size": size}
     if att_type == "image":
         return ImageInfo(**kwargs)
@@ -381,7 +381,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         if self._client is None:
             return
         try:
-            await self._client.send_text(room_id, body, relates_to=relates_obj)
+            await self._client.send_text(RoomID(room_id), body, relates_to=relates_obj)
         except Exception as e:
             logger.error(
                 f"Matrix [{self.instance_id}] fallback send failed: {e}")
