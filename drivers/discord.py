@@ -84,6 +84,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         @self._client.event
         async def on_ready():
+            assert self._client is not None  # Type narrowing
             logger.info(
                 f"Discord [{self.instance_id}] logged in as {self._client.user}"
             )
@@ -254,9 +255,14 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             and self._client is not None
         )
 
+        # Get webhook_url from rule msg config (kwargs) or fall back to driver config
+        webhook_url = kwargs.get("webhook_url")
+        if not webhook_url:
+            webhook_url = self._webhook_url
+
         # Resolve the send path first so we know which format override to apply
         is_webhook_send = (
-            self._send_method == "webhook" and self._webhook_url and not force_bot
+            self._send_method == "webhook" and webhook_url is not None and not force_bot
         )
 
         # Apply send-path-specific msg_format override if provided
@@ -280,7 +286,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             text = text.replace(f"@{m['name']}", f"<@{m['id']}>")
 
         if is_webhook_send:
-            return await self._send_webhook(text, attachments, **kwargs)
+            assert webhook_url is not None  # Type narrowing for type checker
+            return await self._send_webhook(text, attachments, webhook_url, **kwargs)
         elif self._client is not None:
             return await self._send_bot(channel, text, attachments, **kwargs)
         else:
@@ -291,9 +298,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self,
         text: str,
         attachments: list[Attachment] | None,
+        webhook_url: str,
         **kwargs,
     ):
-        if self._session is None or self._webhook_url is None:
+        if self._session is None or not webhook_url:
             return None
 
         payload: dict = {"content": text}
@@ -319,7 +327,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 payload["content"] += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
         url = (
-            self._webhook_url + ("&" if "?" in self._webhook_url else "?") + "wait=true"
+            webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true"
         )
 
         try:
@@ -373,6 +381,13 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             )
             return None
 
+        # Ensure the channel is messageable (has a send method)
+        if not isinstance(ch, discord.abc.Messageable):
+            logger.warning(
+                f"Discord [{self.instance_id}] channel {channel_id} is not messageable"
+            )
+            return None
+
         discord_files: list[discord.File] = []
         for att in attachments or []:
             if not att.url and att.data is None:
@@ -401,7 +416,16 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 pass
 
         try:
-            sent = await ch.send(text or None, files=discord_files, reference=reference)
+            # Build kwargs to only include non-None/non-empty values
+            send_kwargs = {}
+            if text:
+                send_kwargs["content"] = text
+            if discord_files:
+                send_kwargs["files"] = discord_files
+            if reference is not None:
+                send_kwargs["reference"] = reference
+
+            sent = await ch.send(**send_kwargs)
             return str(sent.id)
         except Exception as e:
             logger.error(f"Discord [{self.instance_id}] send error: {e}")
