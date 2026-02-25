@@ -72,29 +72,48 @@ const zhSidebar = [
 
 export default defineConfig({
   title: 'NextBridge',
-  description: 'The chat bridge that links up all the major chat platforms!',
+  lastUpdated: true,
+  sitemap: {
+    hostname: "https://nextbridge.siiway.org",
+  },
 
   locales: {
     root: {
       label: 'English',
       lang: 'en-US',
+      description: 'The chat bridge that links up all the major chat platforms!',
       themeConfig: {
         nav: [
           { text: 'Guide', link: '/getting-started' },
           { text: 'Drivers', link: '/drivers/' },
         ],
         sidebar: enSidebar,
+        editLink: {
+          pattern: "https://github.com/siiway/homepage/edit/main/docs/:path",
+          text: "Edit this page on GitHub",
+        },
+        lastUpdated: {
+          text: 'Updated at',
+        },
       },
     },
     zh: {
       label: '简体中文',
       lang: 'zh-CN',
+      description: '连接几乎所有主流聊天平台的聊天桥接工具！',
       themeConfig: {
         nav: [
           { text: '指南', link: '/zh/getting-started' },
           { text: '驱动器', link: '/zh/drivers/' },
         ],
         sidebar: zhSidebar,
+        editLink: {
+          pattern: "https://github.com/siiway/homepage/edit/main/docs/:path",
+          text: "在 GitHub 上编辑本页",
+        },
+        lastUpdated: {
+          text: '本页最后更新于',
+        },
       },
     },
   },
