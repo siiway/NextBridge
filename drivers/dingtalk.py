@@ -29,6 +29,7 @@ import hashlib
 import hmac
 import json
 import time
+from typing import Any
 
 import aiohttp
 from aiohttp import web
@@ -206,7 +207,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
 
         if text.strip():
             # sampleText supports "at" field
-            param = {"content": text}
+            param: dict[str, Any] = {"content": text}
             if at_uids:
                 param["at"] = {"atUserIds": at_uids}
             await self._send_org_msg(open_conv_id, token, "sampleText", param)
@@ -270,6 +271,8 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
     async def _send_org_msg(
         self, open_conv_id: str, token: str, msg_key: str, msg_param: dict
     ) -> None:
+        assert self._robot_client is not None
+        robot_client = self._robot_client
         headers = robot_models.OrgGroupSendHeaders(x_acs_dingtalk_access_token=token)
         req = robot_models.OrgGroupSendRequest(
             robot_code=self.config.robot_code,
@@ -281,7 +284,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         try:
             await loop.run_in_executor(
                 None,
-                lambda: self._robot_client.org_group_send_with_options(
+                lambda: robot_client.org_group_send_with_options(
                     req, headers, util_models.RuntimeOptions()
                 ),
             )
@@ -328,15 +331,17 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         if time.monotonic() < self._token_expires_at - 60:
             return self._access_token
 
+        assert self._oauth_client is not None
+        oauth_client = self._oauth_client
         req = oauth_models.GetAccessTokenRequest(
             app_key=self.config.app_key,
             app_secret=self.config.app_secret,
         )
         loop = asyncio.get_running_loop()
         resp = await loop.run_in_executor(
-            None, lambda: self._oauth_client.get_access_token(req)
+            None, lambda: oauth_client.get_access_token(req)
         )
-        self._access_token = resp.body.access_token
+        self._access_token = resp.body.access_token  # type: ignore
         self._token_expires_at = time.monotonic() + (resp.body.expire_in or 7200)
         logger.debug(f"DingTalk [{self.instance_id}] access token refreshed")
         return self._access_token
