@@ -399,6 +399,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         mime: str,
     ) -> None:
         """Upload a file via the Google Chat multipart media upload endpoint."""
+        assert self._session is not None  # Type narrowing - session is set in start()
         boundary = "gc_nb_boundary"
         meta = json.dumps({}).encode()
         body = (
@@ -432,6 +433,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 f"Google Chat [{self.instance_id}] media upload error: {e}")
 
     async def _post_message(self, url: str, headers: dict, body: dict) -> None:
+        assert self._session is not None  # Type narrowing - session is set in start()
         try:
             async with self._session.post(url, json=body, headers=headers) as resp:
                 if resp.status not in (200, 201):
