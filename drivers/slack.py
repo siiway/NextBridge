@@ -35,6 +35,7 @@ import aiohttp
 from aiohttp import web
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
+from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
@@ -180,7 +181,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
     # ------------------------------------------------------------------
 
     async def _on_request(
-        self, client: SocketModeClient, req: SocketModeRequest
+        self, client: AsyncBaseSocketModeClient, req: SocketModeRequest
     ) -> None:
         # Acknowledge immediately — Slack requires this within 3 seconds
         await client.send_socket_mode_response(
@@ -272,12 +273,14 @@ class SlackDriver(BaseDriver[SlackConfig]):
             return user_id, ""
         try:
             resp = await self._web.users_info(user=user_id)
-            u = resp["user"]
-            profile = u.get("profile", {})
+            u = resp["user"]  # type: ignore
+            if u is None:
+                return user_id, ""
+            profile = u.get("profile", {})  # type: ignore
             name = (
-                profile.get("display_name")
-                or u.get("real_name")
-                or u.get("name")
+                profile.get("display_name")  # type: ignore
+                or u.get("real_name")  # type: ignore
+                or u.get("name")  # type: ignore
                 or user_id
             )
             avatar = profile.get("image_192") or profile.get("image_72") or ""
