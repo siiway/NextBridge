@@ -137,6 +137,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         app_id = self.config.app_id
         app_secret = self.config.app_secret
         handler = self._handler
+        assert handler is not None  # Type narrowing - handler is set in start()
         instance_id = self.instance_id
 
         def _ws_thread() -> None:
@@ -204,19 +205,21 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             await runner.cleanup()
 
     async def _handle_http(self, request: web.Request) -> web.Response:
+        assert self._handler is not None  # Type narrowing - handler is set in start()
         body = await request.read()
-        raw_req = lark.RawRequest(
-            uri=request.path,
-            headers=dict(request.headers),
-            body=body,
-        )
+        # Create RawRequest with correct parameter names for lark-oapi
+        raw_req = lark.RawRequest()
+        raw_req.uri = request.path  # type: ignore
+        raw_req.headers = dict(request.headers)  # type: ignore
+        raw_req.body = body  # type: ignore
+
         # lark-oapi's do() is synchronous; run in thread pool to avoid blocking
         loop = asyncio.get_running_loop()
-        resp = await loop.run_in_executor(None, lambda: self._handler.do(raw_req))
+        resp = await loop.run_in_executor(None, lambda: self._handler.do(raw_req))  # type: ignore
         return web.Response(
-            body=resp.body,
-            status=resp.status_code,
-            content_type=resp.content_type or "application/json",
+            body=resp.body,  # type: ignore
+            status=resp.status_code or 200,  # type: ignore
+            content_type=getattr(resp, 'content_type', 'application/json') or "application/json",  # type: ignore
         )
 
     # ------------------------------------------------------------------
@@ -232,6 +235,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         if open_id in self._user_cache:
             return self._user_cache[open_id]
 
+        assert self._client is not None  # Type narrowing - client is set in start()
         name, avatar = open_id, ""
         try:
             req = (
@@ -240,7 +244,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 .user_id(open_id)
                 .build()
             )
-            resp = self._client.contact.v3.user.get(req)
+            resp = self._client.contact.v3.user.get(req)  # type: ignore
             if resp.success() and resp.data and resp.data.user:
                 u = resp.data.user
                 name = u.name or open_id
@@ -287,6 +291,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         self, message_id: str, file_key: str, resource_type: str
     ) -> bytes | None:
         """Download a message resource (image/file) from Feishu."""
+        assert self._client is not None  # Type narrowing - client is set in start()
         try:
             req = (
                 GetMessageResourceRequest.builder()
@@ -295,9 +300,9 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 .type(resource_type)
                 .build()
             )
-            resp = self._client.im.v1.message_resource.get(req)
+            resp = self._client.im.v1.message_resource.get(req)  # type: ignore
             if resp.success():
-                return resp.file.read()
+                return resp.file.read()  # type: ignore
             logger.error(
                 f"Feishu [{self.instance_id}] resource download failed: "
                 f"code={resp.code} msg={resp.msg}"
@@ -500,45 +505,44 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
     async def _send_feishu_msg(
         self, chat_id: str, msg_type: str, content: str, reply_to_id: str | None = None
     ) -> str | None:
-        if reply_to_id:
-            req = (
-                ReplyMessageRequest.builder()
-                .message_id(reply_to_id)
-                .request_body(
-                    ReplyMessageRequestBody.builder()
-                    .msg_type(msg_type)
-                    .content(content)
-                    .build()
-                )
-                .build()
-            )
-        else:
-            req = (
-                CreateMessageRequest.builder()
-                .receive_id_type("chat_id")
-                .request_body(
-                    CreateMessageRequestBody.builder()
-                    .receive_id(chat_id)
-                    .msg_type(msg_type)
-                    .content(content)
-                    .build()
-                )
-                .build()
-            )
+        assert self._client is not None  # Type narrowing - client is set in start()
 
         loop = asyncio.get_running_loop()
         try:
             if reply_to_id:
+                req = (
+                    ReplyMessageRequest.builder()
+                    .message_id(reply_to_id)
+                    .request_body(
+                        ReplyMessageRequestBody.builder()
+                        .msg_type(msg_type)
+                        .content(content)
+                        .build()
+                    )
+                    .build()
+                )
                 resp = await loop.run_in_executor(
-                    None, lambda: self._client.im.v1.message.reply(req)
+                    None, lambda: self._client.im.v1.message.reply(req)  # type: ignore
                 )
             else:
+                req = (
+                    CreateMessageRequest.builder()
+                    .receive_id_type("chat_id")
+                    .request_body(
+                        CreateMessageRequestBody.builder()
+                        .receive_id(chat_id)
+                        .msg_type(msg_type)
+                        .content(content)
+                        .build()
+                    )
+                    .build()
+                )
                 resp = await loop.run_in_executor(
-                    None, lambda: self._client.im.v1.message.create(req)
+                    None, lambda: self._client.im.v1.message.create(req)  # type: ignore
                 )
 
             if resp.success():
-                return resp.data.message_id
+                return resp.data.message_id  # type: ignore
 
             logger.error(
                 f"Feishu [{self.instance_id}] send failed: "
@@ -549,6 +553,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         return None
 
     async def _upload_image(self, data: bytes) -> str | None:
+        assert self._client is not None  # Type narrowing - client is set in start()
         body = (
             CreateImageRequestBody.builder()
             .image_type("message")
@@ -559,10 +564,10 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         loop = asyncio.get_running_loop()
         try:
             resp = await loop.run_in_executor(
-                None, lambda: self._client.im.v1.image.create(req)
+                None, lambda: self._client.im.v1.image.create(req)  # type: ignore
             )
             if resp.success():
-                return resp.data.image_key
+                return resp.data.image_key  # type: ignore
             logger.error(
                 f"Feishu [{self.instance_id}] image upload failed: "
                 f"code={resp.code} msg={resp.msg}"
@@ -573,6 +578,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         return None
 
     async def _upload_file(self, data: bytes, fname: str) -> str | None:
+        assert self._client is not None  # Type narrowing - client is set in start()
         body = (
             CreateFileRequestBody.builder()
             .file_type("stream")
@@ -584,10 +590,10 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         loop = asyncio.get_running_loop()
         try:
             resp = await loop.run_in_executor(
-                None, lambda: self._client.im.v1.file.create(req)
+                None, lambda: self._client.im.v1.file.create(req)  # type: ignore
             )
             if resp.success():
-                return resp.data.file_key
+                return resp.data.file_key  # type: ignore
             logger.error(
                 f"Feishu [{self.instance_id}] file upload failed: "
                 f"code={resp.code} msg={resp.msg}"
