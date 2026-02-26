@@ -1,26 +1,26 @@
 # Platform Support Status
 
-| Platform | Status | Mentions | Replies | Media | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | |
-| **Discord** | ✅ | ✅ | ✅ | ✅ | |
-| **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | |
-| **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | |
-| **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | |
-| **Yunhu** | ✅ | ❌ | ✅ | ✅ | Native mentions not yet supported |
-| **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | |
-| **DingTalk** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | No E2E encryption support yet |
-| **Signal** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **WhatsApp** | ⏸️ | - | - | - | No public bot API or stable community libraries |
-| **WeChat** | ⏸️ | - | - | - | High risk of account ban |
-| **Zulip** | ❌ | - | - | - | Planned |
-| **LINE** | ❌ | - | - | - | Planned |
-| **Viber** | ❌ | - | - | - | Planned |
+| Platform | Status | Mentions | Replies | Media | Custom Proxy | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ❌ | |
+| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ | |
+| **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
+| **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
+| **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | |
+| **Yunhu** | ✅ | ❌ | ✅ | ✅ | ❌ | Native mentions not yet supported |
+| **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
+| **DingTalk** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | No E2E encryption support yet |
+| **Signal** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **WhatsApp** | ⏸️ | - | - | - | - | No public bot API or stable community libraries |
+| **WeChat** | ⏸️ | - | - | - | - | High risk of account ban |
+| **Zulip** | ❌ | - | - | - | - | Planned |
+| **LINE** | ❌ | - | - | - | - | Planned |
+| **Viber** | ❌ | - | - | - | - | Planned |
 
 ## Legend
 - ✅ **Supported**: Fully implemented and verified.

@@ -23,6 +23,7 @@ The config has a two-level structure regardless of format:
 
 ```
 {
+  "global": { ...global config... },
   "<platform>": {
     "<instance_id>": { ...driver config... }
   }
@@ -31,8 +32,25 @@ The config has a two-level structure regardless of format:
 
 | Level | Description |
 |---|---|
+| `global` | Global configuration options that apply to all drivers unless overridden |
 | `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `matrix`, `signal`, `slack` |
 | `<instance_id>` | A name you choose freely — used to reference this instance in rules |
+
+## Global Configuration
+
+The `global` section contains configuration options that apply to all drivers unless overridden in the driver-specific configuration.
+
+| Key | Required | Default | Description |
+|---|---|---|---|
+| `proxy` | No | — | Global proxy URL for all drivers that ***support proxy configuration*** (e.g., `http://proxy.example.com:8080`). Individual driver proxy settings will override this global setting. |
+
+```json
+{
+  "global": {
+    "proxy": "http://proxy.example.com:8080"
+  }
+}
+```
 
 You can run **multiple instances of the same platform** by adding more keys under the platform:
 

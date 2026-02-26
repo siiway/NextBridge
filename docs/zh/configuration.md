@@ -23,6 +23,7 @@ uv run main.py convert data/config.yaml data/config.toml
 
 ```
 {
+  "global": { ...全局配置... },
   "<平台名>": {
     "<实例ID>": { ...驱动器配置... }
   }
@@ -31,8 +32,25 @@ uv run main.py convert data/config.yaml data/config.toml
 
 | 层级 | 说明 |
 |---|---|
+| `global` | 全局配置选项，适用于所有驱动，除非在特定驱动配置中被覆盖 |
 | `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`matrix`、`signal`、`slack` 之一 |
 | `<实例ID>` | 由你自由命名，在规则配置中用于引用此实例 |
+
+## 全局配置
+
+`global` 部分包含适用于所有驱动的配置选项，除非在特定驱动配置中被覆盖。
+
+| 键 | 是否必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `proxy` | 否 | — | 全局代理 URL，适用于所有***支持代理配置***的驱动（例如：`http://proxy.example.com:8080`）。单个驱动的代理设置将覆盖此全局设置。 |
+
+```json
+{
+  "global": {
+    "proxy": "http://proxy.example.com:8080"
+  }
+}
+```
 
 同一平台可以**运行多个实例**，只需在平台名下添加多个键：
 

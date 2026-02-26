@@ -33,7 +33,8 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
-from services.config_schema import _DriverConfig, CoercedBool
+from services.config_schema import _DriverConfig, CoercedBool, GlobalConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -43,6 +44,7 @@ class DiscordConfig(_DriverConfig):
     bot_token: str = ""
     max_file_size: int = 8 * 1024 * 1024
     send_as_bot_when_using_cqface_emoji: CoercedBool = False
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -58,6 +60,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._send_method: str = config.send_method
         self._webhook_url: str | None = config.webhook_url or None
         self._bot_token: str | None = config.bot_token or None
+        # Use local proxy if set, otherwise fall back to global proxy
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None # type: ignore
         # face_id (str) → "<:name:id>" resolved Discord emoji string
         self._emoji_cache: dict[str, str] = {}
         # name → emoji_id index built lazily from discord_emojis.json
@@ -69,7 +73,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
-        self._session = aiohttp.ClientSession()
+        self._session = aiohttp.ClientSession() if not self._proxy else aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False), proxy=self._proxy)
 
         if not self._bot_token:
             logger.warning(
@@ -80,7 +84,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         intents = discord.Intents.default()
         intents.message_content = True
-        self._client = discord.Client(intents=intents)
+        self._client = discord.Client(intents=intents, proxy=self._proxy) # type: ignore
 
         @self._client.event
         async def on_ready():

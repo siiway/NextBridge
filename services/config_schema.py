@@ -20,6 +20,19 @@ CoercedBool = Annotated[bool, BeforeValidator(_coerce_bool)]
 
 
 # ---------------------------------------------------------------------------
+# Global configuration
+# ---------------------------------------------------------------------------
+
+
+class GlobalConfig(BaseModel):
+    """Global configuration options that apply to all drivers unless overridden."""
+    
+    proxy: str = ""
+    """Global proxy URL for all drivers that support proxy configuration.
+    Individual driver proxy settings will override this global setting."""
+
+
+# ---------------------------------------------------------------------------
 # Base for all driver config blocks — unknown keys are a validation error
 # ---------------------------------------------------------------------------
 
