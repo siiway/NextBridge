@@ -4,7 +4,7 @@
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ❌ | |
 | **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ | |
-| **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
+| **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ✅ | |
 | **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
 | **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | |
 | **Yunhu** | ✅ | ❌ | ✅ | ✅ | ❌ | Native mentions not yet supported |
@@ -18,6 +18,7 @@
 | **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **WhatsApp** | ⏸️ | - | - | - | - | No public bot API or stable community libraries |
 | **WeChat** | ⏸️ | - | - | - | - | High risk of account ban |
+| **Tailchat** | ❌ | - | - | - | - | Planned |
 | **Zulip** | ❌ | - | - | - | - | Planned |
 | **LINE** | ❌ | - | - | - | - | Planned |
 | **Viber** | ❌ | - | - | - | - | Planned |

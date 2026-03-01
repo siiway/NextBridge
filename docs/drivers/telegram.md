@@ -18,6 +18,7 @@ Add under `telegram.<instance_id>` in `config.json`:
 | `bot_token` | Yes | — | Bot token from @BotFather |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
 | `rich_header_host` | No | — | Base URL of your Cloudflare rich-header worker (see [Rich Header](#rich-header)) |
+| `proxy` | No | — | Proxy URL for all Telegram API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
 
 ```json
 {

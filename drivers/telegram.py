@@ -6,7 +6,7 @@
 #   max_file_size     – Max bytes per attachment when sending (default 50 MB,
 #                       Telegram bot API limit)
 #   rich_header_host  – Base URL of the Cloudflare rich-header worker
-#                       (e.g. "https://richheader.yourname.workers.dev").
+#                       (e.g. "https://richheader.yourname.workers.dev" or "https://richheader.siiway.top").
 #                       When set, text-only bridged messages whose msg_format
 #                       includes a <richheader/> tag are sent with a small OG
 #                       link-preview card shown above the text (avatar + name).
@@ -29,6 +29,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -36,6 +37,7 @@ class TelegramConfig(_DriverConfig):
     bot_token: str
     max_file_size: int = 50 * 1024 * 1024
     rich_header_host: str = ""
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -64,6 +66,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     def __init__(self, instance_id: str, config: TelegramConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._app: Application | None = None
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -72,7 +75,12 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
 
-        self._app = Application.builder().token(self.config.bot_token).build()
+        app = Application.builder().token(self.config.bot_token) # type: ignore
+        if self._proxy:
+            logger.debug(f"Using proxy")
+            app = app.proxy(self._proxy)
+            app = app.get_updates_proxy(self._proxy)
+        self._app = app.build()
         self._app.add_handler(MessageHandler(
             _CONTENT_FILTER, self._on_message))
 

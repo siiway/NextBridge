@@ -33,7 +33,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
-from services.config_schema import _DriverConfig, CoercedBool, GlobalConfig
+from services.config_schema import _DriverConfig, CoercedBool
 from services.config import get
 from drivers import BaseDriver
 

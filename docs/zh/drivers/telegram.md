@@ -18,6 +18,7 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
 | `bot_token` | 是 | — | 来自 @BotFather 的 Bot Token |
 | `max_file_size` | 否 | `52428800`（50 MB） | 发送附件时单个文件的最大字节数 |
 | `rich_header_host` | 否 | — | Cloudflare 富头部 Worker 的基础 URL（见 [富头部](#富头部)） |
+| `proxy` | 否 | — | 所有 Telegram API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。 |
 
 ```json
 {
