@@ -10,6 +10,7 @@
 import mimetypes
 
 import aiohttp
+from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 
@@ -17,17 +18,33 @@ logger = log.get_logger()
 
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
-_session: aiohttp.ClientSession | None = None
+_session_no_proxy: aiohttp.ClientSession | None = None
+_proxy_sessions: dict[str, aiohttp.ClientSession] = {}
 
 
-def _get_session() -> aiohttp.ClientSession:
-    global _session
-    if _session is None or _session.closed:
-        _session = aiohttp.ClientSession()
-    return _session
+def _get_session(proxy: str | None = None) -> aiohttp.ClientSession:
+    global _session_no_proxy, _proxy_sessions
+
+    if proxy:
+        if proxy in _proxy_sessions and not _proxy_sessions[proxy].closed:
+            # proxy session exists
+            return _proxy_sessions[proxy]
+        else:
+            # new proxy session
+            connector = ProxyConnector.from_url(proxy, rdns=True)
+            session = aiohttp.ClientSession(connector=connector)
+            _proxy_sessions[proxy] = session
+            logger.debug(f"New proxy session {session} for {proxy}")
+            return session
+    else:
+        # no proxy -> direct
+        if _session_no_proxy is None or _session_no_proxy.closed:
+            _session_no_proxy = aiohttp.ClientSession()
+            logger.debug(f"New direct session {_session_no_proxy}")
+        return _session_no_proxy
 
 
-async def fetch(url: str, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, str] | None:
+async def fetch(url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None) -> tuple[bytes, str] | None:
     """
     Download *url* up to *max_bytes*.
 
@@ -40,7 +57,7 @@ async def fetch(url: str, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, str] | 
     if not url:
         return None
 
-    session = _get_session()
+    session = _get_session(proxy=proxy)
 
     try:
         # Pre-flight HEAD to skip obviously oversized files without downloading
@@ -79,7 +96,9 @@ async def fetch(url: str, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, str] | 
 
 
 async def fetch_attachment(
-    att, max_bytes: int = _DEFAULT_MAX
+    att,
+    max_bytes: int = _DEFAULT_MAX,
+    proxy: str | None = None
 ) -> tuple[bytes, str] | None:
     """
     Return ``(bytes, mime)`` for an Attachment.
@@ -96,7 +115,7 @@ async def fetch_attachment(
             return None
         mime = mimetypes.guess_type(att.name)[0] or "application/octet-stream"
         return att.data, mime
-    return await fetch(att.url, max_bytes)
+    return await fetch(att.url, max_bytes, proxy)
 
 
 def filename_for(name: str, content_type: str) -> str:

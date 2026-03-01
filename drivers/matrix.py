@@ -362,7 +362,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             if not att.url and att.data is None:
                 continue
 
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if not result:
                 label = att.name or att.url or ""
                 await self._send_fallback(

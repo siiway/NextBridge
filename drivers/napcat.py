@@ -23,6 +23,9 @@ from pathlib import Path
 import websockets
 import websockets.exceptions
 
+import aiohttp
+from aiohttp_socks import ProxyConnector
+
 from typing import Any, Literal
 
 import services.logger as log
@@ -40,6 +43,7 @@ class NapCatConfig(_DriverConfig):
     file_send_mode: Literal["stream", "base64"] = "stream"
     cqface_mode: Literal["gif", "emoji"] = "gif"
     stream_threshold: int = 0
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -99,6 +103,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         self._ws: Any = None  # websockets connection (type varies by version)
         # echo_id → Future; used to await responses for specific actions
         self._pending: dict[str, asyncio.Future] = {}
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -114,9 +119,16 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         logger.info(f"NapCat [{self.instance_id}] connecting to {ws_url}")
 
+        connect_kwargs: dict
+        if self._proxy:
+            logger.debug(f"NapCat [{self.instance_id}] using proxy {self._proxy}")
+            connect_kwargs = {"proxy": self._proxy}
+        else:
+            connect_kwargs = {}
+
         while True:
             try:
-                async with websockets.connect(ws_url) as ws:
+                async with websockets.connect(ws_url, **connect_kwargs) as ws:
                     self._ws = ws
                     logger.info(f"NapCat [{self.instance_id}] connected")
                     await self._listen(ws)
@@ -129,7 +141,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             finally:
                 self._ws = None
 
-            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5 s…")
+            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5s…")
             await asyncio.sleep(5)
 
     # ------------------------------------------------------------------
@@ -552,7 +564,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 continue
 
             if att.type == "image":
-                result = await media.fetch_attachment(att, self.config.max_file_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
@@ -568,7 +580,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     )
 
             elif att.type == "voice":
-                result = await media.fetch_attachment(att, self.config.max_file_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
@@ -584,7 +596,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     )
 
             elif att.type == "video":
-                result = await media.fetch_attachment(att, self.config.max_file_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
                 if result:
                     data_bytes, _ = result
                     mode = self._resolve_send_mode(len(data_bytes))
@@ -617,7 +629,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     )
 
             else:  # file
-                result = await media.fetch_attachment(att, self.config.max_file_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
                 if result:
                     data_bytes, _ = result
                     fname = att.name or "file"

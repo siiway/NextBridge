@@ -21,7 +21,7 @@ Add under `discord.<instance_id>` in `config.json`:
 | `webhook_url` | No | — | Default webhook URL for sending. Can be overridden per-rule via `msg` config (see below). |
 | `max_file_size` | No | `8388608` (8 MB) | Maximum bytes per attachment when sending |
 | `send_as_bot_when_using_cqface_emoji` | No | `false` | When `true`, messages containing `:cqface<id>:` tokens (emitted by the NapCat driver's `cqface_mode: "emoji"`) are sent via the bot instead of the webhook, even if `send_method` is `"webhook"`. Requires `bot_token`. |
-| `proxy` | No | — | Proxy URL for all Discord API requests (e.g., `http://proxy.example.com:8080`). When set, SSL verification is disabled for the proxy connection. |
+| `proxy` | No | — | Proxy URL for all Discord API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). When set, SSL verification is disabled for the proxy connection. |
 
 \* At least `bot_token` (for receive) or a `webhook_url` (either in config or per-rule) must be provided.
 

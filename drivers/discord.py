@@ -73,7 +73,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
-        self._session = aiohttp.ClientSession() if not self._proxy else aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False), proxy=self._proxy)
+        if self._proxy:
+            logger.debug(f"Discord [{self.instance_id}] using proxy {self._proxy}")
+            self._session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False), proxy=self._proxy)
+        else:
+            self._session = aiohttp.ClientSession()
 
         if not self._bot_token:
             logger.warning(
@@ -319,7 +323,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
@@ -396,7 +400,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)

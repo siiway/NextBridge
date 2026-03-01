@@ -2,7 +2,7 @@
 
 | Platform | Status | Mentions | Replies | Media | Custom Proxy | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ❌ | |
+| **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ⚠️ | |
 | **Discord** | ✅ | ✅ | ✅ | ✅ | ⚠️ | |
 | **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
 | **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
