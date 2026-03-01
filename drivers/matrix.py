@@ -36,6 +36,9 @@ from mautrix.types import (
     UserID,
     VideoInfo,
 )
+from mautrix.api import HTTPAPI
+from aiohttp import ClientSession, TCPConnector
+from aiohttp_socks import ProxyConnector, ProxyType
 
 from pydantic import model_validator
 
@@ -43,6 +46,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -52,6 +56,7 @@ class MatrixConfig(_DriverConfig):
     password: str = ""
     access_token: str = ""
     max_file_size: int = 10 * 1024 * 1024
+    proxy: str = ""
 
     @model_validator(mode="after")
     def _require_auth(self) -> "MatrixConfig":
@@ -85,6 +90,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
     def __init__(self, instance_id: str, config: MatrixConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: Client | None = None
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -94,7 +100,27 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         homeserver = self.config.homeserver.rstrip("/")
         user_id = self.config.user_id
 
-        self._client = Client(mxid=UserID(user_id), base_url=homeserver)
+        # proxy support
+        session: ClientSession | None = None
+        if self._proxy:
+            logger.debug(f"Matrix [{self.instance_id}] using proxy {self._proxy}")
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+        else:
+            connector = None
+
+        session = ClientSession(connector=connector or TCPConnector(ssl=True))
+
+        api = HTTPAPI(
+            base_url=homeserver,
+            token="",  # to be set after login
+            client_session=session,
+        )
+
+        self._client = Client(
+            mxid=UserID(user_id),
+            base_url=homeserver,
+            api=api
+        )
 
         if self.config.access_token:
             self._client.api.token = self.config.access_token

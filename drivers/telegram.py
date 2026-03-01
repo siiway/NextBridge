@@ -77,7 +77,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
         app = Application.builder().token(self.config.bot_token) # type: ignore
         if self._proxy:
-            logger.debug(f"Using proxy")
+            logger.debug(f"Telegram [{self.instance_id}] using proxy {self._proxy}")
             app = app.proxy(self._proxy)
             app = app.get_updates_proxy(self._proxy)
         self._app = app.build()

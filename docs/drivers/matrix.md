@@ -20,6 +20,7 @@ Add under `matrix.<instance_id>` in your config file:
 | `password` | No* | — | Login password |
 | `access_token` | No* | — | Access token (alternative to `password`) |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
+| `proxy` | No | — | Proxy URL for all Matrix API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
 
 \* Either `password` or `access_token` must be provided.
 

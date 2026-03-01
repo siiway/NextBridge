@@ -3,14 +3,14 @@
 | Platform | Status | Mentions | Replies | Media | Custom Proxy | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ❌ | |
-| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ | |
-| **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ✅ | |
+| **Discord** | ✅ | ✅ | ✅ | ✅ | ⚠️ | |
+| **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
 | **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
 | **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | |
 | **Yunhu** | ✅ | ❌ | ✅ | ✅ | ❌ | Native mentions not yet supported |
 | **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
 | **DingTalk** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
-| **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | No E2E encryption support yet |
+| **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | No E2E encryption support yet |
 | **Signal** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
