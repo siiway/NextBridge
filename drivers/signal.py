@@ -27,11 +27,13 @@ import json
 import mimetypes
 
 import aiohttp
+from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -39,6 +41,7 @@ class SignalConfig(_DriverConfig):
     api_url: str
     number: str
     max_file_size: int = 50 * 1024 * 1024
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -58,6 +61,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
     def __init__(self, instance_id: str, config: SignalConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -67,7 +71,13 @@ class SignalDriver(BaseDriver[SignalConfig]):
         api_url = self.config.api_url.rstrip("/")
         number = self.config.number
 
-        self._session = aiohttp.ClientSession()
+        if self._proxy:
+            logger.debug(f"Signal [{self.instance_id}] using proxy {self._proxy}")
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+            self._session = aiohttp.ClientSession(connector=connector)
+        else:
+            self._session = aiohttp.ClientSession()
+
         self.bridge.register_sender(self.instance_id, self.send)
 
         ws_url = f"{api_url}/v1/receive/{number}"
@@ -167,20 +177,14 @@ class SignalDriver(BaseDriver[SignalConfig]):
             att_type = _content_type_to_att_type(ct)
             size = att_info.get("size", -1)
 
-            att_data: bytes | None = None
-            if att_id and self._session is not None:
-                try:
-                    async with self._session.get(
-                        f"{api_url}/v1/attachments/{att_id}"
-                    ) as resp:
-                        if resp.status == 200:
-                            raw = await resp.read()
-                            if len(raw) <= self.config.max_file_size:
-                                att_data = raw
-                except Exception as e:
-                    logger.warning(
-                        f"Signal [{self.instance_id}] attachment download failed: {e}"
-                    )
+            att_url = f"{api_url}/v1/attachments/{att_id}"
+            result = await media.fetch_attachment(
+                Attachment(type="file", url=att_url, name=fname, size=size),
+                self.config.max_file_size,
+                proxy=self._proxy
+            )
+            if result:
+                att_data, _ = result
 
             attachments.append(
                 Attachment(type=att_type, url="", name=fname,

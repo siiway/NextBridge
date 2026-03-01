@@ -23,15 +23,13 @@ from pathlib import Path
 import websockets
 import websockets.exceptions
 
-import aiohttp
-from aiohttp_socks import ProxyConnector
-
 from typing import Any, Literal
 
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from services.db import msg_db
 from drivers import BaseDriver
 
