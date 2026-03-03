@@ -93,7 +93,7 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
   "my_tg": {
     "chat_id": "-100987654321",
     "msg": {
-      "msg_format": "<richheader title=\"{username}\" content=\"id: {user_id}\"/> {msg}"
+      "msg_format": "<richheader title=\"{user}\" content=\"id: {user_id}\"/> {msg}"
     }
   }
 }

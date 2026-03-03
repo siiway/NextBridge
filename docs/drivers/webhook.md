@@ -51,14 +51,14 @@ Each message POSTs a JSON body:
 }
 ```
 
-Additional fields from the rule's `msg` config block are merged into the top level. For example, if your rule includes `"webhook_title": "{username}"`, the payload will also contain `"webhook_title": "Alice"`.
+Additional fields from the rule's `msg` config block are merged into the top level. For example, if your rule includes `"webhook_title": "{user}"`, the payload will also contain `"webhook_title": "Alice"`.
 
 To include sender metadata in the payload, add the relevant keys to the rule's `msg` block using format variables:
 
 ```json
 {
   "msg": {
-    "user":       "{username}",
+    "user":       "{user}",
     "user_id":    "{user_id}",
     "platform":   "{platform}",
     "avatar":     "{user_avatar}"
