@@ -37,7 +37,7 @@
 #             e.g. "GENERAL" or the _id from /api/v1/channels.info?roomName=general
 #
 # Per-message identity (add to the rule's msg block):
-#   rc_alias  – Display name override  (e.g. "{username}")
+#   rc_alias  – Display name override  (e.g. "{user}")
 #   rc_avatar – Avatar URL override    (e.g. "{user_avatar}", must be HTTPS)
 
 from drivers.registry import register
