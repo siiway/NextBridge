@@ -29,3 +29,4 @@ class NormalizedMessage:
     mentions: list[dict] = field(
         default_factory=list
     )  # list of {"id": str, "name": str}
+    time: str | None = None

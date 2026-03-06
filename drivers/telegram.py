@@ -80,13 +80,46 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         async with self._app:
             await self._app.start()
             assert self._app.updater is not None
-            await self._app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-            logger.info(f"Telegram [{self.instance_id}] polling started")
-            try:
-                await asyncio.Event().wait()  # keep running until cancelled
-            finally:
-                await self._app.updater.stop()
-                await self._app.stop()
+            # Polling loop with retry logic
+            while True:
+                try:
+                    await self._app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+                    logger.info(f"Telegram [{self.instance_id}] polling started")
+                    # Keep running until cancelled. If an error occurs in a background polling task
+                    # that causes a fatal application state, Event().wait() might be implicitly
+                    # cancelled or the entire application might shut down.
+                    await asyncio.Event().wait()
+                    # If we reach here, it means Event().wait() was cancelled,
+                    # which is the signal to stop the driver.
+                    break # Exit polling retry loop gracefully
+                except asyncio.CancelledError:
+                    logger.info(f"Telegram [{self.instance_id}] polling task cancelled.")
+                    break # Exit polling retry loop gracefully
+                except Exception as e:
+                    # Catch any other exceptions during polling setup or while waiting.
+                    logger.error(f"Telegram [{self.instance_id}] polling failed: {e}. Retrying in 15 seconds...")
+                    # Crucially, stop the updater before retrying. If `start_polling`
+                    # partially succeeded, we need to clean up.
+                    # If it completely failed, `stop()` might be a no-op but is safe.
+                    await self._app.updater.stop() # Ensure updater is stopped before trying to restart
+                    await asyncio.sleep(15) # Wait before retrying
+            # await self._app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+            # logger.info(f"Telegram [{self.instance_id}] polling started")
+            # try:
+            #     await asyncio.Event().wait()  # keep running until cancelled
+            # finally:
+            #     await self._app.updater.stop()
+            #     await self._app.stop()
+
+    # async def start(self):
+    #     while True:
+    #         try:
+    #             await self._start()
+    #         except Exception as e:
+    #             logger.error(f"Telegram [{self.instance_id}] error: {e}")
+    #             await asyncio.sleep(5)  # backoff before retrying
+
+
 
     # ------------------------------------------------------------------
     # Receive
@@ -220,6 +253,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             if msg.reply_to_message
             else None,
             mentions=mentions,
+            time=msg.date.isoformat() if msg.date else None,
         )
         await self.bridge.on_message(normalized)
 
@@ -338,6 +372,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -348,6 +385,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -358,6 +398,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -368,6 +411,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -382,6 +428,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     parse_mode=parse_mode,
                     link_preview_options=link_preview_opts,
                     reply_parameters=reply_params,
+                    read_timeout=30,
+                    write_timeout=30,
+                    connect_timeout=30,
                 )
                 if not first_msg_id:
                     first_msg_id = str(sent.message_id)

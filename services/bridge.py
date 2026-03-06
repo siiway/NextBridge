@@ -264,6 +264,7 @@ class Bridge:
             "user_id": msg.user_id,
             "user_avatar": msg.user_avatar,
             "msg": msg.text,
+            "time": msg.time,
         }
         try:
             formatted = fmt.format(**ctx)
