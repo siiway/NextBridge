@@ -23,6 +23,7 @@ import io
 import json
 from pathlib import Path
 import re
+import os
 
 import discord
 import aiohttp
@@ -80,7 +81,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         intents = discord.Intents.default()
         intents.message_content = True
-        self._client = discord.Client(intents=intents)
+        self._client = discord.Client(intents=intents, proxy=os.getenv("http_proxy"))
 
         @self._client.event
         async def on_ready():
