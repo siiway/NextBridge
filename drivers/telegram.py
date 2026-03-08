@@ -20,16 +20,19 @@ from drivers.registry import register
 import asyncio
 import html
 import io
+import traceback
 from urllib.parse import urlencode
 
-from telegram import LinkPreviewOptions, Update, ReplyParameters
+from telegram import LinkPreviewOptions, ReplyParameters, Update
+from telegram.error import NetworkError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 import services.logger as log
 import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+from drivers.registry import register
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class TelegramConfig(_DriverConfig):
@@ -64,6 +67,29 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     def __init__(self, instance_id: str, config: TelegramConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._app: Application | None = None
+        # self._stop_event = asyncio.Event() # This is no longer needed with the refactor
+
+    # Error handler must be a regular (non-async) function as required by python-telegram-bot
+    def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log the error and inform the user if possible. This function must NOT be a coroutine."""
+        tb_list = traceback.format_exception(None, context.error, context.error.__traceback__, limit=None)
+        tb_string = "".join(tb_list[-2:])
+        print_tb_string = "\n".join(tb_list[-2:]) # For logging to console
+
+        message = (
+            "An exception was raised while handling an update\n"
+            f"<pre>{html.escape(tb_string)}</pre>"
+        )
+
+        logger.error(f"Telegram [{self.instance_id}] error in update handling: {context.error}\n{print_tb_string}")
+        
+        if isinstance(context.error, NetworkError):
+            network_error = "Telegram network error detected in handler. The main driver loop will handle restart."
+            logger.critical(network_error)
+            # Signal the main driver loop to restart if it's the polling loop that failed.
+            # In this refactored approach, the outer `while True` loop in `start()`
+            # will catch the exception propagated from `start_polling` if it fails critically.
+            # No explicit event setting needed here.
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -72,21 +98,66 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
 
-        self._app = Application.builder().token(self.config.bot_token).build()
-        self._app.add_handler(MessageHandler(
-            _CONTENT_FILTER, self._on_message))
-
-        # async-with handles initialize() / shutdown() automatically
-        async with self._app:
-            await self._app.start()
-            assert self._app.updater is not None
-            await self._app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-            logger.info(f"Telegram [{self.instance_id}] polling started")
+        while True: # Outer loop for full driver restart
             try:
-                await asyncio.Event().wait()  # keep running until cancelled
-            finally:
-                await self._app.updater.stop()
-                await self._app.stop()
+                # Re-initialize the application on each attempt to ensure a clean state
+                # Configure timeouts directly in the builder as per wiki advice
+                self._app = (
+                    Application.builder()
+                    .token(self.config.bot_token)
+                    .connect_timeout(10) # General connect timeout
+                    .read_timeout(10)    # General read timeout (for non-get_updates methods)
+                    .write_timeout(10)   # General write timeout
+                    .pool_timeout(5)     # Connection pool timeout
+                    .get_updates_read_timeout(10) # Specific read timeout for get_updates
+                    .build()
+                )
+                self._app.add_handler(MessageHandler(
+                    _CONTENT_FILTER, self._on_message))
+                self._app.add_error_handler(self._error_handler) # Register the synchronous error handler
+
+                logger.info(f"Telegram [{self.instance_id}] starting application and polling.")
+
+                async with self._app: # This context manager handles initialize() / shutdown()
+                    await self._app.start()
+                    assert self._app.updater is not None
+                    logger.info(f"Telegram [{self.instance_id}] application started.")
+
+                    # Start polling for updates directly.
+                    # This method will block until disconnected or an exception occurs.
+                    # Timeout for the polling long-request is managed by get_updates_read_timeout
+                    # and the `timeout` parameter here (which adds to the read_timeout).
+                    await self._app.updater.start_polling(
+                        allowed_updates=Update.ALL_TYPES,
+                        timeout=10, # This timeout is for the long polling request duration.
+                                    # Shorter values here can make network errors detectable faster.
+                    )
+                    logger.info(f"Telegram [{self.instance_id}] polling started.")
+
+                    # Keep running until cancelled. If `start_polling` exits cleanly,
+                    # the `async with self._app:` block will also exit.
+                    # If `start_polling` throws an exception, it will be caught by the outer try/except.
+                    await asyncio.Event().wait() # Keep the main task alive if polling is running in background tasks
+                    
+                logger.info(f"Telegram [{self.instance_id}] driver stopped gracefully.")
+                break # Exit the outer loop if run_until_disconnected finishes without error
+
+            except asyncio.CancelledError:
+                logger.info(f"Telegram [{self.instance_id}] driver task cancelled.")
+                break # Exit the outer loop gracefully
+            except Exception as e:
+                # Catch any exceptions during the driver's lifecycle (e.g., polling failures)
+                logger.error(f"Telegram [{self.instance_id}] driver encountered a critical error: {e}. Retrying in 15 seconds...")
+                
+                # Ensure _app is properly shut down before retrying, if it was partially started
+                # The `async with self._app:` block should handle shutdown on exit,
+                # but an explicit shutdown here acts as a safeguard.
+                if self._app: # Check if it's not already in shutdown process
+                    try:
+                        await self._app.shutdown()
+                    except Exception as shutdown_e:
+                        logger.warning(f"Telegram [{self.instance_id}] error during shutdown before retry: {shutdown_e}")
+                await asyncio.sleep(15) # Wait before retrying
 
     # ------------------------------------------------------------------
     # Receive
@@ -220,6 +291,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             if msg.reply_to_message
             else None,
             mentions=mentions,
+            time=msg.date.isoformat() if msg.date else None,
         )
         await self.bridge.on_message(normalized)
 
@@ -338,6 +410,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -348,6 +423,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -358,6 +436,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -368,6 +449,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -382,6 +466,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     parse_mode=parse_mode,
                     link_preview_options=link_preview_opts,
                     reply_parameters=reply_params,
+                    read_timeout=30,
+                    write_timeout=30,
+                    connect_timeout=30,
                 )
                 if not first_msg_id:
                     first_msg_id = str(sent.message_id)

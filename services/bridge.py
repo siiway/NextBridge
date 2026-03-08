@@ -264,6 +264,7 @@ class Bridge:
             "user_id": msg.user_id,
             "user_avatar": msg.user_avatar,
             "msg": msg.text,
+            "time": msg.time,
         }
         try:
             formatted = fmt.format(**ctx)
@@ -301,7 +302,7 @@ class Bridge:
 
         for target_id, target_channel in rule.get("to", {}).items():
             # Skip echo back to the exact same channel
-            if target_id == msg.instance_id and target_channel == msg.channel:
+            if target_id == msg.instance_id or target_channel == msg.channel:
                 continue
 
             if self._is_sensitive(formatted):
@@ -367,7 +368,7 @@ class Bridge:
             target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
 
             # Skip echo back to the exact same channel
-            if target_id == msg.instance_id and target_channel == msg.channel:
+            if target_id == msg.instance_id or target_channel == msg.channel:
                 continue
 
             # Per-target msg overrides the global msg (target wins on conflict)
