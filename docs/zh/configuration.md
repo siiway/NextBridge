@@ -52,6 +52,10 @@ uv run main.py convert data/config.yaml data/config.toml
 }
 ```
 
+::: tip 使用环境变量中的代理
+ 如果未设置，程序会尝试从环境变量 `http_proxy`, `https_proxy`, `all_proxy` 中读取代理配置 (不分大小写)，此时你可以通过将 `proxy` 指定为特殊值 `disabled` 来阻止使用系统代理。
+:::
+
 同一平台可以**运行多个实例**，只需在平台名下添加多个键：
 
 ```json

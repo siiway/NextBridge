@@ -52,6 +52,10 @@ The `global` section contains configuration options that apply to all drivers un
 }
 ```
 
+::: tip Using proxy from environment variables
+ If not set, the program will attempt to read proxy configuration from environment variables `http_proxy`, `https_proxy`, and `all_proxy` (case-insensitive). You can disable the use of system proxy by setting `proxy` to the special value `disabled`.
+:::
+
 You can run **multiple instances of the same platform** by adding more keys under the platform:
 
 ```json
