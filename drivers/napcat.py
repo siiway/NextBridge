@@ -12,6 +12,7 @@
 #   stream_threshold – If > 0, force stream mode when file exceeds this many bytes,
 #                      regardless of file_send_mode (default 0 = disabled)
 
+import datetime
 from drivers.registry import register
 import asyncio
 import base64
@@ -187,6 +188,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         sender = event.get("sender", {})
         # Prefer group card (nickname-in-group) over global nickname
         nickname = sender.get("card") or sender.get("nickname") or user_id
+        time = event.get("time")
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
         text, attachments, reply_id, mentions = self._parse_message(
@@ -210,6 +212,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             message_id=str(event.get("message_id", "")),
             reply_parent=reply_id,
             mentions=mentions,
+            time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
         )
         await self.bridge.on_message(msg)
 

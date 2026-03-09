@@ -42,25 +42,25 @@
       "channel_id": "222",
       "msg": {
         "msg_format": "{msg}",
-        "webhook_title": "{username} ({user_id}) @ {from}",
+        "webhook_title": "{user} ({user_id}) @ {from}",
         "webhook_avatar": "{user_avatar}"
       }
     },
     "my_qq": {
       "group_id": "123456789",
       "msg": {
-        "msg_format": "{username} ({user_id}): {msg}"
+        "msg_format": "{user} ({user_id}): {msg}"
       }
     },
     "my_tg": {
       "chat_id": "-100987654321",
       "msg": {
-        "msg_format": "{username} ({user_id}): {msg}"
+        "msg_format": "{user} ({user_id}): {msg}"
       }
     }
   },
   "msg": {
-    "msg_format": "{username} ({user_id}): {msg}"
+    "msg_format": "{user} ({user_id}): {msg}"
   }
 }
 ```
@@ -102,7 +102,7 @@
 | `{platform}` | 发送方的平台名，如 `napcat`、`discord` |
 | `{instance_id}` | 发送方的实例 ID（与 config.json 中定义一致） |
 | `{from}` | `{instance_id}` 的别名 |
-| `{username}` | 发送者的显示名称 |
+| `{user}` | 发送者的显示名称 |
 | `{user_id}` | 平台原生用户 ID |
 | `{user_avatar}` | 发送者的头像 URL（可能为空） |
 | `{msg}` | 消息文本内容 |
@@ -140,12 +140,12 @@
   "channels": {
     "my_qq": {
       "group_id": "123456789",
-      "msg": { "msg_format": "{username} ({user_id}): {msg}" }
+      "msg": { "msg_format": "{user} ({user_id}): {msg}" }
     },
     "my_tg": {
       "chat_id": "-100987654321",
       "msg": {
-        "msg_format": "<richheader title=\"{username}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
+        "msg_format": "<richheader title=\"{user}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
       }
     }
   }
@@ -161,14 +161,14 @@
 ### 示例
 
 ```json
-{ "msg_format": "{username} ({user_id}): {msg}" }
+{ "msg_format": "{user} ({user_id}): {msg}" }
 ```
 ```
 Alice (123456789): 大家好
 ```
 
 ```json
-{ "msg_format": "[{platform}] {username}: {msg}" }
+{ "msg_format": "[{platform}] {user}: {msg}" }
 ```
 ```
 [discord] Alice: 大家好

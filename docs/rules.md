@@ -42,25 +42,25 @@ Each channel entry may contain a `"msg"` key that overrides the global `"msg"` f
       "channel_id": "222",
       "msg": {
         "msg_format": "{msg}",
-        "webhook_title": "{username} ({user_id}) @ {from}",
+        "webhook_title": "{user} ({user_id}) @ {from}",
         "webhook_avatar": "{user_avatar}"
       }
     },
     "my_qq": {
       "group_id": "123456789",
       "msg": {
-        "msg_format": "{username} ({user_id}): {msg}"
+        "msg_format": "{user} ({user_id}): {msg}"
       }
     },
     "my_tg": {
       "chat_id": "-100987654321",
       "msg": {
-        "msg_format": "{username} ({user_id}): {msg}"
+        "msg_format": "{user} ({user_id}): {msg}"
       }
     }
   },
   "msg": {
-    "msg_format": "{username} ({user_id}): {msg}"
+    "msg_format": "{user} ({user_id}): {msg}"
   }
 }
 ```
@@ -102,7 +102,7 @@ Controls how the message is formatted when sent to a target.
 | `{platform}` | Platform name of the sender, e.g. `napcat`, `discord` |
 | `{instance_id}` | Instance ID of the sender as defined in config.json |
 | `{from}` | Alias for `{instance_id}` |
-| `{username}` | Display name of the sender |
+| `{user}` | Display name of the sender |
 | `{user_id}` | Platform-native user ID |
 | `{user_avatar}` | Avatar URL of the sender (may be empty) |
 | `{msg}` | The message text content |
@@ -140,12 +140,12 @@ Both attributes support the same `{variable}` substitutions as `msg_format`.
   "channels": {
     "my_qq": {
       "group_id": "123456789",
-      "msg": { "msg_format": "{username} ({user_id}): {msg}" }
+      "msg": { "msg_format": "{user} ({user_id}): {msg}" }
     },
     "my_tg": {
       "chat_id": "-100987654321",
       "msg": {
-        "msg_format": "<richheader title=\"{username}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
+        "msg_format": "<richheader title=\"{user}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
       }
     }
   }
@@ -161,14 +161,14 @@ On Telegram (when `rich_header_host` is configured) this produces a compact card
 ### Examples
 
 ```json
-{ "msg_format": "{username} ({user_id}): {msg}" }
+{ "msg_format": "{user} ({user_id}): {msg}" }
 ```
 ```
 Alice (123456789): hello everyone
 ```
 
 ```json
-{ "msg_format": "[{platform}] {username}: {msg}" }
+{ "msg_format": "[{platform}] {user}: {msg}" }
 ```
 ```
 [discord] Alice: hello everyone

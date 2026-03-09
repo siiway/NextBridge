@@ -128,8 +128,8 @@ GET /api/v1/channels.info?roomName=general
     "from": { "dc": { "channel_id": "123" } },
     "to":   { "rc_main": { "room_id": "GENERAL" } },
     "msg": {
-      "msg_format": "[Discord] {username}: {msg}",
-      "rc_alias":   "{username}",
+      "msg_format": "[Discord] {user}: {msg}",
+      "rc_alias":   "{user}",
       "rc_avatar":  "{user_avatar}"
     }
   }]
@@ -138,7 +138,7 @@ GET /api/v1/channels.info?roomName=general
 
 | 键名 | 说明 |
 |---|---|
-| `rc_alias` | 消息显示的用户名（例如 `"{username}"`） |
+| `rc_alias` | 消息显示的用户名（例如 `"{user}"`） |
 | `rc_avatar` | 消息显示的头像 URL（例如 `"{user_avatar}"`）。必须为 HTTPS URL，否则忽略。 |
 
 在 API 模式下，机器人账号须拥有 **bot** 角色，`alias`/`avatar` 覆盖才会生效。

@@ -128,8 +128,8 @@ Both send modes support per-message sender identity. Configure them in the `msg`
     "from": { "dc": { "channel_id": "123" } },
     "to":   { "rc_main": { "room_id": "GENERAL" } },
     "msg": {
-      "msg_format": "[Discord] {username}: {msg}",
-      "rc_alias":   "{username}",
+      "msg_format": "[Discord] {user}: {msg}",
+      "rc_alias":   "{user}",
       "rc_avatar":  "{user_avatar}"
     }
   }]
@@ -138,7 +138,7 @@ Both send modes support per-message sender identity. Configure them in the `msg`
 
 | Key | Description |
 |---|---|
-| `rc_alias` | Display name shown on the message (e.g. `"{username}"`) |
+| `rc_alias` | Display name shown on the message (e.g. `"{user}"`) |
 | `rc_avatar` | Avatar URL shown on the message (e.g. `"{user_avatar}"`). Must be HTTPS; ignored otherwise. |
 
 In API mode the bot must have the **bot** role for `alias`/`avatar` overrides to be accepted.
