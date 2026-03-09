@@ -15,7 +15,7 @@
 | **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **WhatsApp** | ⏸️ | - | - | - | - | No public bot API or stable community libraries |
 | **WeChat** | ⏸️ | - | - | - | - | High risk of account ban |
 | **Tailchat** | ❌ | - | - | - | - | Planned |
@@ -25,6 +25,6 @@
 
 ## Legend
 - ✅ **Supported**: Fully implemented and verified.
-- ⚠️ **Supported (Not Tested)**: Implemented but requires further testing to ensure stability.
+- ⚠️ **Supported (Not Tested)**: Implemented and basically tested but requires further testing to ensure stability.
 - ⏸️ **Paused**: Development suspended due to technical or policy limitations.
 - ❌ **Not Supported**: Not yet implemented.
