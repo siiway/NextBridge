@@ -21,6 +21,7 @@
  - [ ] [Zulip](https://zulip.com)
  - [ ] [LINE](https://line.me)
  - [ ] [Viber](https://viber.com)
+ - [ ] [Tailchat](https://github.com/msgbyte/tailchat)
 
 ## Special Thanks
  - discord.py

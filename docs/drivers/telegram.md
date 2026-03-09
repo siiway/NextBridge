@@ -79,7 +79,7 @@ This works by serving a tiny HTML page with [Open Graph](https://ogp.me/) meta t
 ### Cloudflare Worker setup
 
 ::: tip Public endpoint
-We provides a public endpoint, `https://richheader.siiway.top`. Feel free to use it.
+We provide a public endpoint, `https://richheader.siiway.top`. Feel free to use it.
 :::
 
 1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create**.

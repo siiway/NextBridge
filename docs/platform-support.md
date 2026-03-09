@@ -5,7 +5,7 @@
 | **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ⚠️ | |
 | **Discord** | ✅ | ✅ | ✅ | ✅ | ⚠️ | |
 | **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
-| **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
+| **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
 | **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | |
 | **Yunhu** | ✅ | ❌ | ✅ | ✅ | ❌ | Native mentions not yet supported |
 | **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
