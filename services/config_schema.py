@@ -5,7 +5,9 @@ from os import environ
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
-from services.logger import logger
+import services.logger as log
+
+logger = log.get_logger()
 
 # ---------------------------------------------------------------------------
 # Reusable bool coercion: "true" / "1" / "yes" → True
@@ -29,7 +31,7 @@ def _get_proxy_from_env(v: str) -> str:
     if v.lower() in ['disabled', 'disable']:
         logger.debug(f'Global proxy disabled manually')
         return ''
-    
+
     elif v:
         logger.debug(f"Using global proxy from config file: {v}")
         return v
@@ -46,7 +48,7 @@ def _get_proxy_from_env(v: str) -> str:
 
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
-    
+
     proxy: Annotated[str, BeforeValidator(_get_proxy_from_env)] = ""
     """Global proxy URL for all drivers that support proxy configuration.
     Individual driver proxy settings will override this global setting."""

@@ -7,7 +7,7 @@
 | **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
 | **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
 | **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | |
-| **Yunhu** | ✅ | ❌ | ✅ | ✅ | ❌ | Native mentions not yet supported |
+| **Yunhu** | ✅ | ❌ | ✅ | ✅ | ✅ | Native mentions not yet supported |
 | **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
 | **DingTalk** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | No E2E encryption support yet |
