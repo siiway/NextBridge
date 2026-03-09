@@ -6,13 +6,13 @@
 | **Discord** | ✅ | ✅ | ✅ | ✅ | ⚠️ | |
 | **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
 | **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
-| **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | |
+| **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | SDK doesn't support proxy |
 | **Yunhu** | ✅ | ❌ | ✅ | ✅ | ✅ | Native mentions not yet supported |
-| **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | |
-| **DingTalk** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | SDK doesn't support proxy |
+| **DingTalk** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | SDK doesn't support proxy |
 | **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | No E2E encryption support yet |
 | **Signal** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |

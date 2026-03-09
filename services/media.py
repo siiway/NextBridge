@@ -18,30 +18,22 @@ logger = log.get_logger()
 
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
-_session_no_proxy: aiohttp.ClientSession | None = None
-_proxy_sessions: dict[str, aiohttp.ClientSession] = {}
+_sessions: dict[str | None, aiohttp.ClientSession] = {}
 
 
 def _get_session(proxy: str | None = None) -> aiohttp.ClientSession:
-    global _session_no_proxy, _proxy_sessions
+    global _sessions
 
-    if proxy:
-        if proxy in _proxy_sessions and not _proxy_sessions[proxy].closed:
-            # proxy session exists
-            return _proxy_sessions[proxy]
-        else:
-            # new proxy session
-            connector = ProxyConnector.from_url(proxy, rdns=True)
-            session = aiohttp.ClientSession(connector=connector)
-            _proxy_sessions[proxy] = session
-            logger.debug(f"New proxy session {session} for {proxy}")
-            return session
-    else:
-        # no proxy -> direct
-        if _session_no_proxy is None or _session_no_proxy.closed:
-            _session_no_proxy = aiohttp.ClientSession()
-            logger.debug(f"New direct session {_session_no_proxy}")
-        return _session_no_proxy
+    if proxy in _sessions and not _sessions[proxy].closed:
+        # session exists
+        return _sessions[proxy]
+
+    # new session
+    connector = ProxyConnector.from_url(proxy, rdns=True) if proxy else None
+    session = aiohttp.ClientSession(connector=connector)
+    _sessions[proxy] = session
+    logger.debug(f"New {'proxy' if proxy else 'direct'} session {session}")
+    return session
 
 
 async def fetch(url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None) -> tuple[bytes, str] | None:
