@@ -32,6 +32,8 @@ Add under `googlechat.<instance_id>` in `config.json`:
 | `listen_path` | No | `"/google-chat/events"` | HTTP path for the event endpoint |
 | `endpoint_url` | No | — | Full public URL of the endpoint (enables request signature verification) |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum attachment size in bytes |
+| `proxy` | No | — | Proxy URL for all Google Chat API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+
 
 \* Exactly one of `service_account_file` or `service_account_json` is required.
 

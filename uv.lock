@@ -792,6 +792,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-telegram-bot" },
     { name = "pyyaml" },
+    { name = "requests", extra = ["socks"] },
     { name = "slack-sdk" },
     { name = "tomli-w" },
     { name = "websockets" },
@@ -812,6 +813,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "python-telegram-bot", specifier = ">=22.6" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "requests", extras = ["socks"], specifier = ">=2.32.5" },
     { name = "slack-sdk", specifier = ">=3.40.1" },
     { name = "tomli-w", specifier = ">=1.0" },
     { name = "websockets", specifier = ">=13.0" },
@@ -1052,6 +1054,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pysocks"
+version = "1.7.1"
+source = { registry = "https://mirrors.cernet.edu.cn/pypi/web/simple" }
+sdist = { url = "https://mirrors.sustech.edu.cn/pypi/web/packages/bd/11/293dd436aea955d45fc4e8a35b6ae7270f5b8e00b53cf6c024c83b657a11/PySocks-1.7.1.tar.gz", hash = "sha256:3f8804571ebe159c380ac6de37643bb4685970655d3bba243530d6558b799aa0" }
+wheels = [
+    { url = "https://mirrors.sustech.edu.cn/pypi/web/packages/8d/59/b4572118e098ac8e46e399a1dd0f2d85403ce8bbaad9ec79373ed6badaf9/PySocks-1.7.1-py3-none-any.whl", hash = "sha256:2725bd0a9925919b9b51739eea5f9e2bae91e83288108a9ad338b2e3a4435ee5" },
+]
+
+[[package]]
 name = "python-socks"
 version = "2.8.1"
 source = { registry = "https://mirrors.cernet.edu.cn/pypi/web/simple" }
@@ -1132,6 +1143,11 @@ dependencies = [
 sdist = { url = "https://mirrors.sustech.edu.cn/pypi/web/packages/c9/74/b3ff8e6c8446842c3f5c837e9c3dfcfe2018ea6ecef224c710c85ef728f4/requests-2.32.5.tar.gz", hash = "sha256:dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf" }
 wheels = [
     { url = "https://mirrors.sustech.edu.cn/pypi/web/packages/1e/db/4254e3eabe8020b458f1a747140d32277ec7a271daf1d235b70dc0b4e6e3/requests-2.32.5-py3-none-any.whl", hash = "sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6" },
+]
+
+[package.optional-dependencies]
+socks = [
+    { name = "pysocks" },
 ]
 
 [[package]]

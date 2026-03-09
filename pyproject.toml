@@ -21,4 +21,5 @@ dependencies = [
     "google-auth>=2.0",
     "httpx[socks]>=0.28.1",
     "aiohttp-socks>=0.11.0",
+    "requests[socks]>=2.32.5",
 ]

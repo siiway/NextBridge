@@ -13,7 +13,7 @@
 | **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | No E2E encryption support yet |
 | **Signal** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **WhatsApp** | ⏸️ | - | - | - | - | No public bot API or stable community libraries |
