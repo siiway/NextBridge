@@ -22,11 +22,13 @@ import asyncio
 import json
 
 import aiohttp
+from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -34,6 +36,7 @@ class MattermostConfig(_DriverConfig):
     server_url: str
     token: str
     max_file_size: int = 50 * 1024 * 1024
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -56,6 +59,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         self._bot_user_id: str = ""
         self._user_cache: dict[str, tuple[str, str]] = {}
         self._username_cache: dict[str, str] = {}
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -65,8 +69,15 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         server = self.config.server_url.rstrip("/")
         token = self.config.token
 
+        if self._proxy:
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+            logger.info(f"Mattermost [{self.instance_id}] use proxy {self._proxy}")
+        else:
+            connector = aiohttp.TCPConnector(ssl=True)
+
         self._session = aiohttp.ClientSession(
-            headers={"Authorization": f"Bearer {token}"}
+            headers={"Authorization": f"Bearer {token}"},
+            connector=connector
         )
 
         # Resolve the bot's own user_id so we can ignore echo messages
@@ -326,7 +337,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if not result:
                 label = att.name or att.url or ""
                 text_labels.append(f"[{att.type.capitalize()}: {label}]")

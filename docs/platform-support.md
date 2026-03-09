@@ -14,7 +14,7 @@
 | **Signal** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
+| **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | |
 | **WhatsApp** | ⏸️ | - | - | - | - | No public bot API or stable community libraries |
 | **WeChat** | ⏸️ | - | - | - | - | High risk of account ban |
