@@ -27,15 +27,13 @@ from telegram import LinkPreviewOptions, ReplyParameters, Update
 from telegram.error import NetworkError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
-import services.logger as log
-import services.media as media
 from drivers import BaseDriver
 from drivers.registry import register
-from services.config_schema import _DriverConfig
+import services.logger as log
+import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
 from services.config import get
-from drivers import BaseDriver
 
 
 class TelegramConfig(_DriverConfig):
