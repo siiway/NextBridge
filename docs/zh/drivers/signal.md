@@ -25,6 +25,7 @@ docker run -d \
 | `api_url` | 是 | — | signal-cli-rest-api 实例的基础 URL，例如 `http://localhost:8080` |
 | `number` | 是 | — | 已注册的 Signal 手机号，例如 `+12025551234` |
 | `max_file_size` | 否 | `52428800`（50 MB） | 发送附件时单个文件的最大字节数 |
+| `proxy` | 否 | — | 所有 Signal API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。 |
 
 ```json
 {

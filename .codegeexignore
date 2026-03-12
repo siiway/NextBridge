@@ -1,4 +1,4 @@
-# sync to .codegeexignore
+# just sync from .gitignore
 # Python-generated files
 __pycache__/
 *.py[oc]

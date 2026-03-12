@@ -17,7 +17,7 @@ KOOK 驱动器使用 [khl-py](https://github.com/TWT233/khl.py) 通过 WebSocket
 | 键 | 是否必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `token` | 是 | — | 来自 KOOK 开发者平台的机器人 Token |
-| `max_file_size` | 否 | `26214400`（25 MB） | 上传附件时单个文件的最大字节数 |
+| `max_file_size` | 否 | `26214400`（25 MB） | 上传附件时单个文件的最大字节数 || `proxy` | 否 | — | 所有 Kook API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。 |
 
 ```json
 {

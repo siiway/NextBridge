@@ -21,6 +21,7 @@ Add under `teams.<instance_id>` in `config.json`:
 | `listen_port` | No | `3978` | Port the driver listens on for incoming activities |
 | `listen_path` | No | `"/api/messages"` | HTTP path for the messaging endpoint |
 | `max_file_size` | No | `20971520` | Max attachment size in bytes (default 20 MB) |
+| `proxy` | No | — | Proxy URL for all Teams API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
 
 ```json
 {

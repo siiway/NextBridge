@@ -20,8 +20,10 @@ Matrix 驱动器通过长轮询同步循环（使用 [mautrix-python](https://gi
 | `password` | 否* | — | 登录密码 |
 | `access_token` | 否* | — | 访问令牌（可替代 `password`） |
 | `max_file_size` | 否 | `52428800`（50 MB） | 发送附件时单个文件的最大字节数 |
+| `proxy` | 否 | — | 所有 Matrix API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。 |
 
-\* `password` 和 `access_token` 至少需要提供一个。
+> [!IMPORTANT]
+> \* `password` 和 `access_token` 至少需要提供一个。
 
 ```json
 {

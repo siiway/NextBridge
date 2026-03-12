@@ -23,6 +23,7 @@ uv run main.py convert data/config.yaml data/config.toml
 
 ```
 {
+  "global": { ...全局配置... },
   "<平台名>": {
     "<实例ID>": { ...驱动器配置... }
   }
@@ -31,8 +32,30 @@ uv run main.py convert data/config.yaml data/config.toml
 
 | 层级 | 说明 |
 |---|---|
+| `global` | 全局配置选项，适用于所有驱动，除非在特定驱动配置中被覆盖 |
 | `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`matrix`、`signal`、`slack` 之一 |
 | `<实例ID>` | 由你自由命名，在规则配置中用于引用此实例 |
+
+## 全局配置
+
+`global` 部分包含适用于所有驱动的配置选项，除非在特定驱动配置中被覆盖。
+
+| 键 | 是否必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `proxy` | 否 | — | 全局代理 URL，适用于所有***支持代理配置***的驱动（例如：`http://proxy.example.com:8080`）。单个驱动的代理设置将覆盖此全局设置。 |
+| `strict_echo_match` | 否 | `false` | 控制 NextBridge 防止 echo (回声) 到同一个频道/实例的行为。当为 `false`（默认）时，如果目标实例 ID 或频道与源消息相同，则跳过；当为 `true` 时，只有当目标实例 ID 和频道都与源消息相同时才跳过。默认为 `false` 以最大程度防止回声。 |
+
+```json
+{
+  "global": {
+    "proxy": "http://proxy.example.com:8080"
+  }
+}
+```
+
+::: tip 使用环境变量中的代理
+ 如果未设置，程序会尝试从环境变量 `http_proxy`, `https_proxy`, `all_proxy` 中读取代理配置 (不分大小写)，此时你可以通过将 `proxy` 指定为特殊值 `disabled` 来阻止使用系统代理。
+:::
 
 同一平台可以**运行多个实例**，只需在平台名下添加多个键：
 

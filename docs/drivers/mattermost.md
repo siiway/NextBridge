@@ -29,6 +29,7 @@ Add under `mattermost.<instance_id>` in your config file:
 | `server_url` | Yes | — | Base URL of the Mattermost server, e.g. `"https://mattermost.example.com"` |
 | `token` | Yes | — | Bot token or personal access token |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum attachment size in bytes |
+| `proxy` | No | — | Proxy URL for all Mattermost API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
 
 ```json
 {

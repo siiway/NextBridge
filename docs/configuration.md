@@ -23,6 +23,7 @@ The config has a two-level structure regardless of format:
 
 ```
 {
+  "global": { ...global config... },
   "<platform>": {
     "<instance_id>": { ...driver config... }
   }
@@ -31,8 +32,30 @@ The config has a two-level structure regardless of format:
 
 | Level | Description |
 |---|---|
+| `global` | Global configuration options that apply to all drivers unless overridden |
 | `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `matrix`, `signal`, `slack` |
 | `<instance_id>` | A name you choose freely — used to reference this instance in rules |
+
+## Global Configuration
+
+The `global` section contains configuration options that apply to all drivers unless overridden in the driver-specific configuration.
+
+| Key | Required | Default | Description |
+|---|---|---|---|
+| `proxy` | No | — | Global proxy URL for all drivers that ***support proxy configuration*** (e.g., `http://proxy.example.com:8080`). Individual driver proxy settings will override this global setting. |
+| `strict_echo_match` | No | `false` | Controls how NextBridge prevents echoing messages back to the same channel/instance. When `false` (default), skips if target_id == msg.instance_id OR target_channel == msg.channel. When `true`, skips only if target_id == msg.instance_id AND target_channel == msg.channel. Default is `false` to maximize echo prevention. |
+
+```json
+{
+  "global": {
+    "proxy": "http://proxy.example.com:8080"
+  }
+}
+```
+
+::: tip Using proxy from environment variables
+ If not set, the program will attempt to read proxy configuration from environment variables `http_proxy`, `https_proxy`, and `all_proxy` (case-insensitive). You can disable the use of system proxy by setting `proxy` to the special value `disabled`.
+:::
 
 You can run **multiple instances of the same platform** by adding more keys under the platform:
 

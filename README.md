@@ -1,6 +1,10 @@
 # NextBridge
 > The chat bridge that links up all the major chat platforms!
 
+Docs (English): https://nextbridge.siiway.org
+
+文档 (中文): https://nextbridge.siiway.org/zh
+
 ## To-Do List
  - [x] [Tencent QQ](https://im.qq.com) (with [NapCat](https://napneko.github.io))
  - [x] [Discord](https://discord.gg)
@@ -18,6 +22,7 @@
  - [x] [Google Chat](https://chat.google.com) - Not Tested
  - [x] [Mattermost](https://mattermost.com) - Not Tested
  - [x] [Rocket.Chat](https://rocket.chat) - Not Tested
+ - [ ] [Tailchat](https://github.com/msgbyte/tailchat)
  - [ ] [Zulip](https://zulip.com)
  - [ ] [LINE](https://line.me)
  - [ ] [Viber](https://viber.com)

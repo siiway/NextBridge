@@ -19,4 +19,7 @@ dependencies = [
     "slack-sdk>=3.40.1",
     "pydantic>=2.0",
     "google-auth>=2.0",
+    "httpx[socks]>=0.28.1",
+    "aiohttp-socks>=0.11.0",
+    "requests[socks]>=2.32.5",
 ]

@@ -48,6 +48,7 @@ Add under `rocketchat.<instance_id>` in your config file:
 | `listen_path` | No | `"/rocketchat/webhook"` | HTTP path for the outgoing webhook listener |
 | `webhook_token` | No | `""` | Token from the outgoing webhook — verifies requests are from RC |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum attachment size in bytes |
+| `proxy` | No | — | Proxy URL for all Rocket.Chat API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
 
 **API mode example:**
 

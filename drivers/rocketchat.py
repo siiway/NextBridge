@@ -45,12 +45,14 @@ import asyncio
 
 import aiohttp
 from aiohttp import web
+from aiohttp_socks import ProxyConnector
 from pydantic import model_validator
 
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -67,6 +69,7 @@ class RocketChatConfig(_DriverConfig):
     listen_path: str = "/rocketchat/webhook"
     webhook_token: str = ""
     max_file_size: int = 50 * 1024 * 1024
+    proxy: str = ""
 
     @model_validator(mode="after")
     def _check_send_config(self) -> "RocketChatConfig":
@@ -91,13 +94,20 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
         self._username_cache: dict[str, str] = {}
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self):
-        self._session = aiohttp.ClientSession()
+        if self._proxy:
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+            logger.info(f"Rocket.Chat [{self.instance_id}] use proxy {self._proxy}")
+        else:
+            connector = aiohttp.TCPConnector(ssl=True)
+
+        self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
         app = web.Application()
@@ -328,7 +338,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if not result:
                 label = att.name or att.url or ""
                 await self._api_post_message(

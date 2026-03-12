@@ -26,11 +26,13 @@ import time
 
 import aiohttp
 from aiohttp import web
+from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -40,6 +42,7 @@ class TeamsConfig(_DriverConfig):
     listen_port: int = 3978
     listen_path: str = "/api/messages"
     max_file_size: int = 20 * 1024 * 1024
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -54,13 +57,20 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         self._session: aiohttp.ClientSession | None = None
         self._access_token: str = ""
         self._token_expires: float = 0.0
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self):
-        self._session = aiohttp.ClientSession()
+        if self._proxy:
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+            logger.info(f"Teams [{self.instance_id}] use proxy {self._proxy}")
+        else:
+            connector = aiohttp.TCPConnector(ssl=True)
+
+        self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
         app = web.Application()
@@ -274,7 +284,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if not result:
                 label = att.name or att.url or ""
                 act = {

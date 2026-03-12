@@ -32,6 +32,7 @@ Google Chat 驱动器通过**服务账号**和 **Google Chat REST API** 将 Goog
 | `listen_path` | 否 | `"/google-chat/events"` | 事件端点的 HTTP 路径 |
 | `endpoint_url` | 否 | — | 端点的完整公开 URL（设置后启用请求签名验证） |
 | `max_file_size` | 否 | `52428800`（50 MB）| 附件大小上限（字节） |
+| `proxy` | 否 | — | 所有 Google Chat API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。 |
 
 \* `service_account_file` 与 `service_account_json` 必须填写其中一个。
 

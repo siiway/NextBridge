@@ -6,7 +6,7 @@
 #   max_file_size     – Max bytes per attachment when sending (default 50 MB,
 #                       Telegram bot API limit)
 #   rich_header_host  – Base URL of the Cloudflare rich-header worker
-#                       (e.g. "https://richheader.yourname.workers.dev").
+#                       (e.g. "https://richheader.yourname.workers.dev" or "https://richheader.siiway.top").
 #                       When set, text-only bridged messages whose msg_format
 #                       includes a <richheader/> tag are sent with a small OG
 #                       link-preview card shown above the text (avatar + name).
@@ -27,18 +27,20 @@ from telegram import LinkPreviewOptions, ReplyParameters, Update
 from telegram.error import NetworkError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
-import services.logger as log
-import services.media as media
 from drivers import BaseDriver
 from drivers.registry import register
-from services.config_schema import _DriverConfig
+import services.logger as log
+import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.config_schema import _DriverConfig
+from services.config import get
 
 
 class TelegramConfig(_DriverConfig):
     bot_token: str
     max_file_size: int = 50 * 1024 * 1024
     rich_header_host: str = ""
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -67,12 +69,14 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     def __init__(self, instance_id: str, config: TelegramConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._app: Application | None = None
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
         # self._stop_event = asyncio.Event() # This is no longer needed with the refactor
 
-    # Error handler must be a regular (non-async) function as required by python-telegram-bot
-    def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Log the error and inform the user if possible. This function must NOT be a coroutine."""
-        tb_list = traceback.format_exception(None, context.error, context.error.__traceback__, limit=None)
+    # Error handler must be a ~~regular (non-async) function as required by python-telegram-bot~~ async function!
+    # nt: type check disabled lol -- wyf9
+    async def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log the error and inform the user if possible."""
+        tb_list = traceback.format_exception(None, context.error, getattr(context.error, '__traceback__', None), limit=None)
         tb_string = "".join(tb_list[-2:])
         print_tb_string = "\n".join(tb_list[-2:]) # For logging to console
 
@@ -102,7 +106,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             try:
                 # Re-initialize the application on each attempt to ensure a clean state
                 # Configure timeouts directly in the builder as per wiki advice
-                self._app = (
+                app = (
                     Application.builder()
                     .token(self.config.bot_token)
                     .connect_timeout(10) # General connect timeout
@@ -110,11 +114,16 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     .write_timeout(10)   # General write timeout
                     .pool_timeout(5)     # Connection pool timeout
                     .get_updates_read_timeout(10) # Specific read timeout for get_updates
-                    .build()
                 )
+                if self._proxy:
+                    logger.debug(f"Telegram [{self.instance_id}] using proxy {self._proxy}")
+                    app = app.proxy(self._proxy)
+                    app = app.get_updates_proxy(self._proxy)
+                self._app = app.build()
+
                 self._app.add_handler(MessageHandler(
                     _CONTENT_FILTER, self._on_message))
-                self._app.add_error_handler(self._error_handler) # Register the synchronous error handler
+                self._app.add_error_handler(self._error_handler) # Register the error handler
 
                 logger.info(f"Telegram [{self.instance_id}] starting application and polling.")
 
@@ -388,7 +397,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 if not att.url and att.data is None:
                     continue
 
-                result = await media.fetch_attachment(att, self.config.max_file_size)
+                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
                 if not result:
                     # Oversized or failed — append as text (escape if in HTML mode)
                     label = att.name or att.url or ""

@@ -33,7 +33,11 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import web
+from aiohttp_socks import ProxyConnector
 from pydantic import model_validator
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 import google.oauth2.service_account as _sa
 import google.auth.transport.requests as _ga_req
@@ -42,6 +46,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -52,6 +57,7 @@ class GoogleChatConfig(_DriverConfig):
     listen_path: str = "/google-chat/events"
     endpoint_url: str = ""
     max_file_size: int = 50 * 1024 * 1024
+    proxy: str = ""
 
     @model_validator(mode="after")
     def _require_creds(self) -> "GoogleChatConfig":
@@ -84,12 +90,19 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         self._session: aiohttp.ClientSession | None = None
         self._creds: _sa.Credentials | None = None
         self._token_lock: asyncio.Lock = asyncio.Lock()
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self):
+        if self._proxy:
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+            logger.info(f"GoogleChat [{self.instance_id}] use proxy {self._proxy}")
+        else:
+            connector = aiohttp.TCPConnector(ssl=True)
+
         try:
             if self.config.service_account_json:
                 sa_info = json.loads(self.config.service_account_json)
@@ -105,7 +118,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             )
             return
 
-        self._session = aiohttp.ClientSession()
+        self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
         app = web.Application()
@@ -129,18 +142,43 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
     # Auth
     # ------------------------------------------------------------------
 
+
     async def _get_token(self) -> str:
         async with self._token_lock:
             if self._creds is None:
                 return ""
+
             if not self._creds.valid:
                 try:
-                    await asyncio.to_thread(self._creds.refresh, _ga_req.Request())
-                except Exception as e:
-                    logger.error(
-                        f"Google Chat [{self.instance_id}] token refresh failed: {e}"
+                    session = requests.Session()
+                    if self._proxy:
+                        session.proxies = {
+                            "http": self._proxy,
+                            "https": self._proxy,
+                        }
+                        logger.debug(f"GoogleChat [{self.instance_id}] token refresh use proxy {self._proxy}")
+
+                    # retry
+                    retry_strategy = Retry(
+                        total=3,
+                        backoff_factor=1,
+                        status_forcelist=[429, 500, 502, 503, 504],
                     )
+                    adapter = HTTPAdapter(max_retries=retry_strategy)
+                    session.mount("http://", adapter)
+                    session.mount("https://", adapter)
+
+                    # refresh token manually
+                    request = _ga_req.Request(session=session)
+                    await asyncio.to_thread(self._creds.refresh, request)
+
+                    logger.debug(f"Google Chat [{self.instance_id}] access token refreshed")
+                except Exception as e:
+                    logger.error(f"Google Chat [{self.instance_id}] token refresh failed: {e}")
                     return ""
+                finally:
+                    session.close()
+
             return self._creds.token or ""
 
     # ------------------------------------------------------------------
@@ -378,7 +416,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 continue
 
             # All other attachments (or images with bytes only) → multipart upload
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if not result:
                 label = att.name or att.url or ""
                 await self._post_message(

@@ -29,10 +29,12 @@ import json
 
 import aiohttp
 from aiohttp import web
+from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.config import get
 from services.config_schema import _DriverConfig
 from drivers import BaseDriver
 
@@ -43,6 +45,7 @@ class VoceChatConfig(_DriverConfig):
     listen_port: int = 8091
     listen_path: str = "/vocechat/webhook"
     max_file_size: int = 50 * 1024 * 1024
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -64,14 +67,22 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         self._session: aiohttp.ClientSession | None = None
         # uid → (name, avatar)
         self._user_cache: dict[int, tuple[str, str]] = {}
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self):
+        if self._proxy:
+            logger.info(f"VoceChat [{self.instance_id}] using proxy {self._proxy}")
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+        else:
+            connector = aiohttp.TCPConnector(ssl=True)
+
         self._session = aiohttp.ClientSession(
-            headers={"x-api-key": self.config.api_key}
+            headers={"x-api-key": self.config.api_key},
+            connector=connector
         )
         self.bridge.register_sender(self.instance_id, self.send)
 
@@ -302,7 +313,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if not result:
                 label = att.name or att.url or ""
                 mid = await self._post_message(

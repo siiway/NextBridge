@@ -10,6 +10,7 @@
 import mimetypes
 
 import aiohttp
+from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 
@@ -17,17 +18,46 @@ logger = log.get_logger()
 
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
-_session: aiohttp.ClientSession | None = None
+_sessions: dict[str | None, aiohttp.ClientSession] = {}
 
 
-def _get_session() -> aiohttp.ClientSession:
-    global _session
-    if _session is None or _session.closed:
-        _session = aiohttp.ClientSession()
-    return _session
+def _get_session(proxy: str | None = None) -> aiohttp.ClientSession:
+    global _sessions
+
+    if proxy in _sessions and not _sessions[proxy].closed:
+        # session exists
+        return _sessions[proxy]
+
+    # new session
+    connector = ProxyConnector.from_url(proxy, rdns=True) if proxy else None
+    session = aiohttp.ClientSession(connector=connector)
+    _sessions[proxy] = session
+    logger.debug(f"New {'proxy' if proxy else 'direct'} session {session}")
+    return session
 
 
-async def fetch(url: str, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, str] | None:
+async def close_all_sessions() -> None:
+    """
+    Close all tracked aiohttp.ClientSession instances and clear the session cache.
+
+    This should be called on application shutdown to avoid leaking open
+    connections when multiple per-proxy sessions have been created.
+    """
+    global _sessions
+
+    # Take a snapshot to avoid mutation-while-iterating issues
+    sessions = list(_sessions.values())
+    _sessions.clear()
+
+    for session in sessions:
+        if not session.closed:
+            try:
+                await session.close()
+            except Exception as e:
+                # Log and continue closing remaining sessions
+                logger.exception(f"Error while closing aiohttp ClientSession {session} in services.media: {e}")
+
+async def fetch(url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None) -> tuple[bytes, str] | None:
     """
     Download *url* up to *max_bytes*.
 
@@ -40,7 +70,7 @@ async def fetch(url: str, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, str] | 
     if not url:
         return None
 
-    session = _get_session()
+    session = _get_session(proxy=proxy)
 
     try:
         # Pre-flight HEAD to skip obviously oversized files without downloading
@@ -79,7 +109,9 @@ async def fetch(url: str, max_bytes: int = _DEFAULT_MAX) -> tuple[bytes, str] | 
 
 
 async def fetch_attachment(
-    att, max_bytes: int = _DEFAULT_MAX
+    att,
+    max_bytes: int = _DEFAULT_MAX,
+    proxy: str | None = None
 ) -> tuple[bytes, str] | None:
     """
     Return ``(bytes, mime)`` for an Attachment.
@@ -96,7 +128,7 @@ async def fetch_attachment(
             return None
         mime = mimetypes.guess_type(att.name)[0] or "application/octet-stream"
         return att.data, mime
-    return await fetch(att.url, max_bytes)
+    return await fetch(att.url, max_bytes, proxy)
 
 
 def filename_for(name: str, content_type: str) -> str:

@@ -22,11 +22,13 @@ from urllib.parse import quote, urlparse
 
 import aiohttp
 from aiohttp import web
+from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from drivers import BaseDriver
 
 
@@ -36,6 +38,7 @@ class YunhuConfig(_DriverConfig):
     webhook_path: str = "/yunhu-webhook"
     proxy_host: str = ""
     max_file_size: int = 10 * 1024 * 1024
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -44,8 +47,6 @@ _SEND_URL = "https://chat-go.jwzhd.com/open-apis/v1/bot/send"
 _IMAGE_UPLOAD_URL = "https://chat-go.jwzhd.com/open-apis/v1/image/upload"
 _FILE_UPLOAD_URL = "https://chat-go.jwzhd.com/open-apis/v1/file/upload"
 _VIDEO_UPLOAD_URL = "https://chat-go.jwzhd.com/open-apis/v1/video/upload"
-_DEFAULT_PORT = 8765
-_DEFAULT_PATH = "/yunhu-webhook"
 
 # Yunhu's own CDN — no need to proxy through /media
 _YUNHU_CDN_SUFFIXES = (".jwznb.com", ".jwzhd.com")
@@ -58,6 +59,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         super().__init__(instance_id, config, bridge)
         self._token: str = config.token
         self._session: aiohttp.ClientSession | None = None
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -71,7 +73,13 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 f"Yunhu [{self.instance_id}] no token configured — send disabled"
             )
 
-        self._session = aiohttp.ClientSession()
+        if self._proxy:
+            logger.info(f"Yunhu [{self.instance_id}] using proxy {self._proxy}")
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+        else:
+            connector = aiohttp.TCPConnector(ssl=True)
+
+        self._session = aiohttp.ClientSession(connector=connector)
 
         port: int = self.config.webhook_port
         path: str = self.config.webhook_path
@@ -315,7 +323,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 continue
 
             # Fetch the data first
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if not result:
                 label = att.name or att.url or ""
                 fallback = f"[{att.type.capitalize()}: {label}]"

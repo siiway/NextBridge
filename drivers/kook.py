@@ -24,13 +24,18 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.config import get
 from services.db import msg_db
 from drivers import BaseDriver
+
+from aiohttp import ClientSession
+from aiohttp_socks import ProxyConnector
 
 
 class KookConfig(_DriverConfig):
     token: str
     max_file_size: int = 25 * 1024 * 1024
+    proxy: str = ""
 
 
 logger = log.get_logger()
@@ -40,6 +45,7 @@ class KookDriver(BaseDriver[KookConfig]):
     def __init__(self, instance_id: str, config: KookConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._bot: khl.Bot | None = None
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -49,6 +55,24 @@ class KookDriver(BaseDriver[KookConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
 
         self._bot = khl.Bot(token=self.config.token)
+
+        # handle proxy
+        if self._proxy:
+            logger.debug(f"Kook [{self.instance_id}] using proxy {self._proxy}")
+
+            requester = self._bot.client.gate.requester
+            original_request = requester.request
+
+            async def proxied_request(method: str, route: str, **params):
+                # inject connector on 1st request
+                if requester._cs is not None and requester._cs.connector is None:
+                    connector = ProxyConnector.from_url(self._proxy, rdns=True)  # type: ignore
+                    sess = ClientSession(connector=connector)
+                    requester._cs = sess
+
+                return await original_request(method, route, **params)
+
+            requester.request = proxied_request
 
         # Register our handler alongside khl's internal command-manager handler.
         # khl's Client dispatches to all registered handlers for a given type.
