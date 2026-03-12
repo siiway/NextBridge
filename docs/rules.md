@@ -1,6 +1,25 @@
 # Rules Reference
 
-Message routing is defined in `data/rules.json`:
+## Rules file formats
+
+NextBridge supports **JSON**, **YAML**, and **TOML** rules files. Place the file in the data directory (default: `data/`). The first file found in this order is used:
+
+1. `rules.json`
+2. `rules.yaml` / `rules.yml`
+3. `rules.toml`
+
+### Converting between formats
+
+Use the built-in convert command to translate between formats:
+
+```sh
+uv run main.py convert data/rules.json data/rules.yaml
+uv run main.py convert data/rules.yaml data/rules.toml
+```
+
+## Structure
+
+The rules file has the following structure regardless of format:
 
 ```json
 {

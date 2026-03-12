@@ -17,11 +17,21 @@ _YAML_EXTS = {".yaml", ".yml"}
 _TOML_EXTS = {".toml"}
 
 _CONFIG_NAMES = ["config.json", "config.yaml", "config.yml", "config.toml"]
+_RULES_NAMES = ["rules.json", "rules.yaml", "rules.yml", "rules.toml"]
 
 
 def find_config(directory: Path) -> Path | None:
     """Return the first existing config file found in *directory*."""
     for name in _CONFIG_NAMES:
+        p = directory / name
+        if p.is_file():
+            return p
+    return None
+
+
+def find_rules(directory: Path) -> Path | None:
+    """Return the first existing rules file found in *directory*."""
+    for name in _RULES_NAMES:
         p = directory / name
         if p.is_file():
             return p

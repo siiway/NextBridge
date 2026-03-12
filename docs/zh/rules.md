@@ -1,6 +1,25 @@
 # 规则配置参考
 
-消息路由在 `data/rules.json` 中定义：
+## 规则文件格式
+
+NextBridge 支持 **JSON**、**YAML** 和 **TOML** 格式的规则文件。将规则文件放在数据目录（默认为 `data/`）下，程序会按以下顺序查找并使用第一个存在的文件：
+
+1. `rules.json`
+2. `rules.yaml` / `rules.yml`
+3. `rules.toml`
+
+### 格式转换
+
+使用内置 convert 命令可以在各格式之间互转：
+
+```sh
+uv run main.py convert data/rules.json data/rules.yaml
+uv run main.py convert data/rules.yaml data/rules.toml
+```
+
+## 结构
+
+无论使用哪种格式，规则文件均采用以下结构：
 
 ```json
 {

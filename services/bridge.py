@@ -1,4 +1,3 @@
-import json
 import re
 import uuid
 from pathlib import Path
@@ -6,6 +5,7 @@ from typing import Callable
 
 import services.util as u
 import services.logger as log
+import services.config_io as config_io
 from services.message import NormalizedMessage
 from services.db import msg_db
 
@@ -80,11 +80,16 @@ class Bridge:
     # ------------------------------------------------------------------
 
     def load_rules(self):
-        rules_path = Path(u.get_data_path()) / "rules.json"
-        with open(rules_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        # Try to find rules file in supported formats
+        rules_path = config_io.find_rules(Path(u.get_data_path()))
+        if rules_path is None:
+            logger.warning("No rules file found")
+            self._rules = []
+            return
+
+        data = config_io.load_config(rules_path)
         self._rules = data.get("rules", [])
-        logger.info(f"Loaded {len(self._rules)} bridge rule(s)")
+        logger.info(f"Loaded {len(self._rules)} bridge rule(s) from {rules_path.name}")
 
     def _should_skip_echo(self, target_id: str, target_channel: dict, msg: NormalizedMessage) -> bool:
         """Determine if we should skip sending to avoid echo.
