@@ -36,6 +36,27 @@ def _get_session(proxy: str | None = None) -> aiohttp.ClientSession:
     return session
 
 
+async def close_all_sessions() -> None:
+    """
+    Close all tracked aiohttp.ClientSession instances and clear the session cache.
+
+    This should be called on application shutdown to avoid leaking open
+    connections when multiple per-proxy sessions have been created.
+    """
+    global _sessions
+
+    # Take a snapshot to avoid mutation-while-iterating issues
+    sessions = list(_sessions.values())
+    _sessions.clear()
+
+    for session in sessions:
+        if not session.closed:
+            try:
+                await session.close()
+            except Exception as e:
+                # Log and continue closing remaining sessions
+                logger.exception(f"Error while closing aiohttp ClientSession {session} in services.media: {e}")
+
 async def fetch(url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None) -> tuple[bytes, str] | None:
     """
     Download *url* up to *max_bytes*.

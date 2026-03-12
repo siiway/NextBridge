@@ -73,6 +73,7 @@ class Bridge:
         self._rules: list[dict] = []
         self._senders: dict[str, Callable] = {}
         self._sensitive: frozenset[str] = frozenset()
+        self.strict_echo_match: bool = False
 
     # ------------------------------------------------------------------
     # Setup
@@ -84,6 +85,18 @@ class Bridge:
             data = json.load(f)
         self._rules = data.get("rules", [])
         logger.info(f"Loaded {len(self._rules)} bridge rule(s)")
+
+    def _should_skip_echo(self, target_id: str, target_channel: dict, msg: NormalizedMessage) -> bool:
+        """Determine if we should skip sending to avoid echo.
+
+        Returns True if the message should be skipped based on strict_echo_match configuration.
+        """
+        if self.strict_echo_match:
+            # Strict mode: skip only if both instance_id and channel match
+            return target_id == msg.instance_id and target_channel == msg.channel
+        else:
+            # Default mode: skip if either instance_id or channel matches
+            return target_id == msg.instance_id or target_channel == msg.channel
 
     def load_sensitive_values(self, config: dict):
         found: set[str] = set()
@@ -301,8 +314,8 @@ class Bridge:
         formatted, extra = self._build_formatted(msg, rule.get("msg", {}))
 
         for target_id, target_channel in rule.get("to", {}).items():
-            # Skip echo back to the exact same channel
-            if target_id == msg.instance_id or target_channel == msg.channel:
+            # Skip echo based on strict_echo_match configuration
+            if self._should_skip_echo(target_id, target_channel, msg):
                 continue
 
             if self._is_sensitive(formatted):
@@ -367,8 +380,8 @@ class Bridge:
             # Strip the reserved "msg" key to get the bare channel address dict
             target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
 
-            # Skip echo back to the exact same channel
-            if target_id == msg.instance_id or target_channel == msg.channel:
+            # Skip echo based on strict_echo_match configuration
+            if self._should_skip_echo(target_id, target_channel, msg):
                 continue
 
             # Per-target msg overrides the global msg (target wins on conflict)

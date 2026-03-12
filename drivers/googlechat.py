@@ -176,6 +176,8 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 except Exception as e:
                     logger.error(f"Google Chat [{self.instance_id}] token refresh failed: {e}")
                     return ""
+                finally:
+                    session.close()
 
             return self._creds.token or ""
 

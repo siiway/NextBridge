@@ -75,7 +75,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     # Error handler must be a ~~regular (non-async) function as required by python-telegram-bot~~ async function!
     # nt: type check disabled lol -- wyf9
     async def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Log the error and inform the user if possible. This function must NOT be a coroutine."""
+        """Log the error and inform the user if possible."""
         tb_list = traceback.format_exception(None, context.error, getattr(context.error, '__traceback__', None), limit=None)
         tb_string = "".join(tb_list[-2:])
         print_tb_string = "\n".join(tb_list[-2:]) # For logging to console
@@ -123,7 +123,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
                 self._app.add_handler(MessageHandler(
                     _CONTENT_FILTER, self._on_message))
-                self._app.add_error_handler(self._error_handler) # Register the synchronous error handler
+                self._app.add_error_handler(self._error_handler) # Register the error handler
 
                 logger.info(f"Telegram [{self.instance_id}] starting application and polling.")
 

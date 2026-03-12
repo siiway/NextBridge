@@ -185,11 +185,10 @@ class SignalDriver(BaseDriver[SignalConfig]):
             )
             if result:
                 att_data, _ = result
-
-            attachments.append(
-                Attachment(type=att_type, url="", name=fname,
-                           size=size, data=att_data)
-            )
+                attachments.append(
+                    Attachment(type=att_type, url="", name=fname,
+                               size=size, data=att_data)
+                )
 
         normalized = NormalizedMessage(
             platform="signal",

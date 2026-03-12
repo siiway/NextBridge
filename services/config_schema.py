@@ -53,6 +53,14 @@ class GlobalConfig(BaseModel):
     """Global proxy URL for all drivers that support proxy configuration.
     Individual driver proxy settings will override this global setting."""
 
+    strict_echo_match: CoercedBool = False
+    """Controls how the bridge prevents echoing messages back to the same channel/instance.
+
+    When False (default): skips if target_id == msg.instance_id OR target_channel == msg.channel.
+    When True: skips only if target_id == msg.instance_id AND target_channel == msg.channel.
+
+    Default is False to maximize echo prevention."""
+
 
 # ---------------------------------------------------------------------------
 # Base for all driver config blocks — unknown keys are a validation error

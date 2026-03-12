@@ -73,6 +73,10 @@ async def main():
 
     bridge.load_sensitive_values(raw)
 
+    # Load global configuration
+    global_config = raw.get("global", {})
+    bridge.strict_echo_match = global_config.get("strict_echo_match", False)
+
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()
     validated: dict[str, dict[str, object]] = {}
@@ -121,6 +125,11 @@ async def main():
         for task in driver_tasks:
             task.cancel()
         await asyncio.gather(*driver_tasks, return_exceptions=True)
+
+        # Close all aiohttp sessions to avoid connection leaks
+        from services.media import close_all_sessions
+        await close_all_sessions()
+
         logger.info("NextBridge stopped.")
 
 
