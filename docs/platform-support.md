@@ -8,7 +8,7 @@
 | **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
 | **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | SDK doesn't support proxy |
 | **Yunhu** | ✅ | ❌ | ✅ | ✅ | ✅ | Native mentions not yet supported |
-| **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | SDK doesn't support proxy |
+| **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
 | **DingTalk** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | SDK doesn't support proxy |
 | **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | No E2E encryption support yet |
 | **Signal** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |

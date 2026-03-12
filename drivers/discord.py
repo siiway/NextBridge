@@ -23,7 +23,6 @@ import io
 import json
 from pathlib import Path
 import re
-import os
 
 import discord
 import aiohttp
