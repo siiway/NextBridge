@@ -76,6 +76,14 @@ async def main():
     # Load global configuration
     global_config = raw.get("global", {})
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
+    
+    # Validate database configuration
+    from services.config_schema import GlobalConfig
+    try:
+        GlobalConfig.model_validate(global_config)
+    except ValidationError as exc:
+        logger.critical(f"Global configuration error", exc_info=exc)
+        return
 
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()
@@ -89,7 +97,7 @@ async def main():
                     inst_raw
                 )
             except ValidationError as exc:
-                logger.critical(f"Config error in {platform}.{inst_id}:\n{exc}")
+                logger.critical(f"Config error in {platform}.{inst_id}", exc_info=exc)
                 config_ok = False
 
     if not config_ok:
@@ -100,7 +108,7 @@ async def main():
             return
         exc = task.exception()
         if exc is not None:
-            logger.error(f"Driver '{task.get_name()}' crashed: {exc}")
+            logger.error(f"Driver '{task.get_name()}' crashed", exc_info=exc)
 
     driver_tasks: list[asyncio.Task] = []
     for platform, (_, driver_cls) in registry.items():

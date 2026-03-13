@@ -44,6 +44,7 @@ uv run main.py convert data/config.yaml data/config.toml
 |---|---|---|---|
 | `proxy` | 否 | — | 全局代理 URL，适用于所有***支持代理配置***的驱动（例如：`http://proxy.example.com:8080`）。单个驱动的代理设置将覆盖此全局设置。 |
 | `strict_echo_match` | 否 | `false` | 控制 NextBridge 防止 echo (回声) 到同一个频道/实例的行为。当为 `false`（默认）时，如果目标实例 ID 或频道与源消息相同，则跳过；当为 `true` 时，只有当目标实例 ID 和频道都与源消息相同时才跳过。默认为 `false` 以最大程度防止回声。 |
+| `database` | 否 | — | 数据库配置，用于存储消息和用户映射。参见下方[数据库配置](#数据库配置)。 |
 
 ```json
 {
@@ -55,6 +56,74 @@ uv run main.py convert data/config.yaml data/config.toml
 
 ::: tip 使用环境变量中的代理
  如果未设置，程序会尝试从环境变量 `http_proxy`, `https_proxy`, `all_proxy` 中读取代理配置 (不分大小写)，此时你可以通过将 `proxy` 指定为特殊值 `disabled` 来阻止使用系统代理。
+:::
+
+## 数据库配置
+
+NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端，包括 SQLite、MySQL、PostgreSQL 等。数据库用于存储：
+
+- 不同平台之间的消息 ID 映射
+- 用于跨平台用户识别的用户绑定
+- 用户显示名称映射
+- 临时绑定码
+
+### 配置选项
+
+| 键 | 是否必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `database.url` | 否 | `sqlite:///data/messages.db` | SQLAlchemy 数据库 URL。不同数据库的示例请参见下方。 |
+| `database.echo` | 否 | `false` | 启用 SQLAlchemy 查询日志用于调试。 |
+| `database.pool_size` | 否 | — | 非 SQLite 数据库的连接池大小。未指定时使用 SQLAlchemy 默认值。 |
+| `database.max_overflow` | 否 | — | 非 SQLite 数据库的连接池最大溢出大小。未指定时使用 SQLAlchemy 默认值。 |
+| `database.pool_recycle` | 否 | `3600` | 连接回收时间（秒），默认为 1 小时。 |
+
+### 数据库 URL 示例
+
+**SQLite（默认）：**
+```json
+{
+  "global": {
+    "database": {
+      "url": "sqlite:///data/messages.db"
+    }
+  }
+}
+```
+
+**MySQL：**
+```json
+{
+  "global": {
+    "database": {
+      "url": "mysql+pymysql://user:password@localhost:3306/nextbridge",
+      "pool_size": 10,
+      "max_overflow": 20,
+      "pool_recycle": 3600
+    }
+  }
+}
+```
+
+**PostgreSQL：**
+```json
+{
+  "global": {
+    "database": {
+      "url": "postgresql://user:password@localhost:5432/nextbridge",
+      "pool_size": 10,
+      "max_overflow": 20,
+      "pool_recycle": 3600
+    }
+  }
+}
+```
+
+::: tip SQLite 路径处理
+  使用 SQLite 的相对路径（如 `sqlite:///data/messages.db`）时，路径将相对于数据目录解析。绝对路径（如 `sqlite:////var/lib/nextbridge/messages.db`）将按原样使用。
+:::
+
+::: warning 连接池
+  连接池设置（`pool_size`、`max_overflow`、`pool_recycle`）仅适用于非 SQLite 数据库。SQLite 使用基于文件的存储，不支持同样的连接池机制。
 :::
 
 同一平台可以**运行多个实例**，只需在平台名下添加多个键：

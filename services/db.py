@@ -1,6 +1,7 @@
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from sqlalchemy import (
     Column,
@@ -11,10 +12,12 @@ from sqlalchemy import (
     delete,
     select,
 )
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session
 
 import services.util as u
 import services.logger as log
+import services.config as config
 
 logger = log.get_logger()
 
@@ -62,14 +65,53 @@ Index("idx_global_user", UserBinding.global_user_id)
 class MessageDB:
     """Handles mapping of message IDs between different platforms."""
 
-    def __init__(self):
-        db_path = Path(u.get_data_path()) / "messages.db"
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._engine = create_engine(
-            f"sqlite:///{db_path}",
-            connect_args={"check_same_thread": False},
-        )
+    def __init__(self, engine: Optional[Engine] = None):
+        """Initialize the database handler.
+
+        Args:
+            engine: Optional SQLAlchemy engine. If not provided, will be created from config.
+        """
+        self._engine = engine or self._create_engine_from_config()
         _Base.metadata.create_all(self._engine)
+
+    @staticmethod
+    def _create_engine_from_config() -> Engine:
+        """Create a SQLAlchemy engine from the global configuration.
+
+        Returns:
+            SQLAlchemy Engine instance configured according to database settings.
+        """
+        db_config: dict = config.get("database", {})  # type: ignore
+        url = db_config.get("url", "sqlite:///data/messages.db")
+
+        # Handle SQLite relative paths
+        if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
+            # Convert relative path to absolute path
+            db_path = url.replace("sqlite:///", "")
+            if not Path(db_path).is_absolute():
+                data_path = Path(u.get_data_path())
+                db_path = data_path / db_path
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+                url = f"sqlite:///{db_path}"
+
+        # Build engine kwargs from config
+        engine_kwargs = {"echo": db_config.get("echo", False)}
+
+        # SQLite-specific settings
+        if url.startswith("sqlite:///"):
+            engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+        # Pool settings for non-SQLite databases
+        else:
+            if "pool_size" in db_config:
+                engine_kwargs["pool_size"] = db_config["pool_size"]
+            if "max_overflow" in db_config:
+                engine_kwargs["max_overflow"] = db_config["max_overflow"]
+            if "pool_recycle" in db_config:
+                engine_kwargs["pool_recycle"] = db_config["pool_recycle"]
+
+        logger.info(f"Initializing database engine: {url.split("://")[0]}")
+        return create_engine(url, **engine_kwargs)
 
     def _session(self) -> Session:
         return Session(self._engine)
@@ -306,4 +348,33 @@ class MessageDB:
 
 
 # Shared singleton
-msg_db = MessageDB()
+
+_msg_db_instance: Optional[MessageDB] = None
+
+
+def msg_db() -> MessageDB:
+    """Get the shared MessageDB instance.
+
+    This function implements lazy initialization to ensure the database
+    is only initialized after the configuration has been loaded.
+
+    Returns:
+        The shared MessageDB instance.
+    """
+    global _msg_db_instance
+    if _msg_db_instance is None:
+        _msg_db_instance = MessageDB()
+    return _msg_db_instance
+
+
+def init_db(engine: Optional[Engine] = None) -> None:
+    """Initialize the database with an optional custom engine.
+
+    This function allows explicit initialization of the database,
+    useful for testing or when using a custom engine.
+
+    Args:
+        engine: Optional SQLAlchemy engine to use.
+    """
+    global _msg_db_instance
+    _msg_db_instance = MessageDB(engine)

@@ -204,7 +204,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             pass
         except Exception as exc:
             logger.warning(
-                f"Discord [{self.instance_id}] failed to read emoji DB: {exc}"
+                f"Discord [{self.instance_id}] failed to read emoji DB",
+                exc_info=exc
             )
 
         return self._emoji_db
