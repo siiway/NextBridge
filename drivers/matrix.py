@@ -342,6 +342,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 )
             is_html = True
 
+        relates_obj: RelatesTo | None = None
         if text.strip():
             relates_obj = RelatesTo(in_reply_to=InReplyTo(
                 event_id=reply_to_event_id)) if reply_to_event_id else None

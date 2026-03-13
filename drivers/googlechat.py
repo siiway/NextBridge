@@ -149,6 +149,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 return ""
 
             if not self._creds.valid:
+                session: requests.Session | None = None
                 try:
                     session = requests.Session()
                     if self._proxy:
@@ -177,7 +178,8 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                     logger.error(f"Google Chat [{self.instance_id}] token refresh failed: {e}")
                     return ""
                 finally:
-                    session.close()
+                    if session is not None:
+                        session.close()
 
             return self._creds.token or ""
 

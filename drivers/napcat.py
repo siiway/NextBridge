@@ -636,6 +636,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     fname = att.name or "file"
                     mode = self._resolve_send_mode(len(data_bytes))
                     if mode == "base64":
+                        b64 = base64.b64encode(data_bytes).decode()
                         await self._call(
                             "upload_group_file",
                             {
