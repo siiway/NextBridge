@@ -147,7 +147,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 # DingTalk webhook doesn't always give the display name in atUsers
                 # We might need to rely on the senderNick if it's a self-mention or lookup
                 # For now, store ID. The bridge might know the name from previous messages.
-                uname = msg_db.get_user_name(self.instance_id, uid)
+                uname = msg_db().get_user_name(self.instance_id, uid)
                 mentions.append({"id": uid, "name": uname or uid})
 
         msg = NormalizedMessage(
@@ -341,7 +341,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         resp = await loop.run_in_executor(
             None, lambda: oauth_client.get_access_token(req)
         )
-        self._access_token = resp.body.access_token  # type: ignore
+        self._access_token = resp.body.access_token or ""
         self._token_expires_at = time.monotonic() + (resp.body.expire_in or 7200)
         logger.debug(f"DingTalk [{self.instance_id}] access token refreshed")
         return self._access_token

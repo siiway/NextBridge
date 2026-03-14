@@ -81,7 +81,7 @@ class MessageDB:
         Returns:
             SQLAlchemy Engine instance configured according to database settings.
         """
-        db_config: dict = config.get("database", {})  # type: ignore
+        db_config: dict = config.get("database", {})
         url = db_config.get("url", "sqlite:///data/messages.db")
 
         # Handle SQLite relative paths
@@ -110,7 +110,7 @@ class MessageDB:
             if "pool_recycle" in db_config:
                 engine_kwargs["pool_recycle"] = db_config["pool_recycle"]
 
-        logger.info(f"Initializing database engine: {url.split("://")[0]}")
+        logger.info(f"Initializing database engine: {url.split('://')[0]}")
         return create_engine(url, **engine_kwargs)
 
     def _session(self) -> Session:
@@ -126,12 +126,14 @@ class MessageDB:
         """Create a temporary binding code."""
         expires_at = int(time.time()) + ttl
         with self._session() as s:
-            s.merge(BindingCode(
-                code=code,
-                instance_id=instance_id,
-                platform_user_id=platform_user_id,
-                expires_at=expires_at,
-            ))
+            s.merge(
+                BindingCode(
+                    code=code,
+                    instance_id=instance_id,
+                    platform_user_id=platform_user_id,
+                    expires_at=expires_at,
+                )
+            )
             s.commit()
 
     def consume_binding_code(
@@ -154,31 +156,39 @@ class MessageDB:
 
             s.execute(delete(BindingCode).where(BindingCode.code == code))
 
-            existing = s.execute(
-                select(UserBinding).where(
-                    (
-                        (UserBinding.instance_id == src_inst)
-                        & (UserBinding.platform_user_id == src_uid)
-                    )
-                    | (
-                        (UserBinding.instance_id == target_instance)
-                        & (UserBinding.platform_user_id == target_user_id)
+            existing = (
+                s.execute(
+                    select(UserBinding).where(
+                        (
+                            (UserBinding.instance_id == src_inst)
+                            & (UserBinding.platform_user_id == src_uid)
+                        )
+                        | (
+                            (UserBinding.instance_id == target_instance)
+                            & (UserBinding.platform_user_id == target_user_id)
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
 
-            global_id = existing.global_user_id if existing else str(uuid.uuid4())  # type: ignore[union-attr]
+            global_id = existing.global_user_id if existing else str(uuid.uuid4())
 
-            s.merge(UserBinding(
-                global_user_id=global_id,
-                instance_id=src_inst,
-                platform_user_id=src_uid,
-            ))
-            s.merge(UserBinding(
-                global_user_id=global_id,
-                instance_id=target_instance,
-                platform_user_id=target_user_id,
-            ))
+            s.merge(
+                UserBinding(
+                    global_user_id=global_id,
+                    instance_id=src_inst,
+                    platform_user_id=src_uid,
+                )
+            )
+            s.merge(
+                UserBinding(
+                    global_user_id=global_id,
+                    instance_id=target_instance,
+                    platform_user_id=target_user_id,
+                )
+            )
             s.commit()
         return True
 
@@ -265,11 +275,13 @@ class MessageDB:
         """Store or update a user's display name for an instance."""
         try:
             with self._session() as s:
-                s.merge(UserMapping(
-                    instance_id=instance_id,
-                    platform_user_id=platform_user_id,
-                    display_name=display_name,
-                ))
+                s.merge(
+                    UserMapping(
+                        instance_id=instance_id,
+                        platform_user_id=platform_user_id,
+                        display_name=display_name,
+                    )
+                )
                 s.commit()
         except Exception as e:
             logger.error(f"Failed to save user mapping: {e}")
@@ -313,12 +325,14 @@ class MessageDB:
         """Store a mapping between a bridge ID and a platform-specific message ID."""
         try:
             with self._session() as s:
-                s.merge(MessageMapping(
-                    bridge_id=bridge_id,
-                    instance_id=instance_id,
-                    channel_id=channel_id,
-                    platform_msg_id=platform_msg_id,
-                ))
+                s.merge(
+                    MessageMapping(
+                        bridge_id=bridge_id,
+                        instance_id=instance_id,
+                        channel_id=channel_id,
+                        platform_msg_id=platform_msg_id,
+                    )
+                )
                 s.commit()
         except Exception as e:
             logger.error(f"Failed to save message mapping: {e}")

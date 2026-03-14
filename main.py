@@ -76,13 +76,14 @@ async def main():
     # Load global configuration
     global_config = raw.get("global", {})
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
-    
+
     # Validate database configuration
     from services.config_schema import GlobalConfig
+
     try:
         GlobalConfig.model_validate(global_config)
     except ValidationError as exc:
-        logger.critical(f"Global configuration error", exc_info=exc)
+        logger.critical("Global configuration error", exc_info=exc)
         return
 
     # Validate each driver's per-instance configs via its registered model.
@@ -136,6 +137,7 @@ async def main():
 
         # Close all aiohttp sessions to avoid connection leaks
         from services.media import close_all_sessions
+
         await close_all_sessions()
 
         logger.info("NextBridge stopped.")

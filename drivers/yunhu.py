@@ -59,7 +59,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         super().__init__(instance_id, config, bridge)
         self._token: str = config.token
         self._session: aiohttp.ClientSession | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -90,8 +90,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        logger.info(
-            f"Yunhu [{self.instance_id}] webhook listening on :{port}{path}")
+        logger.info(f"Yunhu [{self.instance_id}] webhook listening on :{port}{path}")
 
         await asyncio.Event().wait()  # run indefinitely
 
@@ -160,8 +159,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             key_name = "fileKey"
 
         form = aiohttp.FormData()
-        form.add_field(field, data_bytes, filename=filename,
-                       content_type=content_type)
+        form.add_field(field, data_bytes, filename=filename, content_type=content_type)
 
         try:
             async with self._session.post(url, data=form) as resp:
@@ -224,14 +222,12 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             url = self._proxy_pfp(content.get("imageUrl", ""))
             name = content.get("imageName", "image.jpg")
             if url:
-                attachments.append(Attachment(
-                    type="image", url=url, name=name))
+                attachments.append(Attachment(type="image", url=url, name=name))
         elif content_type == "video":
             url = self._proxy_pfp(content.get("videoUrl", ""))
             name = content.get("videoName", "video.mp4")
             if url:
-                attachments.append(Attachment(
-                    type="video", url=url, name=name))
+                attachments.append(Attachment(type="video", url=url, name=name))
         elif content_type == "file":
             url = self._proxy_pfp(content.get("fileUrl", ""))
             name = content.get("fileName", "file")
@@ -323,7 +319,9 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 continue
 
             # Fetch the data first
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 fallback = f"[{att.type.capitalize()}: {label}]"

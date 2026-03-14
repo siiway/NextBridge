@@ -57,7 +57,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         self._session: aiohttp.ClientSession | None = None
         self._access_token: str = ""
         self._token_expires: float = 0.0
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -182,8 +182,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             elif ct.startswith("audio/"):
                 att_type = "voice"
             attachments.append(
-                Attachment(type=att_type, url=url,
-                           name=name, size=-1, data=None)
+                Attachment(type=att_type, url=url, name=name, size=-1, data=None)
             )
 
         if not text.strip() and not attachments:
@@ -221,8 +220,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._session is None:
-            logger.warning(
-                f"Teams [{self.instance_id}] send: driver not started")
+            logger.warning(f"Teams [{self.instance_id}] send: driver not started")
             return
 
         service_url = channel.get("service_url", "").rstrip("/")
@@ -277,14 +275,16 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             if reply_to_id:
                 activity["replyToId"] = reply_to_id
             if entities:
-                activity["entities"] = entities  # type: ignore
+                activity["entities"] = entities
             await self._post_activity(url, headers, activity)
 
         # Send attachments
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 act = {
@@ -349,8 +349,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
                         f"HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            logger.error(
-                f"Teams [{self.instance_id}] post activity error: {e}")
+            logger.error(f"Teams [{self.instance_id}] post activity error: {e}")
 
 
 register("teams", TeamsConfig, TeamsDriver)

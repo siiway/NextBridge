@@ -61,7 +61,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
     def __init__(self, instance_id: str, config: SignalConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -105,11 +105,9 @@ class SignalDriver(BaseDriver[SignalConfig]):
                             ):
                                 break
                 except aiohttp.ClientError as e:
-                    logger.error(
-                        f"Signal [{self.instance_id}] connection error: {e}")
+                    logger.error(f"Signal [{self.instance_id}] connection error: {e}")
 
-                logger.info(
-                    f"Signal [{self.instance_id}] reconnecting in 5 s…")
+                logger.info(f"Signal [{self.instance_id}] reconnecting in 5 s…")
                 await asyncio.sleep(5)
         finally:
             await self._session.close()
@@ -151,8 +149,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             # Signal sometimes uses \uFFFC placeholder, sometimes actual text.
             # We'll replace whatever is there with @Name for bridge readability.
             if 0 <= start < len(text) and length > 0:
-                text = text[:start] + \
-                    f"@{display_name}" + text[start + length:]
+                text = text[:start] + f"@{display_name}" + text[start + length :]
 
         if not text.strip() and not raw_attachments:
             return
@@ -181,13 +178,14 @@ class SignalDriver(BaseDriver[SignalConfig]):
             result = await media.fetch_attachment(
                 Attachment(type="file", url=att_url, name=fname, size=size),
                 self.config.max_file_size,
-                proxy=self._proxy
+                proxy=self._proxy,
             )
             if result:
                 att_data, _ = result
                 attachments.append(
-                    Attachment(type=att_type, url="", name=fname,
-                               size=size, data=att_data)
+                    Attachment(
+                        type=att_type, url="", name=fname, size=size, data=att_data
+                    )
                 )
 
         normalized = NormalizedMessage(
@@ -228,8 +226,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             )
             return
         if self._session is None:
-            logger.warning(
-                f"Signal [{self.instance_id}] send: driver not started")
+            logger.warning(f"Signal [{self.instance_id}] send: driver not started")
             return
 
         api_url = self.config.api_url.rstrip("/")

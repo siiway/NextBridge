@@ -91,7 +91,9 @@ class Bridge:
         self._rules = data.get("rules", [])
         logger.info(f"Loaded {len(self._rules)} bridge rule(s) from {rules_path.name}")
 
-    def _should_skip_echo(self, target_id: str, target_channel: dict, msg: NormalizedMessage) -> bool:
+    def _should_skip_echo(
+        self, target_id: str, target_channel: dict, msg: NormalizedMessage
+    ) -> bool:
         """Determine if we should skip sending to avoid echo.
 
         Returns True if the message should be skipped based on strict_echo_match configuration.
@@ -121,7 +123,7 @@ class Bridge:
         import random
 
         code = f"{random.randint(100000, 999999)}"
-        msg_db.create_binding_code(code, msg.instance_id, msg.user_id)
+        msg_db().create_binding_code(code, msg.instance_id, msg.user_id)
 
         sender = self._senders.get(msg.instance_id)
         if sender:
@@ -143,7 +145,7 @@ class Bridge:
             return
 
         code = parts[1]
-        success = msg_db.consume_binding_code(code, msg.instance_id, msg.user_id)
+        success = msg_db().consume_binding_code(code, msg.instance_id, msg.user_id)
 
         sender = self._senders.get(msg.instance_id)
         if sender:
@@ -160,7 +162,9 @@ class Bridge:
         parts = msg.text.split()
         target_inst = parts[1] if len(parts) > 1 else None
 
-        success = msg_db.remove_user_binding(msg.instance_id, msg.user_id, target_inst)
+        success = msg_db().remove_user_binding(
+            msg.instance_id, msg.user_id, target_inst
+        )
         sender = self._senders.get(msg.instance_id)
         if sender:
             if success:
@@ -186,7 +190,7 @@ class Bridge:
 
     async def _handle_list_command(self, msg: NormalizedMessage):
         """List all accounts linked to the user's global identity."""
-        bindings = msg_db.get_all_bindings(msg.instance_id, msg.user_id)
+        bindings = msg_db().get_all_bindings(msg.instance_id, msg.user_id)
         sender = self._senders.get(msg.instance_id)
         if sender:
             if not bindings:
@@ -197,7 +201,7 @@ class Bridge:
 
             lines = ["🔗 **Linked Accounts:**"]
             for inst, uid in bindings:
-                name = msg_db.get_user_name(inst, uid) or "Unknown"
+                name = msg_db().get_user_name(inst, uid) or "Unknown"
                 current = (
                     " (Current)"
                     if inst == msg.instance_id and uid == msg.user_id
@@ -228,18 +232,18 @@ class Bridge:
 
         # Save sender's user mapping
         if msg.user_id:
-            msg_db.save_user(msg.instance_id, msg.user_id, msg.user)
+            msg_db().save_user(msg.instance_id, msg.user_id, msg.user)
 
         # Generate or resolve bridge_id for the incoming message
         bridge_id = str(uuid.uuid4())
         if msg.message_id:
-            msg_db.save_mapping(
+            msg_db().save_mapping(
                 bridge_id, msg.instance_id, str(msg.channel), msg.message_id
             )
 
         reply_bridge_id = None
         if msg.reply_parent:
-            reply_bridge_id = msg_db.get_bridge_id(msg.instance_id, msg.reply_parent)
+            reply_bridge_id = msg_db().get_bridge_id(msg.instance_id, msg.reply_parent)
 
         for rule in self._rules:
             if rule.get("type") == "connect":
@@ -338,7 +342,7 @@ class Bridge:
             # Resolve target reply ID
             target_reply_id = None
             if reply_bridge_id:
-                target_reply_id = msg_db.get_platform_msg_id(
+                target_reply_id = msg_db().get_platform_msg_id(
                     reply_bridge_id, target_id, str(target_channel)
                 )
                 if target_reply_id:
@@ -348,12 +352,12 @@ class Bridge:
             target_mentions = []
             for m in msg.mentions:
                 # 1. Try explicit binding first
-                target_uid = msg_db.get_bound_user_id(
+                target_uid = msg_db().get_bound_user_id(
                     msg.instance_id, m["id"], target_id
                 )
                 # 2. Fall back to display name match
                 if not target_uid:
-                    target_uid = msg_db.get_user_id_by_name(target_id, m["name"])
+                    target_uid = msg_db().get_user_id_by_name(target_id, m["name"])
 
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
@@ -365,7 +369,7 @@ class Bridge:
                     target_channel, formatted, attachments=msg.attachments, **extra
                 )
                 if new_msg_id:
-                    msg_db.save_mapping(
+                    msg_db().save_mapping(
                         bridge_id, target_id, str(target_channel), str(new_msg_id)
                     )
             except Exception as e:
@@ -408,7 +412,7 @@ class Bridge:
             # Resolve target reply ID
             target_reply_id = None
             if reply_bridge_id:
-                target_reply_id = msg_db.get_platform_msg_id(
+                target_reply_id = msg_db().get_platform_msg_id(
                     reply_bridge_id, target_id, str(target_channel)
                 )
                 if target_reply_id:
@@ -418,12 +422,12 @@ class Bridge:
             target_mentions = []
             for m in msg.mentions:
                 # 1. Try explicit binding first
-                target_uid = msg_db.get_bound_user_id(
+                target_uid = msg_db().get_bound_user_id(
                     msg.instance_id, m["id"], target_id
                 )
                 # 2. Fall back to display name match
                 if not target_uid:
-                    target_uid = msg_db.get_user_id_by_name(target_id, m["name"])
+                    target_uid = msg_db().get_user_id_by_name(target_id, m["name"])
 
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
@@ -435,7 +439,7 @@ class Bridge:
                     target_channel, formatted, attachments=msg.attachments, **extra
                 )
                 if new_msg_id:
-                    msg_db.save_mapping(
+                    msg_db().save_mapping(
                         bridge_id, target_id, str(target_channel), str(new_msg_id)
                     )
             except Exception as e:

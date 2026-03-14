@@ -90,7 +90,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         self._session: aiohttp.ClientSession | None = None
         self._creds: _sa.Credentials | None = None
         self._token_lock: asyncio.Lock = asyncio.Lock()
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -107,8 +107,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             if self.config.service_account_json:
                 sa_info = json.loads(self.config.service_account_json)
             else:
-                sa_info = json.loads(
-                    Path(self.config.service_account_file).read_text())
+                sa_info = json.loads(Path(self.config.service_account_file).read_text())
             self._creds = _sa.Credentials.from_service_account_info(
                 sa_info, scopes=_SCOPES
             )
@@ -142,7 +141,6 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
     # Auth
     # ------------------------------------------------------------------
 
-
     async def _get_token(self) -> str:
         async with self._token_lock:
             if self._creds is None:
@@ -157,7 +155,9 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                             "http": self._proxy,
                             "https": self._proxy,
                         }
-                        logger.debug(f"GoogleChat [{self.instance_id}] token refresh use proxy {self._proxy}")
+                        logger.debug(
+                            f"GoogleChat [{self.instance_id}] token refresh use proxy {self._proxy}"
+                        )
 
                     # retry
                     retry_strategy = Retry(
@@ -173,9 +173,13 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                     request = _ga_req.Request(session=session)
                     await asyncio.to_thread(self._creds.refresh, request)
 
-                    logger.debug(f"Google Chat [{self.instance_id}] access token refreshed")
+                    logger.debug(
+                        f"Google Chat [{self.instance_id}] access token refreshed"
+                    )
                 except Exception as e:
-                    logger.error(f"Google Chat [{self.instance_id}] token refresh failed: {e}")
+                    logger.error(
+                        f"Google Chat [{self.instance_id}] token refresh failed: {e}"
+                    )
                     return ""
                 finally:
                     if session is not None:
@@ -216,8 +220,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         text: str = message.get("argumentText") or message.get("text") or ""
         raw_space: str = space.get("name", "")
         space_name: str = (
-            raw_space if raw_space.startswith(
-                "spaces/") else f"spaces/{raw_space}"
+            raw_space if raw_space.startswith("spaces/") else f"spaces/{raw_space}"
         )
         display_name: str = sender.get("displayName") or sender.get("name", "")
         user_id: str = sender.get("name", "")
@@ -337,8 +340,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._session is None:
-            logger.warning(
-                f"Google Chat [{self.instance_id}] send: driver not started")
+            logger.warning(f"Google Chat [{self.instance_id}] send: driver not started")
             return
 
         space_name = channel.get("space_name", "")
@@ -418,7 +420,9 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 continue
 
             # All other attachments (or images with bytes only) → multipart upload
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 await self._post_message(
@@ -469,8 +473,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                         f"HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            logger.error(
-                f"Google Chat [{self.instance_id}] media upload error: {e}")
+            logger.error(f"Google Chat [{self.instance_id}] media upload error: {e}")
 
     async def _post_message(self, url: str, headers: dict, body: dict) -> None:
         assert self._session is not None  # Type narrowing - session is set in start()

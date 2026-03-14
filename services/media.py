@@ -55,9 +55,14 @@ async def close_all_sessions() -> None:
                 await session.close()
             except Exception as e:
                 # Log and continue closing remaining sessions
-                logger.exception(f"Error while closing aiohttp ClientSession {session} in services.media: {e}")
+                logger.exception(
+                    f"Error while closing aiohttp ClientSession {session} in services.media: {e}"
+                )
 
-async def fetch(url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None) -> tuple[bytes, str] | None:
+
+async def fetch(
+    url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None
+) -> tuple[bytes, str] | None:
     """
     Download *url* up to *max_bytes*.
 
@@ -109,9 +114,7 @@ async def fetch(url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = Non
 
 
 async def fetch_attachment(
-    att,
-    max_bytes: int = _DEFAULT_MAX,
-    proxy: str | None = None
+    att, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None
 ) -> tuple[bytes, str] | None:
     """
     Return ``(bytes, mime)`` for an Attachment.

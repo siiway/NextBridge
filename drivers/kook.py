@@ -45,7 +45,7 @@ class KookDriver(BaseDriver[KookConfig]):
     def __init__(self, instance_id: str, config: KookConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._bot: khl.Bot | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -62,17 +62,18 @@ class KookDriver(BaseDriver[KookConfig]):
 
             requester = self._bot.client.gate.requester
             original_request = requester.request
+            proxy_url = self._proxy
 
             async def proxied_request(method: str, route: str, **params):
                 # inject connector on 1st request
                 if requester._cs is not None and requester._cs.connector is None:
-                    connector = ProxyConnector.from_url(self._proxy, rdns=True)  # type: ignore
+                    connector = ProxyConnector.from_url(proxy_url, rdns=True)
                     sess = ClientSession(connector=connector)
                     requester._cs = sess
 
                 return await original_request(method, route, **params)
 
-            requester.request = proxied_request
+            requester.request = proxied_request  # type: ignore[assignment]
 
         # Register our handler alongside khl's internal command-manager handler.
         # khl's Client dispatches to all registered handlers for a given type.
@@ -111,7 +112,7 @@ class KookDriver(BaseDriver[KookConfig]):
         for match in met_matches:
             uid = match.group(1)
             # Try to get display name from cache/DB if we've seen them before
-            name = msg_db.get_user_name(self.instance_id, uid)
+            name = msg_db().get_user_name(self.instance_id, uid)
             if not name:
                 # If unknown, we can't easily fetch it without an extra API call
                 # Fallback to ID or generic placeholder
@@ -147,8 +148,7 @@ class KookDriver(BaseDriver[KookConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._bot is None:
-            logger.warning(
-                f"Kook [{self.instance_id}] send: driver not started")
+            logger.warning(f"Kook [{self.instance_id}] send: driver not started")
             return
 
         channel_id = channel.get("channel_id")
@@ -182,8 +182,7 @@ class KookDriver(BaseDriver[KookConfig]):
             result = await media.fetch_attachment(att, self.config.max_file_size)
             if not result:
                 label = att.name or att.url or ""
-                attachment_fragments.append(
-                    f"\n[{att.type.capitalize()}: {label}]")
+                attachment_fragments.append(f"\n[{att.type.capitalize()}: {label}]")
                 continue
 
             data_bytes, mime = result
@@ -192,11 +191,9 @@ class KookDriver(BaseDriver[KookConfig]):
             try:
                 asset_url = await self._bot.client.create_asset(io.BytesIO(data_bytes))
             except Exception as e:
-                logger.error(
-                    f"Kook [{self.instance_id}] asset upload failed: {e}")
+                logger.error(f"Kook [{self.instance_id}] asset upload failed: {e}")
                 label = att.name or att.url or fname
-                attachment_fragments.append(
-                    f"\n[{att.type.capitalize()}: {label}]")
+                attachment_fragments.append(f"\n[{att.type.capitalize()}: {label}]")
                 continue
 
             if att.type == "image":

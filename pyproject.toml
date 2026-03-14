@@ -29,5 +29,8 @@ dependencies = [
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple/"
 
-[tool.pyright]
-typeCheckingMode = "basic"
+[dependency-groups]
+dev = [
+    "ruff>=0.15.6",
+    "ty>=0.0.23",
+]

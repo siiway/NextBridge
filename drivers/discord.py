@@ -23,7 +23,6 @@ import io
 import json
 from pathlib import Path
 import re
-import os
 
 import discord
 import aiohttp
@@ -62,7 +61,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._webhook_url: str | None = config.webhook_url or None
         self._bot_token: str | None = config.bot_token or None
         # Use local proxy if set, otherwise fall back to global proxy
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
         # face_id (str) → "<:name:id>" resolved Discord emoji string
         self._emoji_cache: dict[str, str] = {}
         # name → emoji_id index built lazily from discord_emojis.json
@@ -76,7 +75,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
         if self._proxy:
             logger.debug(f"Discord [{self.instance_id}] using proxy {self._proxy}")
-            self._session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False), proxy=self._proxy)
+            self._session = aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(ssl=False), proxy=self._proxy
+            )
         else:
             self._session = aiohttp.ClientSession()
 
@@ -89,7 +90,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         intents = discord.Intents.default()
         intents.message_content = True
-        self._client = discord.Client(intents=intents, proxy=self._proxy) # type: ignore
+        if self._proxy:
+            self._client = discord.Client(intents=intents, proxy=self._proxy)
+        else:
+            self._client = discord.Client(intents=intents)
 
         @self._client.event
         async def on_ready():
@@ -204,8 +208,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             pass
         except Exception as exc:
             logger.warning(
-                f"Discord [{self.instance_id}] failed to read emoji DB",
-                exc_info=exc
+                f"Discord [{self.instance_id}] failed to read emoji DB", exc_info=exc
             )
 
         return self._emoji_db
@@ -325,7 +328,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
@@ -336,9 +341,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 ref = f"({att.url})" if att.url else ""
                 payload["content"] += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
-        url = (
-            webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true"
-        )
+        url = webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true"
 
         try:
             if files:
@@ -402,7 +405,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)

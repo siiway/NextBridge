@@ -135,8 +135,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             self._sm.socket_mode_request_listeners.append(self._on_request)
             try:
                 await self._sm.connect_to_new_endpoint()
-                logger.info(
-                    f"Slack [{self.instance_id}] Socket Mode connected")
+                logger.info(f"Slack [{self.instance_id}] Socket Mode connected")
                 await asyncio.Event().wait()
             finally:
                 await self._sm.close()
@@ -273,14 +272,14 @@ class SlackDriver(BaseDriver[SlackConfig]):
             return user_id, ""
         try:
             resp = await self._web.users_info(user=user_id)
-            u = resp["user"]  # type: ignore
+            u = resp["user"]
             if u is None:
                 return user_id, ""
-            profile = u.get("profile", {})  # type: ignore
+            profile = u.get("profile", {})
             name = (
-                profile.get("display_name")  # type: ignore
-                or u.get("real_name")  # type: ignore
-                or u.get("name")  # type: ignore
+                profile.get("display_name")
+                or u.get("real_name")
+                or u.get("name")
                 or user_id
             )
             avatar = profile.get("image_192") or profile.get("image_72") or ""
@@ -303,15 +302,13 @@ class SlackDriver(BaseDriver[SlackConfig]):
 
         try:
             async with self._session.get(
-                url, headers={
-                    "Authorization": f"Bearer {self.config.bot_token}"}
+                url, headers={"Authorization": f"Bearer {self.config.bot_token}"}
             ) as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.read()
         except Exception as e:
-            logger.warning(
-                f"Slack [{self.instance_id}] file download failed: {e}")
+            logger.warning(f"Slack [{self.instance_id}] file download failed: {e}")
             return None
 
         if len(data) > max_size:
@@ -373,8 +370,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             )
             return None
         if self._web is None:
-            logger.warning(
-                f"Slack [{self.instance_id}] send: bot_token not configured")
+            logger.warning(f"Slack [{self.instance_id}] send: bot_token not configured")
             return None
 
         title: str = kwargs.get("webhook_title", "") or ""
@@ -402,8 +398,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
                     if not first_msg_id:
                         first_msg_id = str(mid)
             except Exception as e:
-                logger.error(
-                    f"Slack [{self.instance_id}] chat_postMessage failed: {e}")
+                logger.error(f"Slack [{self.instance_id}] chat_postMessage failed: {e}")
 
         for att in attachments or []:
             if not att.url and att.data is None:
@@ -434,8 +429,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
                         filename=fname,
                         content=data_bytes,
                     )
-                    permalink = (file_resp.get("file") or {}
-                                 ).get("permalink", "")
+                    permalink = (file_resp.get("file") or {}).get("permalink", "")
                     if permalink:
                         resp = await self._web.chat_postMessage(
                             **_post_kwargs(permalink)
@@ -462,8 +456,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
                         thread_ts=reply_to_id,
                     )
             except Exception as e:
-                logger.error(
-                    f"Slack [{self.instance_id}] file upload failed: {e}")
+                logger.error(f"Slack [{self.instance_id}] file upload failed: {e}")
 
         return first_msg_id
 
@@ -479,8 +472,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             )
             return
         if self._session is None:
-            logger.warning(
-                f"Slack [{self.instance_id}] send: driver not started")
+            logger.warning(f"Slack [{self.instance_id}] send: driver not started")
             return
 
         # Incoming webhooks are text-only; append attachment labels inline

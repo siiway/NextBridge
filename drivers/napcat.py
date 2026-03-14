@@ -102,7 +102,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         self._ws: Any = None  # websockets connection (type varies by version)
         # echo_id → Future; used to await responses for specific actions
         self._pending: dict[str, asyncio.Future] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -132,11 +132,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     logger.info(f"NapCat [{self.instance_id}] connected")
                     await self._listen(ws)
             except websockets.exceptions.ConnectionClosedOK:
-                logger.info(
-                    f"NapCat [{self.instance_id}] connection closed normally")
+                logger.info(f"NapCat [{self.instance_id}] connection closed normally")
             except Exception as e:
-                logger.error(
-                    f"NapCat [{self.instance_id}] connection error: {e}")
+                logger.error(f"NapCat [{self.instance_id}] connection error: {e}")
             finally:
                 self._ws = None
 
@@ -161,8 +159,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     continue
                 await self._handle(data)
             except json.JSONDecodeError:
-                logger.warning(
-                    f"NapCat [{self.instance_id}] invalid JSON received")
+                logger.warning(f"NapCat [{self.instance_id}] invalid JSON received")
             except Exception as e:
                 logger.error(f"NapCat [{self.instance_id}] handler error: {e}")
 
@@ -247,7 +244,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 name = d.get("name")
                 if not name and qq != "all":
                     # Try to look up name in our DB
-                    name = msg_db.get_user_name(self.instance_id, qq)
+                    name = msg_db().get_user_name(self.instance_id, qq)
                 if not name:
                     name = qq
 
@@ -258,20 +255,17 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             elif t == "image":
                 url = d.get("url") or d.get("file", "")
                 name = d.get("file", "image.jpg")
-                attachments.append(Attachment(
-                    type="image", url=url, name=name))
+                attachments.append(Attachment(type="image", url=url, name=name))
 
             elif t == "record":  # voice message
                 url = d.get("url") or d.get("file", "")
                 name = d.get("file", "voice.amr")
-                attachments.append(Attachment(
-                    type="voice", url=url, name=name))
+                attachments.append(Attachment(type="voice", url=url, name=name))
 
             elif t == "video":
                 url = d.get("url") or d.get("file", "")
                 name = d.get("file", "video.mp4")
-                attachments.append(Attachment(
-                    type="video", url=url, name=name))
+                attachments.append(Attachment(type="video", url=url, name=name))
 
             elif t == "file":
                 url = d.get("url") or d.get("path", "")
@@ -298,8 +292,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                         # face_id is validated integer at this point
                         name = f"face_{int(face_id_raw)}.gif"
                         attachments.append(
-                            Attachment(type="image", url="",
-                                       name=name, data=gif_data)
+                            Attachment(type="image", url="", name=name, data=gif_data)
                         )
 
             elif t == "json":
@@ -309,8 +302,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 raw_json = d.get("data", "")
                 try:
                     obj = (
-                        json.loads(raw_json) if isinstance(
-                            raw_json, str) else raw_json
+                        json.loads(raw_json) if isinstance(raw_json, str) else raw_json
                     )
                     prompt = obj.get("prompt", "").strip()
                     if prompt:
@@ -321,8 +313,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                         for key in ("news", "music", "contact", "detail_1"):
                             sub = meta.get(key)
                             if isinstance(sub, dict):
-                                title = sub.get("title") or sub.get(
-                                    "nickname") or ""
+                                title = sub.get("title") or sub.get("nickname") or ""
                                 desc = sub.get("desc") or sub.get("tag") or ""
                                 parts = [p for p in (title, desc) if p]
                                 if parts:
@@ -369,8 +360,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 singer = d.get("singer", d.get("author", "")).strip()
                 if title:
                     text_parts.append(
-                        f"[Music: {title}" +
-                        (f" — {singer}" if singer else "") + "]"
+                        f"[Music: {title}" + (f" — {singer}" if singer else "") + "]"
                     )
                 else:
                     text_parts.append("[Music]")
@@ -411,13 +401,11 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             await self._ws.send(json.dumps(payload, ensure_ascii=False))
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
-            logger.warning(
-                f"NapCat [{self.instance_id}] action '{action}' timed out")
+            logger.warning(f"NapCat [{self.instance_id}] action '{action}' timed out")
             self._pending.pop(echo, None)
             return None
         except Exception as e:
-            logger.error(
-                f"NapCat [{self.instance_id}] action '{action}' error: {e}")
+            logger.error(f"NapCat [{self.instance_id}] action '{action}' error: {e}")
             self._pending.pop(echo, None)
             return None
 
@@ -438,7 +426,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         # Upload all chunks (NapCat param is "filename", not "file_name")
         for i in range(total_chunks):
-            chunk = data_bytes[i * CHUNK_SIZE: (i + 1) * CHUNK_SIZE]
+            chunk = data_bytes[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE]
             b64 = base64.b64encode(chunk).decode()
 
             resp = await self._call(
@@ -518,8 +506,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         reply_to_id = kwargs.get("reply_to_id")
         if reply_to_id:
-            segments.append(
-                {"type": "reply", "data": {"id": str(reply_to_id)}})
+            segments.append({"type": "reply", "data": {"id": str(reply_to_id)}})
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -548,8 +535,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     # Add preceding text
                     if idx > last_idx:
                         segments.append(
-                            {"type": "text", "data": {
-                                "text": text[last_idx:idx]}}
+                            {"type": "text", "data": {"text": text[last_idx:idx]}}
                         )
                     # Add mention segment
                     segments.append({"type": "at", "data": {"qq": m["id"]}})
@@ -557,15 +543,16 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             # Add remaining text
             if last_idx < len(text):
-                segments.append(
-                    {"type": "text", "data": {"text": text[last_idx:]}})
+                segments.append({"type": "text", "data": {"text": text[last_idx:]}})
 
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
             if att.type == "image":
-                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+                result = await media.fetch_attachment(
+                    att, self.config.max_file_size, self._proxy
+                )
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
@@ -581,7 +568,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     )
 
             elif att.type == "voice":
-                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+                result = await media.fetch_attachment(
+                    att, self.config.max_file_size, self._proxy
+                )
                 if result:
                     data_bytes, _ = result
                     b64 = base64.b64encode(data_bytes).decode()
@@ -597,7 +586,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     )
 
             elif att.type == "video":
-                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+                result = await media.fetch_attachment(
+                    att, self.config.max_file_size, self._proxy
+                )
                 if result:
                     data_bytes, _ = result
                     mode = self._resolve_send_mode(len(data_bytes))
@@ -630,7 +621,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     )
 
             else:  # file
-                result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+                result = await media.fetch_attachment(
+                    att, self.config.max_file_size, self._proxy
+                )
                 if result:
                     data_bytes, _ = result
                     fname = att.name or "file"

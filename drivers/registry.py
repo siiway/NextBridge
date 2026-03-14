@@ -8,10 +8,12 @@ list needs to be maintained — drop a file into ``drivers/`` and it's live.
 
 from __future__ import annotations
 
-_REGISTRY: dict[str, tuple[type, type]] = {}
+from pydantic import BaseModel
+
+_REGISTRY: dict[str, tuple[type[BaseModel], type]] = {}
 
 
-def register(name: str, config_cls: type, driver_cls: type) -> None:
+def register(name: str, config_cls: type[BaseModel], driver_cls: type) -> None:
     """Register a driver under *name*.
 
     Args:
@@ -22,7 +24,7 @@ def register(name: str, config_cls: type, driver_cls: type) -> None:
     _REGISTRY[name] = (config_cls, driver_cls)
 
 
-def all_drivers() -> dict[str, tuple[type, type]]:
+def all_drivers() -> dict[str, tuple[type[BaseModel], type]]:
     """Return a snapshot of ``{name: (config_cls, driver_cls)}`` for every
     registered driver."""
     return dict(_REGISTRY)

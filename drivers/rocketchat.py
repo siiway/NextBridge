@@ -94,7 +94,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
         self._username_cache: dict[str, str] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -198,8 +198,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
     async def _parse_attachment(
         self, att_raw: dict, server: str, max_size: int
     ) -> Attachment | None:
-        title = att_raw.get("title") or att_raw.get(
-            "description") or "attachment"
+        title = att_raw.get("title") or att_raw.get("description") or "attachment"
         image_url = att_raw.get("image_url", "")
         video_url = att_raw.get("video_url", "")
         audio_url = att_raw.get("audio_url", "")
@@ -284,8 +283,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._session is None:
-            logger.warning(
-                f"Rocket.Chat [{self.instance_id}] send: driver not started")
+            logger.warning(f"Rocket.Chat [{self.instance_id}] send: driver not started")
             return
 
         alias = kwargs.get("rc_alias", "")
@@ -338,7 +336,9 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 await self._api_post_message(
@@ -415,8 +415,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            logger.error(
-                f"Rocket.Chat [{self.instance_id}] file upload error: {e}")
+            logger.error(f"Rocket.Chat [{self.instance_id}] file upload error: {e}")
 
     # ------------------------------------------------------------------
     # Send — Webhook mode
@@ -487,8 +486,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            logger.error(
-                f"Rocket.Chat [{self.instance_id}] webhook post error: {e}")
+            logger.error(f"Rocket.Chat [{self.instance_id}] webhook post error: {e}")
 
 
 register("rocketchat", RocketChatConfig, RocketChatDriver)

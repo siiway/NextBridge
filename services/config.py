@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import services.util as u
 import services.logger as log
@@ -26,7 +27,7 @@ def _load_config():
     return _config_cache
 
 
-def get(key: str, default=None):
+def get(key: str, default: Any = None) -> Any:
     """
     Get a config value. Supports dot-notation for nested keys, e.g. ``get("database.host")``.
     """

@@ -59,7 +59,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         self._bot_user_id: str = ""
         self._user_cache: dict[str, tuple[str, str]] = {}
         self._username_cache: dict[str, str] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -76,8 +76,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             connector = aiohttp.TCPConnector(ssl=True)
 
         self._session = aiohttp.ClientSession(
-            headers={"Authorization": f"Bearer {token}"},
-            connector=connector
+            headers={"Authorization": f"Bearer {token}"}, connector=connector
         )
 
         # Resolve the bot's own user_id so we can ignore echo messages
@@ -96,8 +95,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                         f"HTTP {resp.status}"
                     )
         except Exception as e:
-            logger.error(
-                f"Mattermost [{self.instance_id}] /users/me error: {e}")
+            logger.error(f"Mattermost [{self.instance_id}] /users/me error: {e}")
 
         self.bridge.register_sender(self.instance_id, self.send)
 
@@ -117,8 +115,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                                 "data": {"token": token},
                             }
                         )
-                        logger.info(
-                            f"Mattermost [{self.instance_id}] connected")
+                        logger.info(f"Mattermost [{self.instance_id}] connected")
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 try:
@@ -139,8 +136,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                         f"Mattermost [{self.instance_id}] connection error: {e}"
                     )
 
-                logger.info(
-                    f"Mattermost [{self.instance_id}] reconnecting in 5 s…")
+                logger.info(f"Mattermost [{self.instance_id}] reconnecting in 5 s…")
                 await asyncio.sleep(5)
         finally:
             await self._session.close()
@@ -242,8 +238,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                     full = (
                         f"{u.get('first_name', '')} {u.get('last_name', '')}"
                     ).strip()
-                    name = u.get("nickname") or full or u.get(
-                        "username", user_id)
+                    name = u.get("nickname") or full or u.get("username", user_id)
                     avatar = f"{server}/api/v4/users/{user_id}/image"
         except Exception:
             pass
@@ -304,8 +299,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._session is None:
-            logger.warning(
-                f"Mattermost [{self.instance_id}] send: driver not started")
+            logger.warning(f"Mattermost [{self.instance_id}] send: driver not started")
             return
 
         channel_id = channel.get("channel_id", "")
@@ -337,7 +331,9 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 text_labels.append(f"[{att.type.capitalize()}: {label}]")
@@ -407,8 +403,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                 if infos:
                     return infos[0].get("id")
         except Exception as e:
-            logger.error(
-                f"Mattermost [{self.instance_id}] file upload error: {e}")
+            logger.error(f"Mattermost [{self.instance_id}] file upload error: {e}")
         return None
 
 

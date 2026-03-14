@@ -67,7 +67,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         self._session: aiohttp.ClientSession | None = None
         # uid → (name, avatar)
         self._user_cache: dict[int, tuple[str, str]] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None  # type: ignore
+        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -81,8 +81,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             connector = aiohttp.TCPConnector(ssl=True)
 
         self._session = aiohttp.ClientSession(
-            headers={"x-api-key": self.config.api_key},
-            connector=connector
+            headers={"x-api-key": self.config.api_key}, connector=connector
         )
         self.bridge.register_sender(self.instance_id, self.send)
 
@@ -244,8 +243,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     data=data,
                 )
         except Exception as e:
-            logger.warning(
-                f"VoceChat [{self.instance_id}] file download failed: {e}")
+            logger.warning(f"VoceChat [{self.instance_id}] file download failed: {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -260,8 +258,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         **kwargs,
     ):
         if self._session is None:
-            logger.warning(
-                f"VoceChat [{self.instance_id}] send: driver not started")
+            logger.warning(f"VoceChat [{self.instance_id}] send: driver not started")
             return None
 
         gid = channel.get("gid")
@@ -313,7 +310,9 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 mid = await self._post_message(
@@ -409,8 +408,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     return None
                 file_id = (await resp.text()).strip().strip('"')
         except Exception as e:
-            logger.error(
-                f"VoceChat [{self.instance_id}] file prepare error: {e}")
+            logger.error(f"VoceChat [{self.instance_id}] file prepare error: {e}")
             return None
 
         # Step 2: upload — multipart with file_id, chunk_data, chunk_is_last
@@ -432,8 +430,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 js = await resp.json(content_type=None)
                 return js.get("path")
         except Exception as e:
-            logger.error(
-                f"VoceChat [{self.instance_id}] file upload error: {e}")
+            logger.error(f"VoceChat [{self.instance_id}] file upload error: {e}")
             return None
 
 
