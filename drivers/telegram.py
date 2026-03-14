@@ -74,10 +74,11 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
         # https://github.com/HKUDS/nanobot/blob/58389766a7ab307c7d5a31a1df36d1cacc625054/{file}#L143
         req = HTTPXRequest(
-            connection_pool_size=16,
             pool_timeout=5.0,
             connect_timeout=30.0,
             read_timeout=30.0,
+            write_timeout=30.0,
+            media_write_timeout=30.0,
             proxy=self._proxy,
         )
         self._app = (
@@ -390,9 +391,6 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
-                        read_timeout=30,
-                        write_timeout=30,
-                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -403,9 +401,6 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
-                        read_timeout=30,
-                        write_timeout=30,
-                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -416,9 +411,6 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
-                        read_timeout=30,
-                        write_timeout=30,
-                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -429,9 +421,6 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         caption=caption,
                         parse_mode=parse_mode,
                         reply_parameters=reply_params,
-                        read_timeout=30,
-                        write_timeout=30,
-                        connect_timeout=30,
                     )
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)
@@ -446,9 +435,6 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     parse_mode=parse_mode,
                     link_preview_options=link_preview_opts,
                     reply_parameters=reply_params,
-                    read_timeout=30,
-                    write_timeout=30,
-                    connect_timeout=30,
                 )
                 if not first_msg_id:
                     first_msg_id = str(sent.message_id)
