@@ -30,6 +30,10 @@ dependencies = [
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple/"
 
+[tool.ruff]
+line-length = 88
+indent-width = 4
+
 [dependency-groups]
 dev = [
     "ruff>=0.15.6",
