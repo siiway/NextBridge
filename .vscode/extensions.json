@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "ms-python.autopep8",
+        "tamasfe.even-better-toml",
+        "yzhang.markdown-all-in-one",
+        "ms-python.vscode-pylance",
+        "ms-python.python",
+        "redhat.vscode-yaml"
+    ]
+}

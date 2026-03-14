@@ -28,3 +28,6 @@ dependencies = [
 [[tool.uv.index]]
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple/"
+
+[tool.pyright]
+typeCheckingMode = "basic"

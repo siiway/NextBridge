@@ -1,3 +1,4 @@
 {
-    "Codegeex.RepoIndex": true
+    "Codegeex.RepoIndex": true,
+    "python.analysis.typeCheckingMode": "basic",
 }
