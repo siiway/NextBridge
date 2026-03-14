@@ -54,6 +54,7 @@ export default {
       headers: {
         'Content-Type': 'text/html;charset=UTF-8',
         'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'none'
       },
     });
   },

@@ -26,7 +26,7 @@ The rules file has the following structure regardless of format:
 ```jsonc
 {
   "rules": [
-    // ...rule objects...
+    // ... rule objects ...
   ]
 }
 ```
@@ -53,7 +53,7 @@ Links all listed channels **bidirectionally**. Any message from one channel is f
     }
   },
   "msg": {
-    // ...global msg config...
+    // ... global msg config ...
   }
 }
 ```
@@ -104,16 +104,16 @@ Routes messages from one set of channels to another (unidirectional). Omit `"typ
 {
   "from": {
     "<instance_id>": {
-      // ...channel address...
+      // ... channel address ...
     }
   },
   "to": {
     "<instance_id>": {
-      // ...channel address...
+      // ... channel address ...
     }
   },
   "msg": {
-    // ...msg config...
+    // ... msg config ...
   }
 }
 ```

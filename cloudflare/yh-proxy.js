@@ -51,7 +51,7 @@ function hostAllowed(hostname, allowlist) {
 
 async function proxyUrl(url, extraHeaders = {}) {
   const upstream = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0', ...extraHeaders },
+    headers: { 'User-Agent': 'Mozilla/5.0', 'X-Robots-Tag': 'none', ...extraHeaders },
   });
 
   const contentType = upstream.headers.get('Content-Type') ?? 'application/octet-stream';

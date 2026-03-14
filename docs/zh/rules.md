@@ -26,7 +26,7 @@ uv run main.py convert data/rules.yaml data/rules.toml
 ```jsonc
 {
   "rules": [
-    // ...规则对象...
+    // ... 规则对象 ...
   ]
 }
 ```
@@ -46,14 +46,14 @@ uv run main.py convert data/rules.yaml data/rules.toml
   "type": "connect",
   "channels": {
     "<实例ID>": {
-      // ...频道地址...
+      // ... 频道地址 ...
     },
     "<实例ID>": {
-      // ...频道地址...
+      // ... 频道地址 ...
     }
   },
   "msg": {
-    // ...全局消息格式配置...
+    // ... 全局消息格式配置 ...
   }
 }
 ```
@@ -104,16 +104,16 @@ uv run main.py convert data/rules.yaml data/rules.toml
 {
   "from": {
     "<实例ID>": {
-      // ...频道地址...
+      // ...频道地址 ...
     }
   },
   "to": {
     "<实例ID>": {
-      // ...频道地址...
+      // ...频道地址 ...
     }
   },
   "msg": {
-    // ...消息格式配置...
+    // ...消息格式配置 ...
   }
 }
 ```

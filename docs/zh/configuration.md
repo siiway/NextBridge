@@ -26,11 +26,11 @@ uv run main.py convert data/config.yaml data/config.toml
 ```jsonc
 {
   "global": {
-    // ...全局配置...
+    // ... 全局配置 ...
   },
   "<平台名>": {
     "<实例ID>": {
-      // ...驱动器配置...
+      // ... 驱动器配置 ...
     }
   }
 }
