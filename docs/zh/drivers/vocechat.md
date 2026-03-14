@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # VoceChat
 
 VoceChat 驱动器将自托管的 [VoceChat](https://voce.chat/) 服务器与其他平台桥接。它运行一个 HTTP Webhook 端点接收 VoceChat 推送的消息，并通过 **机器人 REST API** 发送消息。

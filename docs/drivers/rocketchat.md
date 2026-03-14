@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Rocket.Chat
 
 The Rocket.Chat driver receives messages via a **Outgoing Webhook** and supports two sending modes: **API** (REST API with bot credentials — the default) and **Webhook** (Incoming Webhook URL). No extra Python packages are needed.

@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Getting Started
 
 ## Requirements

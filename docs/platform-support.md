@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Platform Support Status
 
 | Platform | Status | Mentions | Replies | Media | Custom Proxy | Notes |

@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Slack
 
 The Slack driver supports two independent receive modes and two independent send modes. Mix and match to suit your setup.

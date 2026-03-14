@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Webhook
 
 Webhook 驱动器是一个**仅发送**的通用驱动器。当消息被路由到 webhook 实例时，NextBridge 会将 JSON 数据包 POST 到配置的 URL。该驱动器没有接收端——不消费任何传入事件。

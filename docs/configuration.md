@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Configuration Reference
 
 ## Config file formats
@@ -21,11 +23,15 @@ uv run main.py convert data/config.yaml data/config.toml
 
 The config has a two-level structure regardless of format:
 
-```
+```jsonc
 {
-  "global": { ...global config... },
+  "global": {
+    // ... global config ...
+  },
   "<platform>": {
-    "<instance_id>": { ...driver config... }
+    "<instance_id>": {
+      // ... driver config ...
+    }
   }
 }
 ```

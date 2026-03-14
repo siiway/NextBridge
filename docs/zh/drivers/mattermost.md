@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Mattermost
 
 Mattermost 驱动器通过 **WebSocket API** 实时接收消息，通过 **REST API** 发送消息，连接到自托管或云端的 Mattermost 服务器。无需 NextBridge 现有依赖以外的额外安装包。

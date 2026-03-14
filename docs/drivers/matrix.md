@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Matrix
 
 The Matrix driver receives messages via a long-poll sync loop (using [mautrix-python](https://github.com/mautrix/python)) and sends messages to rooms using the Matrix Client-Server API.

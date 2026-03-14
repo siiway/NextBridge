@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Rules Reference
 
 ## Rules file formats
@@ -21,9 +23,11 @@ uv run main.py convert data/rules.yaml data/rules.toml
 
 The rules file has the following structure regardless of format:
 
-```json
+```jsonc
 {
-  "rules": [ ...rule objects... ]
+  "rules": [
+    // ...rule objects...
+  ]
 }
 ```
 
@@ -37,14 +41,20 @@ Rules are evaluated in order for every incoming message. A message can match mul
 
 Links all listed channels **bidirectionally**. Any message from one channel is forwarded to all others.
 
-```json
+```jsonc
 {
   "type": "connect",
   "channels": {
-    "<instance_id>": { ...channel address... },
-    "<instance_id>": { ...channel address... }
+    "<instance_id>": {
+      // ... channel address ...
+    },
+    "<instance_id>": {
+      // ... channel address ...
+    }
   },
-  "msg": { ...global msg config... }
+  "msg": {
+    // ...global msg config...
+  }
 }
 ```
 
@@ -90,15 +100,21 @@ Each channel entry may contain a `"msg"` key that overrides the global `"msg"` f
 
 Routes messages from one set of channels to another (unidirectional). Omit `"type"` or set it to `"forward"`.
 
-```json
+```jsonc
 {
   "from": {
-    "<instance_id>": { ...channel address... }
+    "<instance_id>": {
+      // ...channel address...
+    }
   },
   "to": {
-    "<instance_id>": { ...channel address... }
+    "<instance_id>": {
+      // ...channel address...
+    }
   },
-  "msg": { ...msg config... }
+  "msg": {
+    // ...msg config...
+  }
 }
 ```
 

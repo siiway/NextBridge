@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Rocket.Chat
 
 Rocket.Chat 驱动通过**外发 Webhook（Outgoing Webhook）**接收消息，支持两种发送模式：**API 模式**（使用机器人凭证通过 REST API 发送，默认）和 **Webhook 模式**（向 Incoming Webhook URL 发送）。无需额外安装 Python 依赖包。

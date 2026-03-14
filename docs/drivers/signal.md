@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Signal
 
 The Signal driver connects to a running [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) instance, which handles the Signal protocol on your behalf. The driver receives messages via WebSocket and sends messages via HTTP.

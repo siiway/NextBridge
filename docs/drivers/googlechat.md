@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Google Chat
 
 The Google Chat driver bridges Google Chat spaces with the rest of your platforms using a **service account** and the **Google Chat REST API**. It starts an HTTP server that receives message events pushed by Google, and sends replies via the Chat API.

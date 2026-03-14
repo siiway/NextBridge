@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # NapCat（QQ）
 
 NextBridge 通过 [NapCat](https://napneko.github.io) 连接 QQ——NapCat 是一个非官方 QQ 客户端，提供 OneBot 11 WebSocket API。由于 QQ 没有面向普通账号的官方机器人 API，NapCat 作为中间桥接层使用。

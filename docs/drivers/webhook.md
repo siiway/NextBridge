@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Webhook
 
 The Webhook driver is a **send-only** generic driver. When a message is routed to a webhook instance, NextBridge POSTs a JSON payload to the configured URL. There is no receive side — no incoming events are consumed.

@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Telegram
 
 Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/) 通过长轮询接收消息，并通过 Bot API 发送消息。

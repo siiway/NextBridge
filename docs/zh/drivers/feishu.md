@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # 飞书 / Lark
 
 飞书驱动器支持两种接收模式，并通过飞书 IM v1 API 使用 [lark-oapi](https://github.com/larksuite/oapi-sdk-python) 发送消息。

@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # User Commands
 
 NextBridge supports several built-in commands that users can type directly into their chat platforms to manage their identity and cross-platform experience.

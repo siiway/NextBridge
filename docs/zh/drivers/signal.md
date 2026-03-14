@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Signal
 
 Signal 驱动器通过连接一个运行中的 [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) 实例来收发消息，该实例负责处理底层的 Signal 协议。接收消息使用 WebSocket，发送消息使用 HTTP。

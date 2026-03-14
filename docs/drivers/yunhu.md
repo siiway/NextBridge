@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Yunhu (云湖)
 
 The Yunhu driver receives messages via a webhook HTTP server and sends via the Yunhu open API.

@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Microsoft Teams
 
 The Teams driver bridges Microsoft Teams with the rest of your platforms using the **Azure Bot Framework**. It runs an HTTP server that Teams calls for incoming messages and uses the **Bot Connector REST API** to send replies.

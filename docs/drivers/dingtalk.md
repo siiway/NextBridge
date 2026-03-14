@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # DingTalk
 
 The DingTalk driver receives messages via an HTTP webhook (outgoing robot) and sends via the DingTalk Robot v1.0 API using [alibabacloud-dingtalk](https://github.com/aliyun/alibabacloud-dingtalk-sdk).

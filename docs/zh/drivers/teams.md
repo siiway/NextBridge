@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Microsoft Teams
 
 Teams 驱动器通过 **Azure Bot Framework** 将 Microsoft Teams 与其他平台桥接。它运行一个 HTTP 服务器接收 Teams 推送的消息，并使用 **Bot Connector REST API** 发送回复。

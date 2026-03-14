@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # 钉钉
 
 钉钉驱动器通过 HTTP Webhook（外发机器人）接收消息，并通过钉钉机器人 v1.0 API 使用 [alibabacloud-dingtalk](https://github.com/aliyun/alibabacloud-dingtalk-sdk) 发送消息。

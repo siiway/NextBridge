@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Feishu / Lark
 
 The Feishu driver supports two receive modes and sends via the Feishu IM v1 API using [lark-oapi](https://github.com/larksuite/oapi-sdk-python).

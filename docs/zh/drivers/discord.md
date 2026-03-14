@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Discord
 
 Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通过 **Webhook** 或 **Bot** 两种方式发送消息。

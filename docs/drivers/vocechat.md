@@ -1,4 +1,4 @@
-# VoceChat
+> This document was written by AI and has been manually reviewed.
 
 The VoceChat driver bridges a self-hosted [VoceChat](https://voce.chat/) server with the rest of your platforms. It runs an HTTP webhook endpoint that VoceChat calls for incoming messages, and sends via the **Bot REST API**.
 

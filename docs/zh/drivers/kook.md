@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # KOOK（开黑啦）
 
 KOOK 驱动器使用 [khl-py](https://github.com/TWT233/khl.py) 通过 WebSocket（机器人模式）连接。它从公共文字频道接收 TEXT 和 KMarkdown 消息，并通过 KOOK 机器人 API 发送消息。

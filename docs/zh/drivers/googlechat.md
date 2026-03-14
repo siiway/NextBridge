@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Google Chat
 
 Google Chat 驱动器通过**服务账号**和 **Google Chat REST API** 将 Google Chat 空间与其他平台桥接。它启动一个 HTTP 服务器接收 Google 推送的消息事件，并通过 Chat API 发送回复。

@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # Mattermost
 
 The Mattermost driver connects to your self-hosted or cloud Mattermost server using the **WebSocket API** for real-time receive and the **REST API** for sending. No extra dependencies are needed beyond what NextBridge already uses.

@@ -1,3 +1,5 @@
+> 本文档由 AI 编写，已经人工审核。
+
 # Matrix
 
 Matrix 驱动器通过长轮询同步循环（使用 [mautrix-python](https://github.com/mautrix/python)）接收消息，并通过 Matrix 客户端-服务器 API 向房间发送消息。

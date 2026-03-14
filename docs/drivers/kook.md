@@ -1,3 +1,5 @@
+> This document was written by AI and has been manually reviewed.
+
 # KOOK (开黑啦)
 
 The KOOK driver uses [khl-py](https://github.com/TWT233/khl.py) to connect via WebSocket (bot mode). It receives TEXT and KMarkdown messages from public text channels and sends using the KOOK bot API.
