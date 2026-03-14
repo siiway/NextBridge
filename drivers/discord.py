@@ -207,8 +207,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         except FileNotFoundError:
             pass
         except Exception as exc:
-            logger.warning(
-                f"Discord [{self.instance_id}] failed to read emoji DB", exc_info=exc
+            logger.opt(exception=exc).warning(
+                f"Discord [{self.instance_id}] failed to read emoji DB"
             )
 
         return self._emoji_db

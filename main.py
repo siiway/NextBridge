@@ -81,10 +81,12 @@ async def main():
     from services.config_schema import GlobalConfig
 
     try:
-        GlobalConfig.model_validate(global_config)
+        validated_global = GlobalConfig.model_validate(global_config)
     except ValidationError as exc:
-        logger.critical("Global configuration error", exc_info=exc)
+        logger.opt(exception=exc).critical("Global configuration error")
         return
+
+    log.set_console_level(validated_global.log_level)
 
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()
@@ -98,7 +100,9 @@ async def main():
                     inst_raw
                 )
             except ValidationError as exc:
-                logger.critical(f"Config error in {platform}.{inst_id}", exc_info=exc)
+                logger.opt(exception=exc).critical(
+                    f"Config error in {platform}.{inst_id}"
+                )
                 config_ok = False
 
     if not config_ok:
@@ -109,7 +113,7 @@ async def main():
             return
         exc = task.exception()
         if exc is not None:
-            logger.error(f"Driver '{task.get_name()}' crashed", exc_info=exc)
+            logger.opt(exception=exc).error(f"Driver '{task.get_name()}' crashed")
 
     driver_tasks: list[asyncio.Task] = []
     for platform, (_, driver_cls) in registry.items():

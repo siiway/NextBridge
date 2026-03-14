@@ -1,27 +1,15 @@
-import logging
 import sys
 import os
 from datetime import datetime
 
-# ANSI 颜色码
-COLORS = {
-    "DBG": "\033[36m",  # 青蓝
-    "INF": "\033[32m",  # 绿色
-    "WRN": "\033[33m",  # 黄色
-    "ERR": "\033[31m",  # 红色
-    "CRT": "\033[91m\033[1m",  # 亮红加粗
-    "RST": "\033[0m",
-}
+import loguru
+from loguru import logger
 
-# 是否为终端
-IS_TTY = sys.stdout.isatty()
-
-# 日志文件输出目录
+# Log file output directory
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# 生成日志文件名：20250915-15031606.log
-_log_filename = datetime.now().strftime("%Y%m%d-%H%M%S%f")[:-3] + ".log"  # 毫秒精度
+_log_filename = datetime.now().strftime("%Y%m%d-%H%M%S%f")[:-3] + ".log"
 LOG_FILE_PATH = os.path.join(LOG_DIR, _log_filename)
 
 
@@ -37,95 +25,66 @@ def register_sensitive(values: frozenset[str]) -> None:
     _sensitive.update(v for v in values if len(v) >= 8)
 
 
-class MaskingFilter(logging.Filter):
-    """Redacts sensitive values from every log record before emission."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if _sensitive:
-            msg = record.getMessage()
-            for secret in _sensitive:
-                if secret in msg:
-                    msg = msg.replace(secret, "***")
-            record.msg = msg
-            record.args = ()
-        return True
+def _masking_filter(record: loguru.Record) -> bool:
+    """Redact sensitive values from every log record before emission."""
+    if _sensitive:
+        msg = record["message"]
+        for secret in _sensitive:
+            if secret in msg:
+                msg = msg.replace(secret, "***")
+        record["message"] = msg
+    return True
 
 
-class CustomFormatter(logging.Formatter):
-    replaces = {
-        "DEBUG": "[DBG]",
-        "INFO": "[INF]",
-        "WARNING": "[WRN]",
-        "ERROR": "[ERR]",
-        "CRITICAL": "[CRT]",
-    }
-
-    def format(self, record):
-        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        levelname = record.levelname
-
-        # 获取替换后的级别字符串，如 [DBG]
-        level = self.replaces.get(levelname, f"[{levelname}]")
-
-        if level.startswith("[") and len(level) >= 4:
-            color_key = level[1:4]
-        else:
-            color_key = levelname.upper()[:3]
-
-        if IS_TTY and color_key in COLORS:
-            colored_level = COLORS[color_key] + level + COLORS["RST"]
-        else:
-            colored_level = level
-
-        try:
-            file = os.path.relpath(record.pathname)
-        except Exception:
-            file = record.pathname
-
-        line = record.lineno
-        message = record.getMessage()
-
-        res = f"{timestamp} {colored_level} | {file}:{line} | {message}"
-
-        if record.exc_info:
-            if not record.exc_text:
-                record.exc_text = self.formatException(record.exc_info)
-
-        if record.exc_text:
-            res += "\n" + record.exc_text
-
-        return res
-
-
-# 创建主 logger
-logger = logging.getLogger("app")
-logger.setLevel(logging.DEBUG)
-logger.addFilter(MaskingFilter())
-
-# 清除已有 handlers 防止重复
-if logger.handlers:
-    for handler in logger.handlers:
-        handler.close()  # 确保关闭旧处理器
-    logger.handlers.clear()
-logger.propagate = False
-
-# 添加控制台处理器
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(CustomFormatter())
-console_handler.setLevel(logging.INFO)  # 控制台只输出 INFO 及以上
-logger.addHandler(console_handler)
-
-# 添加文件处理器（记录所有 DEBUG 及以上日志）
-file_handler = logging.FileHandler(LOG_FILE_PATH, encoding="utf-8")
-file_formatter = logging.Formatter(
-    "[%(asctime)s] [%(levelname)s] | %(filename)s:%(lineno)d | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+_CONSOLE_FORMAT = (
+    "<dim>[{time:YYYY-MM-DD HH:mm:ss}]</dim> "
+    "<level>[{level.name:.3}]</level> "
+    "| <dim>{file}:{line}</dim> | {message}"
 )
-file_handler.setFormatter(file_formatter)
-file_handler.setLevel(logging.DEBUG)  # 文件记录所有级别
-logger.addHandler(file_handler)
+_FILE_FORMAT = (
+    "[{time:YYYY-MM-DD HH:mm:ss}] [{level}] | {file}:{line} | {message}{exception}"
+)
+
+# Remove loguru's default stderr sink
+logger.remove()
+
+# Console sink — level is configurable at runtime via set_console_level()
+_console_id: int = logger.add(
+    sys.stdout,
+    level="INFO",
+    format=_CONSOLE_FORMAT,
+    colorize=True,
+    filter=_masking_filter,
+)
+
+# File sink — always DEBUG so nothing is ever lost
+logger.add(
+    LOG_FILE_PATH,
+    level="DEBUG",
+    format=_FILE_FORMAT,
+    encoding="utf-8",
+    filter=_masking_filter,
+)
 
 
-def get_logger(name=None):
-    """返回已配置的日志器（当前共享同一实例）"""
+def get_logger():
     return logger
+
+
+def set_console_level(level: str) -> None:
+    """Set the console handler's log level at runtime.
+
+    Accepts standard level names: DEBUG, INFO, WARNING, ERROR, CRITICAL.
+    The file sink always retains DEBUG so nothing is lost.
+    Call this once after the config is loaded.
+    """
+    global _console_id
+    logger.remove(_console_id)
+    _console_id = logger.add(
+        sys.stdout,
+        level=level,
+        format=_CONSOLE_FORMAT,
+        colorize=True,
+        filter=_masking_filter,
+    )
+    logger.debug(f"Console log level set to: {level}")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 from os import environ
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict
@@ -89,6 +89,10 @@ class GlobalConfig(BaseModel):
     When True: skips only if target_id == msg.instance_id AND target_channel == msg.channel.
 
     Default is False to maximize echo prevention."""
+
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    """Console log verbosity level. The log file always captures DEBUG regardless.
+    Set to DEBUG for verbose output during development or troubleshooting."""
 
     database: DatabaseConfig = DatabaseConfig()
     """Database configuration for message and user mappings."""
