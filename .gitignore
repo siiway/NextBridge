@@ -24,3 +24,6 @@ docs/.vitepress/cache/
 
 # claude
 .claude/
+
+# ruff
+.ruff_cache/

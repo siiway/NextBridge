@@ -1,4 +1,4 @@
 {
     "Codegeex.RepoIndex": true,
-    "python.analysis.typeCheckingMode": "basic",
+    "ty.diagnosticMode": "workspace",
 }
