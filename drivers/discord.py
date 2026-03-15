@@ -105,6 +105,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         @self._client.event
         async def on_message(message: discord.Message):
             if message.author.bot:
+                logger.debug(f"Discord [{self.instance_id}] ignoring bot message from {message.author}")
                 return
             await self._on_message(message)
 
@@ -118,6 +119,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     async def _on_message(self, message: discord.Message):
         server_id = str(message.guild.id) if message.guild else ""
         channel_id = str(message.channel.id)
+        logger.debug(
+            f"Discord [{self.instance_id}] message from {message.author} "
+            f"server={server_id} channel={channel_id}"
+        )
         # Use clean_content to get mentions as @Name instead of <@id>
         text = message.clean_content
 
@@ -137,6 +142,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             )
 
         if not text.strip() and not attachments:
+            logger.debug(f"Discord [{self.instance_id}] ignoring empty message from {message.author}")
             return
 
         avatar = (
@@ -268,10 +274,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             and self._client is not None
         )
 
-        # Get webhook_url from rule msg config (kwargs) or fall back to driver config
-        webhook_url = kwargs.get("webhook_url")
-        if not webhook_url:
-            webhook_url = self._webhook_url
+        # Get webhook_url from rule msg config (kwargs), channel dict, or driver config
+        webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url") or self._webhook_url
 
         # Resolve the send path first so we know which format override to apply
         is_webhook_send = (
@@ -389,10 +393,13 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return None
         ch = self._client.get_channel(int(channel_id))
         if ch is None:
-            logger.warning(
-                f"Discord [{self.instance_id}] channel {channel_id} not in cache"
-            )
-            return None
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                logger.warning(
+                    f"Discord [{self.instance_id}] could not fetch channel {channel_id}: {e}"
+                )
+                return None
 
         # Ensure the channel is messageable (has a send method)
         if not isinstance(ch, discord.abc.Messageable):
