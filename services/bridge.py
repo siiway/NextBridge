@@ -252,9 +252,7 @@ class Bridge:
         for rule in self._rules:
             if rule.get("type") == "connect":
                 matched = self._matches_channel(msg, rule.get("channels", {}))
-                logger.debug(
-                    f"Rule connect match for {msg.instance_id}: {matched}"
-                )
+                logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
                 if matched:
                     await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:

@@ -105,7 +105,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         @self._client.event
         async def on_message(message: discord.Message):
             if message.author.bot:
-                logger.debug(f"Discord [{self.instance_id}] ignoring bot message from {message.author}")
+                logger.debug(
+                    f"Discord [{self.instance_id}] ignoring bot message from {message.author}"
+                )
                 return
             await self._on_message(message)
 
@@ -142,7 +144,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             )
 
         if not text.strip() and not attachments:
-            logger.debug(f"Discord [{self.instance_id}] ignoring empty message from {message.author}")
+            logger.debug(
+                f"Discord [{self.instance_id}] ignoring empty message from {message.author}"
+            )
             return
 
         avatar = (
@@ -275,7 +279,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         )
 
         # Get webhook_url from rule msg config (kwargs), channel dict, or driver config
-        webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url") or self._webhook_url
+        webhook_url = (
+            kwargs.get("webhook_url") or channel.get("webhook_url") or self._webhook_url
+        )
 
         # Resolve the send path first so we know which format override to apply
         is_webhook_send = (
