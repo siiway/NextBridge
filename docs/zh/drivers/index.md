@@ -15,6 +15,7 @@
 | 钉钉 | [钉钉](/zh/drivers/dingtalk) | ✅ | ✅ | Webhook 接收；机器人 API 发送 |
 | 云湖 | [云湖](/zh/drivers/yunhu) | ✅ | ✅ | Webhook 接收；开放 API 发送 |
 | KOOK（开黑啦） | [KOOK](/zh/drivers/kook) | ✅ | ✅ | WebSocket 接收；机器人 API 发送；上传至 KOOK CDN |
+| WhatsApp | [WhatsApp](/zh/drivers/whatsapp) | ✅ | ✅ | 使用 neonize（go-whatsapp Python 绑定），无需 Node.js |
 
 ## 驱动器工作原理
 

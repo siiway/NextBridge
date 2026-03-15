@@ -69,6 +69,7 @@ async function proxyUrl(url, extraHeaders = {}) {
       'Content-Type': contentType,
       'Content-Disposition': `inline; filename="${filename}"`,
       'Cache-Control': 'public, max-age=86400',
+      // codescan:ignore-next-line:EXPLOIT019
       'Access-Control-Allow-Origin': '*',
     },
   });

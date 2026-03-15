@@ -18,7 +18,7 @@
 | **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
 | **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **WhatsApp** | ⏸️ | - | - | - | - | No public bot API or stable community libraries |
+| **WhatsApp** | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | Uses neonize (go-whatsapp); media received as text fallback |
 | **WeChat** | ⏸️ | - | - | - | - | High risk of account ban |
 | **Tailchat** | ❌ | - | - | - | - | Planned |
 | **Zulip** | ❌ | - | - | - | - | Planned |
