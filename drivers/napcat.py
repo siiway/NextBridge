@@ -24,7 +24,7 @@ from pathlib import Path
 import websockets
 import websockets.exceptions
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import services.logger as log
 import services.media as media
@@ -42,7 +42,7 @@ class NapCatConfig(_DriverConfig):
     file_send_mode: Literal["stream", "base64"] = "stream"
     cqface_mode: Literal["gif", "emoji"] = "gif"
     stream_threshold: int = 0
-    proxy: str = ""
+    proxy: Optional[str] = None
 
 
 logger = log.get_logger()
