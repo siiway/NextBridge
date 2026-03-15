@@ -431,7 +431,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             if text and not caption_used:
                 sent = await self._app.bot.send_message(
                     chat_id=cid,
-                    text=text,
+                    text=log.replace_sensitive(text),
                     parse_mode=parse_mode,
                     link_preview_options=link_preview_opts,
                     reply_parameters=reply_params,

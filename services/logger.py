@@ -25,13 +25,22 @@ def register_sensitive(values: frozenset[str]) -> None:
     _sensitive.update(v for v in values if len(v) >= 8)
 
 
+# this shouldn't be in log, move out if there's better place
+def replace_sensitive(msg: str) -> str:
+    """Return a redacted version of msg, with all registered secrets replaced."""
+    if not _sensitive:
+        return msg
+    for secret in _sensitive:
+        if secret in msg:
+            msg = msg.replace(secret, "***")
+    return msg
+
+
 def _masking_filter(record: loguru.Record) -> bool:
     """Redact sensitive values from every log record before emission."""
     if _sensitive:
         msg = record["message"]
-        for secret in _sensitive:
-            if secret in msg:
-                msg = msg.replace(secret, "***")
+        msg = replace_sensitive(msg)
         record["message"] = msg
     return True
 
