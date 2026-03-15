@@ -81,6 +81,7 @@ Add under `slack.<instance_id>` in your config file:
 | `listen_port` | For Events API receive | — | HTTP port to listen on |
 | `listen_path` | No | `"/slack/events"` | HTTP path for the Events API endpoint |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
+| `proxy` | No | — | Proxy URL for all Slack API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ### Socket Mode + Bot send (no public URL)
 

@@ -15,6 +15,7 @@ Add under `webhook.<instance_id>` in `config.json`:
 | `url` | Yes | — | HTTP endpoint to send to |
 | `method` | No | `"POST"` | HTTP method: `"POST"`, `"PUT"`, or `"PATCH"` |
 | `headers` | No | `{}` | Extra request headers (e.g. for authentication) |
+| `proxy` | No | — | Proxy URL for HTTP requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
 {
