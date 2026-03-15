@@ -1,9 +1,9 @@
 [project]
 name = "nextbridge"
-version = "0.1.0"
+version = "0.2.0"
 description = "The chat bridge that links up all the major chat platforms!"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "discord-py>=2.6.3",
     "websockets>=13.0",

@@ -50,6 +50,7 @@ The `global` section contains configuration options that apply to all drivers un
 |---|---|---|---|
 | `proxy` | No | — | Global proxy URL for all drivers that ***support proxy configuration*** (e.g., `http://proxy.example.com:8080`). Individual driver proxy settings will override this global setting. |
 | `strict_echo_match` | No | `false` | Controls how NextBridge prevents echoing messages back to the same channel/instance. When `false` (default), skips if target_id == msg.instance_id OR target_channel == msg.channel. When `true`, skips only if target_id == msg.instance_id AND target_channel == msg.channel. Default is `false` to maximize echo prevention. |
+| `log` | No | — | Logging configuration for controlling log output and rotation. See [Logging Configuration](#logging-configuration) below. |
 | `database` | No | — | Database configuration for storing message and user mappings. See [Database Configuration](#database-configuration) below. |
 
 ```json
@@ -62,6 +63,68 @@ The `global` section contains configuration options that apply to all drivers un
 
 ::: tip Using proxy from environment variables
  If not set, the program will attempt to read proxy configuration from environment variables `http_proxy`, `https_proxy`, and `all_proxy` (case-insensitive). You can disable the use of system proxy by setting `proxy` to the special value `disabled`.
+:::
+
+## Logging Configuration
+
+NextBridge uses loguru for logging, which supports flexible log output and rotation. The logging configuration controls both console output and file logging behavior.
+
+### Configuration Options
+
+| Key | Required | Default | Description |
+|---|---|---|---|
+| `log.level` | No | `INFO` | Console log verbosity level. |
+| `log.file_level` | No | `DEBUG` | File log verbosity level. Default is DEBUG for verbose output during troubleshooting. |
+| `log.dir` | No | `null` | Directory path for log files. If `null` or not specified, file logging is disabled. Log files are automatically created with timestamp-based names in the specified directory. |
+| `log.rotation_size` | No | `100 MB` | Maximum size of a single log file before rotation (e.g., `"100 MB"`, `"500 MB"`). Log files are automatically rotated when they exceed this size. |
+| `log.retention_days` | No | `7` | Number of days to keep log files. Older log files are automatically deleted. Set to `0` to disable automatic deletion. |
+| `log.compression` | No | `zip` | Compression format for rotated log files (e.g., `"zip"`, `"gz"`, `"tar.gz"`). Set to `null` to disable compression. |
+
+### Configuration Examples
+
+**Basic logging (console only):**
+```json
+{
+  "global": {
+    "log": {
+      "level": "INFO"
+    }
+  }
+}
+```
+
+**File logging with rotation:**
+```json
+{
+  "global": {
+    "log": {
+      "level": "INFO",
+      "dir": "logs",
+      "rotation_size": "100 MB",
+      "retention_days": 7,
+      "compression": "zip"
+    }
+  }
+}
+```
+
+**Verbose logging for debugging:**
+```json
+{
+  "global": {
+    "log": {
+      "level": "DEBUG",
+      "dir": "logs",
+      "rotation_size": "50 MB",
+      "retention_days": 3,
+      "compression": null
+    }
+  }
+}
+```
+
+::: tip Log Rotation
+  When `log.dir` is set, log files are automatically rotated when they exceed `log.rotation_size`. Old log files are automatically deleted after `log.retention_days` days. Rotated files can be compressed using `log.compression` to save disk space.
 :::
 
 ## Database Configuration

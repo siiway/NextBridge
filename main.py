@@ -11,6 +11,7 @@ import services.error  # noqa: F401
 import services.logger as log
 import services.util as u
 import services.config_io as config_io
+from services.config_schema import GlobalConfig
 from services.bridge import bridge
 
 import drivers as _drivers_pkg
@@ -78,7 +79,6 @@ async def main():
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
 
     # Validate database configuration
-    from services.config_schema import GlobalConfig
 
     try:
         validated_global = GlobalConfig.model_validate(global_config)
@@ -86,7 +86,15 @@ async def main():
         logger.opt(exception=exc).critical("Global configuration error")
         return
 
-    log.set_console_level(validated_global.log_level)
+    # Logging configuration
+    log.set_console_level(validated_global.log.level)
+    log.set_log_dir(validated_global.log.dir)
+    log.set_log_rotation(
+        rotation_size=validated_global.log.rotation_size,
+        retention_days=validated_global.log.retention_days,
+        compression=validated_global.log.compression,
+        file_level=validated_global.log.file_level,
+    )
 
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()

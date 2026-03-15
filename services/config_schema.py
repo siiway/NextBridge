@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from os import environ
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 
 import services.logger as log
 
@@ -27,27 +27,6 @@ CoercedBool = Annotated[bool, BeforeValidator(_coerce_bool)]
 # ---------------------------------------------------------------------------
 # Global configuration
 # ---------------------------------------------------------------------------
-
-
-def _get_proxy_from_env(v: str) -> str | None:
-    if v.lower() in ["disabled", "disable", "unset"]:
-        logger.debug("Global proxy disabled manually")
-        return None
-
-    elif v:
-        logger.debug(f"Using global proxy from config file: {v}")
-        return v or None
-
-    for env_var in ["http_proxy", "https_proxy", "all_proxy"]:
-        env_value = environ.get(env_var) or environ.get(env_var.upper())
-        if env_value:
-            logger.debug(
-                f"Using global proxy from environ variable {env_var}: {env_value}"
-            )
-            return env_value or None
-
-    logger.debug("No global proxy configuration found")
-    return None
 
 
 class DatabaseConfig(BaseModel):
@@ -76,10 +55,49 @@ class DatabaseConfig(BaseModel):
     """Recycle connections after this many seconds (default: 1 hour)."""
 
 
+class LoggingConfig(BaseModel):
+    """Logging configuration for controlling log output and rotation."""
+
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    """Console log verbosity level.
+    Set to DEBUG for verbose output during development or troubleshooting."""
+
+    file_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
+    """File log verbosity level. Default is DEBUG to capture all log messages."""
+
+    dir: str | None = "logs"
+    """Directory path for log files. If None or empty, file logging is disabled.
+    Log files are automatically created with timestamp-based names."""
+
+    rotation_size: str = "100 MB"
+    """Maximum size of a single log file before rotation (e.g., "100 MB", "500 MB").
+    Log files are automatically rotated when they exceed this size."""
+
+    retention_days: int = 7
+    """Number of days to keep log files. Older log files are automatically deleted.
+    Set to 0 to disable automatic deletion."""
+
+    compression: Literal["gz", "bz2", "xz", "lzma", "tar", "tar.gz", "tar.bz2", "tar.xz", "zip", None] = "zip"
+    """Compression format for rotated log files (e.g., "zip", "gz", "tar.gz").
+    Set to None to disable compression."""
+
+    @field_validator('level', 'file_level', mode='before')
+    def normalize_level(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            raise ValueError(f'Invaild log level: {v}')
+        upper = v.strip().upper()
+        valid = {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}
+        if upper not in valid:
+            raise ValueError(f'Invaild log level: {v}')
+        return upper
+
+
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
-    proxy: Annotated[str, BeforeValidator(_get_proxy_from_env)] = UNSET
+    proxy: str = UNSET
     """Global proxy URL for all drivers that support proxy configuration.
     Individual driver proxy settings will override this global setting."""
 
@@ -91,13 +109,32 @@ class GlobalConfig(BaseModel):
 
     Default is False to maximize echo prevention."""
 
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    """Console log verbosity level. The log file always captures DEBUG regardless.
-    Set to DEBUG for verbose output during development or troubleshooting."""
+    log: LoggingConfig = LoggingConfig()
+    """Logging configuration for controlling log output and rotation."""
 
     database: DatabaseConfig = DatabaseConfig()
     """Database configuration for message and user mappings."""
 
+    @field_validator('proxy', mode='after')
+    def get_proxy_from_env(cls, v: str):
+        if v.lower() in ["disabled", "disable", "unset"]:
+            logger.debug("Global proxy disabled manually")
+            return None
+
+        elif v:
+            logger.debug(f"Using global proxy from config file: {v}")
+            return v or None
+
+        for env_var in ["http_proxy", "https_proxy", "all_proxy"]:
+            env_value = environ.get(env_var) or environ.get(env_var.upper())
+            if env_value:
+                logger.debug(
+                    f"Using global proxy from environ variable {env_var}: {env_value}"
+                )
+                return env_value or None
+
+        logger.debug("No global proxy configuration found")
+        return None
 
 # ---------------------------------------------------------------------------
 # Base for all driver config blocks — unknown keys are a validation error
