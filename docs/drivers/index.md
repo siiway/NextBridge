@@ -15,6 +15,15 @@ A **driver** is the adapter between NextBridge and a specific chat platform. Eac
 | DingTalk | [DingTalk](/drivers/dingtalk) | ✅ | ✅ | Webhook receive; Robot API send |
 | Yunhu (云湖) | [Yunhu](/drivers/yunhu) | ✅ | ✅ | Webhook receive; open API send |
 | KOOK (开黑啦) | [KOOK](/drivers/kook) | ✅ | ✅ | WebSocket receive; bot API send; uploads to KOOK CDN |
+| VoceChat | [VoceChat](/drivers/vocechat) | ✅ | ✅ | |
+| Matrix | [Matrix](/drivers/matrix) | ✅ | ✅ | Client sync loop; no E2E encryption support yet |
+| Signal | [Signal](/drivers/signal) | ✅ | ✅ | Requires signal-cli REST API |
+| Microsoft Teams | [Teams](/drivers/teams) | ✅ | ✅ | Bot Framework connector |
+| Google Chat | [Google Chat](/drivers/googlechat) | ✅ | ✅ | REST API with service account |
+| Slack | [Slack](/drivers/slack) | ✅ | ✅ | Socket Mode or Events API receive; bot or webhook send |
+| Mattermost | [Mattermost](/drivers/mattermost) | ✅ | ✅ | WebSocket receive; REST API send |
+| Rocket.Chat | [Rocket.Chat](/drivers/rocketchat) | ✅ | ✅ | Outgoing webhook receive; REST API or incoming webhook send |
+| Webhook | [Webhook](/drivers/webhook) | ❌ | ✅ | Send-only generic HTTP webhook |
 
 ## How drivers work
 

@@ -39,7 +39,7 @@ The config has a two-level structure regardless of format:
 | Level | Description |
 |---|---|
 | `global` | Global configuration options that apply to all drivers unless overridden |
-| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `matrix`, `signal`, `slack` |
+| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `vocechat`, `matrix`, `signal`, `teams`, `googlechat`, `slack`, `mattermost`, `rocketchat`, `webhook` |
 | `<instance_id>` | A name you choose freely — used to reference this instance in rules |
 
 ## Global Configuration

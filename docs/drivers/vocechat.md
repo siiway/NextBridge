@@ -35,7 +35,7 @@ Add under `vocechat.<instance_id>` in your config file:
 | `listen_port` | No | `8091` | HTTP port the webhook listens on |
 | `listen_path` | No | `"/vocechat/webhook"` | HTTP path for the webhook endpoint |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum attachment size in bytes |
-| `proxy` | No | — | Proxy URL for all VoceChat API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+| `proxy` | No | — | Proxy URL for all VoceChat API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
 {

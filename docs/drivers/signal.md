@@ -27,7 +27,7 @@ Add under `signal.<instance_id>` in your config file:
 | `api_url` | Yes | — | Base URL of your signal-cli-rest-api instance, e.g. `http://localhost:8080` |
 | `number` | Yes | — | Your registered Signal phone number, e.g. `+12025551234` |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
-| `proxy` | No | — | Proxy URL for all Signal API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+| `proxy` | No | — | Proxy URL for all Signal API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
 {

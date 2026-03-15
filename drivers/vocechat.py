@@ -34,7 +34,7 @@ from aiohttp_socks import ProxyConnector
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.config import get
+from services.config import get_proxy, UNSET
 from services.config_schema import _DriverConfig
 from drivers import BaseDriver
 
@@ -45,7 +45,7 @@ class VoceChatConfig(_DriverConfig):
     listen_port: int = 8091
     listen_path: str = "/vocechat/webhook"
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = ""
+    proxy: str = UNSET
 
 
 logger = log.get_logger()
@@ -67,7 +67,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         self._session: aiohttp.ClientSession | None = None
         # uid → (name, avatar)
         self._user_cache: dict[int, tuple[str, str]] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle

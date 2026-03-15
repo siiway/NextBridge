@@ -4,6 +4,7 @@ from typing import Any
 import services.util as u
 import services.logger as log
 import services.config_io as config_io
+from services.config_schema import UNSET
 
 logger = log.get_logger()
 
@@ -77,3 +78,15 @@ def set(key: str, value):
         _config_cache = config
     except Exception as e:
         raise RuntimeError(f"Save config failed: {e}")
+
+
+def get_proxy(
+    instance: str | None = UNSET,
+    globally: str = get("global.proxy", UNSET)
+) -> str | None:
+    if not instance == UNSET:
+        return instance or None
+    elif not globally == UNSET:
+        return globally or None
+    else:
+        return None

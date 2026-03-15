@@ -46,7 +46,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -57,7 +57,7 @@ class GoogleChatConfig(_DriverConfig):
     listen_path: str = "/google-chat/events"
     endpoint_url: str = ""
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = ""
+    proxy: str = UNSET
 
     @model_validator(mode="after")
     def _require_creds(self) -> "GoogleChatConfig":
@@ -90,7 +90,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         self._session: aiohttp.ClientSession | None = None
         self._creds: _sa.Credentials | None = None
         self._token_lock: asyncio.Lock = asyncio.Lock()
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle

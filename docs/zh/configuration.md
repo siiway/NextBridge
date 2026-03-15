@@ -39,7 +39,7 @@ uv run main.py convert data/config.yaml data/config.toml
 | 层级 | 说明 |
 |---|---|
 | `global` | 全局配置选项，适用于所有驱动，除非在特定驱动配置中被覆盖 |
-| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`matrix`、`signal`、`slack` 之一 |
+| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`vocechat`、`matrix`、`signal`、`teams`、`googlechat`、`slack`、`mattermost`、`rocketchat`、`webhook` 之一 |
 | `<实例ID>` | 由你自由命名，在规则配置中用于引用此实例 |
 
 ## 全局配置

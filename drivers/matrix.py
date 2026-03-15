@@ -47,7 +47,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -57,7 +57,7 @@ class MatrixConfig(_DriverConfig):
     password: str = ""
     access_token: str = ""
     max_file_size: int = 10 * 1024 * 1024
-    proxy: str = ""
+    proxy: str = UNSET
 
     @model_validator(mode="after")
     def _require_auth(self) -> "MatrixConfig":
@@ -92,7 +92,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
     def __init__(self, instance_id: str, config: MatrixConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: Client | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle

@@ -7,6 +7,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 import services.logger as log
 
+UNSET = "unset"
 logger = log.get_logger()
 
 # ---------------------------------------------------------------------------
@@ -28,14 +29,14 @@ CoercedBool = Annotated[bool, BeforeValidator(_coerce_bool)]
 # ---------------------------------------------------------------------------
 
 
-def _get_proxy_from_env(v: str) -> str:
-    if v.lower() in ["disabled", "disable"]:
+def _get_proxy_from_env(v: str) -> str | None:
+    if v.lower() in ["disabled", "disable", "unset"]:
         logger.debug("Global proxy disabled manually")
-        return ""
+        return None
 
     elif v:
         logger.debug(f"Using global proxy from config file: {v}")
-        return v
+        return v or None
 
     for env_var in ["http_proxy", "https_proxy", "all_proxy"]:
         env_value = environ.get(env_var) or environ.get(env_var.upper())
@@ -43,10 +44,10 @@ def _get_proxy_from_env(v: str) -> str:
             logger.debug(
                 f"Using global proxy from environ variable {env_var}: {env_value}"
             )
-            return env_value
+            return env_value or None
 
     logger.debug("No global proxy configuration found")
-    return ""
+    return None
 
 
 class DatabaseConfig(BaseModel):
@@ -78,7 +79,7 @@ class DatabaseConfig(BaseModel):
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
-    proxy: Annotated[str, BeforeValidator(_get_proxy_from_env)] = ""
+    proxy: Annotated[str, BeforeValidator(_get_proxy_from_env)] = UNSET
     """Global proxy URL for all drivers that support proxy configuration.
     Individual driver proxy settings will override this global setting."""
 

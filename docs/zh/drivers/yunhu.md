@@ -22,7 +22,7 @@
 | `webhook_port` | 否 | `8765` | 传入 Webhook HTTP 服务器的监听端口 |
 | `webhook_path` | 否 | `"/yunhu-webhook"` | Webhook 端点的 HTTP 路径 |
 | `proxy_host` | 否 | — | `cloudflare/yh-proxy.js` Worker 的基础 URL。启用两项功能：头像 URL 改写为 `<host>/pfp?url=…`（注入必要的 Referer）；Discord CDN 附件 URL 改写为 `<host>/media?url=…`，使云湖服务器在中国大陆境内也能拉取。 |
-| `proxy` | 否 | — | 所有云湖 API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。 |
+| `proxy` | 否 | — | 所有云湖 API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
 
 ::: tip 公共端点
  `https://yh-proxy.siiway.top` 是 `cloudflare/yh-proxy.js` 的托管实例，可直接使用，无需自行部署 Worker。

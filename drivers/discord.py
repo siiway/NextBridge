@@ -15,8 +15,7 @@
 #   bot_token     – Optional. Required for receive and bot-send mode.
 #   send_method   – "webhook" (default) | "bot"
 #   webhook_url   – Required when send_method == "webhook"
-#   max_file_size – Max bytes per attachment when sending (default 8 MB,
-#                   Discord webhook limit)
+#   max_file_size – Max bytes per attachment when sending (default 8 MB, Discord webhook limit)
 
 from drivers.registry import register
 import io
@@ -34,7 +33,7 @@ import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
 from services.config_schema import _DriverConfig, CoercedBool
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -44,7 +43,7 @@ class DiscordConfig(_DriverConfig):
     bot_token: str = ""
     max_file_size: int = 8 * 1024 * 1024
     send_as_bot_when_using_cqface_emoji: CoercedBool = False
-    proxy: str = ""
+    proxy: str = UNSET
 
 
 logger = log.get_logger()
@@ -60,8 +59,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._send_method: str = config.send_method
         self._webhook_url: str | None = config.webhook_url or None
         self._bot_token: str | None = config.bot_token or None
-        # Use local proxy if set, otherwise fall back to global proxy
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
         # face_id (str) → "<:name:id>" resolved Discord emoji string
         self._emoji_cache: dict[str, str] = {}
         # name → emoji_id index built lazily from discord_emojis.json
