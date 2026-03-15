@@ -277,12 +277,12 @@ class Bridge:
         self, msg: NormalizedMessage, msg_cfg: dict
     ) -> tuple[str, dict]:
         """Return (formatted_text, extra_kwargs) for a given msg config block."""
-        fmt = msg_cfg.get("msg_format", "{msg}")
+        fmt = msg_cfg.get("msg_format", '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}')
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
             "from": msg.instance_id,
-            "username": msg.user,
+            "user": msg.user,
             "user_id": msg.user_id,
             "user_avatar": msg.user_avatar,
             "msg": msg.text,
@@ -395,6 +395,11 @@ class Bridge:
 
             # Per-target msg overrides the global msg (target wins on conflict)
             merged_msg_cfg = {**global_msg_cfg, **target_cfg.get("msg", {})}
+
+            # Ensure webhook_url is passed to extra if present in target_cfg
+            if "webhook_url" in target_cfg:
+                merged_msg_cfg["webhook_url"] = target_cfg["webhook_url"]
+
             formatted, extra = self._build_formatted(msg, merged_msg_cfg)
 
             if self._is_sensitive(formatted):
@@ -442,8 +447,8 @@ class Bridge:
                     msg_db().save_mapping(
                         bridge_id, target_id, str(target_channel), str(new_msg_id)
                     )
-            except Exception as e:
-                logger.error(f"Failed to send to '{target_id}': {e}")
+            except:
+                logger.opt(exception=True).error(f"Failed to send to '{target_id}'")
 
 
 # Shared singleton used by all drivers

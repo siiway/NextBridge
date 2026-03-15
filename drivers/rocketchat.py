@@ -69,7 +69,7 @@ class RocketChatConfig(_DriverConfig):
     listen_path: str = "/rocketchat/webhook"
     webhook_token: str = ""
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
     @model_validator(mode="after")
     def _check_send_config(self) -> "RocketChatConfig":

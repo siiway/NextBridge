@@ -35,7 +35,7 @@ from aiohttp_socks import ProxyConnector
 class KookConfig(_DriverConfig):
     token: str
     max_file_size: int = 25 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()

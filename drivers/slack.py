@@ -60,7 +60,7 @@ class SlackConfig(_DriverConfig):
     listen_port: int = 0
     listen_path: str = "/slack/events"
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -386,8 +386,8 @@ class SlackDriver(BaseDriver[SlackConfig]):
             logger.warning(f"Slack [{self.instance_id}] send: bot_token not configured")
             return None
 
-        title: str = kwargs.get("webhook_title", "") or ""
-        avatar: str = kwargs.get("webhook_avatar", "") or ""
+        title: str = kwargs.get("webhook_title", "") or "{user} ({user_id}) @ {from}"
+        avatar: str = kwargs.get("webhook_avatar", "") or "{user_avatar}"
         has_identity = bool(title or avatar)
         reply_to_id = kwargs.get("reply_to_id")
         first_msg_id = None

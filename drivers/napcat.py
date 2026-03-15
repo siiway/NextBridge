@@ -42,7 +42,7 @@ class NapCatConfig(_DriverConfig):
     file_send_mode: Literal["stream", "base64"] = "stream"
     cqface_mode: Literal["gif", "emoji"] = "gif"
     stream_threshold: int = 0
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()

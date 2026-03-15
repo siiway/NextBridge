@@ -38,8 +38,8 @@ from services.config import get_proxy, UNSET
 class TelegramConfig(_DriverConfig):
     bot_token: str
     max_file_size: int = 50 * 1024 * 1024
-    rich_header_host: str = ""
-    proxy: str = UNSET
+    rich_header_host: str = "https://richheader.siiway.top"
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -136,8 +136,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app = None
 
     async def _on_error(self, _: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logger.exception(
-            "Telegram [%s] handler error", self.instance_id, exc_info=context.error
+        logger.opt(exception=True).exception(
+            "Telegram [%s] handler error", self.instance_id
         )
 
     # ------------------------------------------------------------------

@@ -20,12 +20,11 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 |---|---|---|---|
 | `bot_token` | 否* | — | Discord Bot Token，接收消息和 `bot` 发送模式均需此项 |
 | `send_method` | 否 | `webhook` | `"webhook"` 或 `"bot"` |
-| `webhook_url` | 否 | — | 默认的 Webhook URL，可通过规则的 `msg` 配置按规则覆盖（见下文） |
 | `max_file_size` | 否 | `8388608`（8 MB） | 发送附件时单个文件的最大字节数 |
 | `send_as_bot_when_using_cqface_emoji` | 否 | `false` | 为 `true` 时，包含 `:cqface<id>:` 标记的消息（由 NapCat 驱动器的 `cqface_mode: "emoji"` 生成）将通过 Bot 发送，即使 `send_method` 设置为 `"webhook"` 亦然。需配置 `bot_token`。 |
 | `proxy` | 否 | — | 所有 Discord API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。设置后，代理连接将禁用 SSL 验证。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
 
-\* 至少需要提供 `bot_token`（用于接收）或 `webhook_url`（可在配置文件或按规则指定）。
+\* 接收消息时需要提供 `bot_token`。仅使用 webhook 发送时，只需在规则中提供 `webhook_url`。
 
 ```json
 {
@@ -33,7 +32,6 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
     "dc_main": {
       "bot_token": "your_bot_token",
       "send_method": "webhook",
-      "webhook_url": "https://discord.com/api/webhooks/ID/TOKEN",
       "max_file_size": 8388608,
       "proxy": "http://proxy.example.com:8080"
     }
@@ -67,12 +65,14 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 |---|---|
 | `server_id` | Discord 服务器（Guild）ID |
 | `channel_id` | Discord 频道 ID |
+| `webhook_url` | 此频道的 Webhook URL（使用 webhook 发送模式时必填） |
 
 ```json
 {
   "dc_main": {
     "server_id": "1061629481267245086",
-    "channel_id": "1269706305661309030"
+    "channel_id": "1269706305661309030",
+    "webhook_url": "https://discord.com/api/webhooks/ID/TOKEN"
   }
 }
 ```
@@ -83,7 +83,6 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 
 | 键 | 说明 |
 |---|---|
-| `webhook_url` | 此规则专用的 Webhook URL，覆盖驱动器配置中的 `webhook_url`，支持模板变量。 |
 | `webhook_msg_format` | 通过 Webhook 发送时覆盖 `msg_format`，支持相同模板变量。 |
 | `bot_msg_format` | 通过 Bot 发送时覆盖 `msg_format`（包括 `send_as_bot_when_using_cqface_emoji` 触发的情形），支持相同模板变量。 |
 | `webhook_title` | Webhook 消息上显示的用户名（仅 `send_method: "webhook"` 时生效） |

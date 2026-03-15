@@ -44,7 +44,7 @@ def replace_sensitive(msg: str) -> str:
     return msg
 
 
-def _masking_filter(record: loguru.Record) -> bool:
+def _masking_filter(record: "loguru.Record") -> bool:
     """Redact sensitive values from every log record before emission."""
     if _sensitive:
         msg = record["message"]

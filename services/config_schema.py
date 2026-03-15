@@ -97,7 +97,7 @@ class LoggingConfig(BaseModel):
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
-    proxy: str = UNSET
+    proxy: str | None = UNSET
     """Global proxy URL for all drivers that support proxy configuration.
     Individual driver proxy settings will override this global setting."""
 

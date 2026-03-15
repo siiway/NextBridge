@@ -42,7 +42,7 @@ class TeamsConfig(_DriverConfig):
     listen_port: int = 3978
     listen_path: str = "/api/messages"
     max_file_size: int = 20 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()

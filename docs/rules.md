@@ -180,7 +180,7 @@ Both attributes support the same `{variable}` substitutions as `msg_format`.
     "my_tg": {
       "chat_id": "-100987654321",
       "msg": {
-        "msg_format": "<richheader title=\"{user}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
+        "msg_format": "<richheader title=\"{user}\" content=\"{user_id} @ {platform}\"/> {msg}"
       }
     }
   }

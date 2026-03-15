@@ -57,7 +57,7 @@ class MatrixConfig(_DriverConfig):
     password: str = ""
     access_token: str = ""
     max_file_size: int = 10 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
     @model_validator(mode="after")
     def _require_auth(self) -> "MatrixConfig":

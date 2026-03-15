@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from pydantic import ValidationError
+from tomllib import load as load_toml
 
 import services.error  # noqa: F401
 import services.logger as log
@@ -36,19 +37,19 @@ def cmd_convert(src: str, dst: str) -> None:
     dst_path = Path(dst)
 
     if not src_path.is_file():
-        print(f"Error: source file not found: {src_path}", file=sys.stderr)
+        logger.error(f"Source file not found: {src_path}")
         sys.exit(1)
 
     try:
         data = config_io.load_config(src_path)
-    except Exception as e:
-        print(f"Error reading {src_path}: {e}", file=sys.stderr)
+    except:
+        logger.opt(exception=True).critical(f"Error reading {src_path}")
         sys.exit(1)
 
     try:
         config_io.save_config(data, dst_path)
-    except Exception as e:
-        print(f"Error writing {dst_path}: {e}", file=sys.stderr)
+    except:
+        logger.opt(exception=True).critical(f"Error reading {dst_path}")
         sys.exit(1)
 
     print(f"Converted {src_path} → {dst_path}")
@@ -122,6 +123,17 @@ async def main():
         exc = task.exception()
         if exc is not None:
             logger.opt(exception=exc).error(f"Driver '{task.get_name()}' crashed")
+
+    try:
+        # get version info
+        with open('pyproject.toml', 'rb', encoding='utf-8') as f:
+            version: str = load_toml(f).get('project', {}).get('version', 'UNKNOWN')
+            f.close()
+    except:
+        logger.warning(f'Read version info failed', exc_info=True)
+        version = 'UNKNOWN'
+
+    logger.info(f"========== NextBridge v{version} Starting ==========")
 
     driver_tasks: list[asyncio.Task] = []
     for platform, (_, driver_cls) in registry.items():

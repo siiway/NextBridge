@@ -41,7 +41,7 @@ class SignalConfig(_DriverConfig):
     api_url: str
     number: str
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()

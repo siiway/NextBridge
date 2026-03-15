@@ -41,7 +41,7 @@ class WebhookConfig(_DriverConfig):
     url: str
     method: Literal["POST", "PUT", "PATCH"] = "POST"
     headers: dict[str, str] = Field(default_factory=dict)
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()

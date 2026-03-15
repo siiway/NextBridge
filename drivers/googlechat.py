@@ -57,7 +57,7 @@ class GoogleChatConfig(_DriverConfig):
     listen_path: str = "/google-chat/events"
     endpoint_url: str = ""
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
     @model_validator(mode="after")
     def _require_creds(self) -> "GoogleChatConfig":

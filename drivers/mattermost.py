@@ -36,7 +36,7 @@ class MattermostConfig(_DriverConfig):
     server_url: str
     token: str
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -121,9 +121,8 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                                 try:
                                     await self._on_event(json.loads(msg.data), server)
                                 except Exception as e:
-                                    logger.error(
-                                        f"Mattermost [{self.instance_id}] "
-                                        f"handler error: {e}"
+                                    logger.exception(
+                                        f"Mattermost [{self.instance_id}] handler error"
                                     )
                             elif msg.type in (
                                 aiohttp.WSMsgType.CLOSE,
@@ -132,8 +131,8 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                             ):
                                 break
                 except aiohttp.ClientError as e:
-                    logger.error(
-                        f"Mattermost [{self.instance_id}] connection error: {e}"
+                    logger.exception(
+                        f"Mattermost [{self.instance_id}] connection error"
                     )
 
                 logger.info(f"Mattermost [{self.instance_id}] reconnecting in 5 s…")

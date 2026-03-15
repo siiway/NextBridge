@@ -36,9 +36,9 @@ class YunhuConfig(_DriverConfig):
     token: str = ""
     webhook_port: int = 8765
     webhook_path: str = "/yunhu-webhook"
-    proxy_host: str = ""
+    proxy_host: str = "https://yh-proxy.siiway.top"
     max_file_size: int = 10 * 1024 * 1024
-    proxy: str = UNSET
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
