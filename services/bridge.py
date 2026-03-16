@@ -216,6 +216,10 @@ class Bridge:
     # ------------------------------------------------------------------
 
     async def on_message(self, msg: NormalizedMessage):
+        logger.debug(
+            f"on_message: platform={msg.platform} instance={msg.instance_id} "
+            f"channel={msg.channel} user={msg.user!r} text={msg.text!r}"
+        )
         # Handle internal commands
         if msg.text.startswith("/bind"):
             await self._handle_bind_command(msg)
@@ -247,20 +251,34 @@ class Bridge:
 
         for rule in self._rules:
             if rule.get("type") == "connect":
-                if self._matches_channel(msg, rule.get("channels", {})):
+                matched = self._matches_channel(msg, rule.get("channels", {}))
+                logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
+                if matched:
                     await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:
                 if self._matches_from(msg, rule.get("from", {})):
                     await self._dispatch(msg, rule, bridge_id, reply_bridge_id)
 
     def _matches_channel(self, msg: NormalizedMessage, channels: dict) -> bool:
-        """Return True if *msg* originates from one of the channels in a connect rule."""
+        """Return True if *msg* originates from one of the channels in a connect rule.
+
+        Only keys that are present in msg.channel are compared — other keys in
+        the channel config block (e.g. webhook_url, msg_format) are skipped so
+        they do not interfere with address matching.
+        """
         if msg.instance_id not in channels:
             return False
-        for key, expected in channels[msg.instance_id].items():
-            if key == "msg":  # reserved — not a channel address field
+        rule_ch = channels[msg.instance_id]
+        for key, expected in rule_ch.items():
+            if key in ("msg",):  # reserved — not a channel address field
                 continue
-            if str(msg.channel.get(key, "")) != str(expected):
+            if key not in msg.channel:
+                continue  # config-only field (webhook_url, msg_format, …) — skip
+            if str(msg.channel[key]) != str(expected):
+                logger.debug(
+                    f"Channel match fail for {msg.instance_id}: "
+                    f"{key}={msg.channel[key]!r} != expected {expected!r}"
+                )
                 return False
         return True
 
@@ -269,7 +287,9 @@ class Bridge:
         if msg.instance_id not in from_cfg:
             return False
         for key, expected in from_cfg[msg.instance_id].items():
-            if str(msg.channel.get(key, "")) != str(expected):
+            if key not in msg.channel:
+                continue
+            if str(msg.channel[key]) != str(expected):
                 return False
         return True
 
@@ -391,7 +411,10 @@ class Bridge:
 
             # Skip echo based on strict_echo_match configuration
             if self._should_skip_echo(target_id, target_channel, msg):
+                logger.debug(f"Skipping echo to {target_id}")
                 continue
+
+            logger.debug(f"Dispatching to {target_id} channel={target_channel}")
 
             # Per-target msg overrides the global msg (target wins on conflict)
             merged_msg_cfg = {**global_msg_cfg, **target_cfg.get("msg", {})}

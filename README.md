@@ -1,4 +1,5 @@
 # NextBridge
+
 > The chat bridge that links up all the major chat platforms!
 
 Docs (English): https://nextbridge.siiway.org
@@ -6,11 +7,12 @@ Docs (English): https://nextbridge.siiway.org
 文档 (中文): https://nextbridge.siiway.org/zh
 
 ## To-Do List
+
  - [x] [Tencent QQ](https://im.qq.com) (with [NapCat](https://napneko.github.io))
  - [x] [Discord](https://discord.gg)
  - [x] [Telegram](https://telegram.org)
  - [x] [VoceChat](https://voce.chat)
- - [ ] ~~[WhatsApp](https://whatsapp.com)~~ - paused since there is no support for bot and no community implementations
+ - [x] [WhatsApp](https://whatsapp.com) (with [Neonize](https://github.com/krypton-byte/neonize))
  - [x] [DingTalk](https://dingtalk.com) - Not Tested
  - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
  - [ ] ~~[WeChat / WeiXin](https://weixin.qq.com)~~ - paused cuz i dont want to get my wechat account banned
@@ -28,10 +30,19 @@ Docs (English): https://nextbridge.siiway.org
  - [ ] [Viber](https://viber.com)
 
 ## Special Thanks
- - discord.py
+
  - NapCat
+ - discord.py
  - python-telegram-bot
  - mautrix-python
+ - lark-oapi
+ - alibabacloud-dingtalk
+ - khl-py
+ - yunhu
+ - slack-sdk
+ - google-auth
+ - neonize
 
 ## License
+
 GNU General Public License v3.0. See [LICENSE](./LICENSE) for details.

@@ -24,6 +24,7 @@
 | Mattermost | [Mattermost](/zh/drivers/mattermost) | ✅ | ✅ | WebSocket 接收；REST API 发送 |
 | Rocket.Chat | [Rocket.Chat](/zh/drivers/rocketchat) | ✅ | ✅ | Outgoing webhook 接收；REST API 或 incoming webhook 发送 |
 | Webhook | [Webhook](/zh/drivers/webhook) | ❌ | ✅ | 仅发送的通用 HTTP webhook |
+| WhatsApp | [WhatsApp](/zh/drivers/whatsapp) | ✅ | ✅ | 使用 neonize（go-whatsapp Python 绑定），无需 Node.js |
 
 ## 驱动器工作原理
 

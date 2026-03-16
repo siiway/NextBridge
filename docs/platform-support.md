@@ -20,7 +20,7 @@
 | **Mattermost** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | WebSocket receive; REST API send |
 | **Rocket.Chat** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Outgoing webhook receive; REST API or incoming webhook send |
 | **Webhook** | ⚠️ | ❌ | ✅ | - | - | ⚠️ | ⚠️ | Send-only generic HTTP webhook |
-| **WhatsApp** | ⏸️ | - | - | - | - | - | - | No public bot API or stable community libraries |
+| **WhatsApp** | ⚠️ | ⚠️ | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | Uses neonize (go-whatsapp); media received as text fallback |
 | **WeChat** | ⏸️ | - | - | - | - | - | - | High risk of account ban |
 | **Tailchat** | ❌ | - | - | - | - | - | - | Planned |
 | **Zulip** | ❌ | - | - | - | - | - | - | Planned |

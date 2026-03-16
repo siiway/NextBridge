@@ -20,7 +20,7 @@
 | **Mattermost** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | WebSocket 接收；REST API 发送 |
 | **Rocket.Chat** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Outgoing webhook 接收；REST API 或 incoming webhook 发送 |
 | **Webhook** | ⚠️ | ❌ | ✅ | - | - | ⚠️ | ⚠️ | 仅发送的通用 HTTP webhook |
-| **WhatsApp** | ⏸️ | - | - | - | - | - | - | 无公共 Bot API 或稳定的社区实现 |
+| **WhatsApp** | ⚠️ | ⚠️ | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | 使用 neonize（go-whatsapp）；媒体以文本回退形式接收 |
 | **微信** | ⏸️ | - | - | - | - | - | - | 账号封禁风险极高 |
 | **Tailchat** | ❌ | - | - | - | - | - | - | 计划中 |
 | **Zulip** | ❌ | - | - | - | - | - | - | 计划中 |

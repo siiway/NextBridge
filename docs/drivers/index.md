@@ -24,6 +24,7 @@ A **driver** is the adapter between NextBridge and a specific chat platform. Eac
 | Mattermost | [Mattermost](/drivers/mattermost) | ✅ | ✅ | WebSocket receive; REST API send |
 | Rocket.Chat | [Rocket.Chat](/drivers/rocketchat) | ✅ | ✅ | Outgoing webhook receive; REST API or incoming webhook send |
 | Webhook | [Webhook](/drivers/webhook) | ❌ | ✅ | Send-only generic HTTP webhook |
+| WhatsApp | [WhatsApp](/drivers/whatsapp) | ✅ | ✅ | Uses neonize (go-whatsapp bindings); no Node.js required |
 
 ## How drivers work
 
