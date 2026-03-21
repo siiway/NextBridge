@@ -336,6 +336,15 @@ wheels = [
 ]
 
 [[package]]
+name = "base58"
+version = "2.1.1"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/7f/45/8ae61209bb9015f516102fa559a2914178da1d5868428bd86a1b4421141d/base58-2.1.1.tar.gz", hash = "sha256:c5d0cb3f5b6e81e8e35da5754388ddcc6d0d14b6c6a132cb93d69ed580a7278c" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/4a/45/ec96b29162a402fc4c1c5512d114d7b3787b9d1c2ec241d9568b4816ee23/base58-2.1.1-py3-none-any.whl", hash = "sha256:11a36f4d3ce51dfc1043f3218591ac4eb1ceb172919cebe05b52a5bcc8d245c2" },
+]
+
+[[package]]
 name = "beautifulsoup4"
 version = "4.14.3"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -809,6 +818,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "aiohttp-socks" },
     { name = "alibabacloud-dingtalk" },
+    { name = "base58" },
     { name = "discord-py" },
     { name = "google-auth" },
     { name = "httpx", extra = ["socks"] },
@@ -818,12 +828,14 @@ dependencies = [
     { name = "mautrix" },
     { name = "neonize" },
     { name = "pydantic" },
+    { name = "python-olm" },
     { name = "python-telegram-bot" },
     { name = "pyyaml" },
     { name = "requests", extra = ["socks"] },
     { name = "slack-sdk" },
     { name = "sqlalchemy" },
     { name = "tomli-w" },
+    { name = "unpaddedbase64" },
     { name = "websockets" },
     { name = "yunhu" },
 ]
@@ -839,6 +851,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.10" },
     { name = "aiohttp-socks", specifier = ">=0.11.0" },
     { name = "alibabacloud-dingtalk", specifier = ">=2.2.38" },
+    { name = "base58", specifier = ">=2.1.1" },
     { name = "discord-py", specifier = ">=2.6.3" },
     { name = "google-auth", specifier = ">=2.0" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
@@ -848,12 +861,14 @@ requires-dist = [
     { name = "mautrix", specifier = ">=0.21.0" },
     { name = "neonize", specifier = ">=0.3.15" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "python-olm", specifier = ">=3.2.16" },
     { name = "python-telegram-bot", specifier = ">=22.6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "requests", extras = ["socks"], specifier = ">=2.32.5" },
     { name = "slack-sdk", specifier = ">=3.40.1" },
     { name = "sqlalchemy", specifier = ">=2.0.48" },
     { name = "tomli-w", specifier = ">=1.0" },
+    { name = "unpaddedbase64", specifier = ">=2.1.0" },
     { name = "websockets", specifier = ">=13.0" },
     { name = "yunhu", specifier = ">=0.0.11" },
 ]
@@ -879,17 +894,6 @@ version = "12.1.1"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/1f/42/5c74462b4fd957fcd7b13b04fb3205ff8349236ea74c7c375766d6c82288/pillow-12.1.1.tar.gz", hash = "sha256:9ad8fa5937ab05218e2b6a4cff30295ad35afd2f83ac592e68c0d871bb0fdbc4" }
 wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/07/d3/8df65da0d4df36b094351dce696f2989bec731d4f10e743b1c5f4da4d3bf/pillow-12.1.1-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:ab323b787d6e18b3d91a72fc99b1a2c28651e4358749842b8f8dfacd28ef2052" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/d6/71/5026395b290ff404b836e636f51d7297e6c83beceaa87c592718747e670f/pillow-12.1.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:adebb5bee0f0af4909c30db0d890c773d1a92ffe83da908e2e9e720f8edf3984" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/b1/2e/1001613d941c67442f745aff0f7cc66dd8df9a9c084eb497e6a543ee6f7e/pillow-12.1.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:bb66b7cc26f50977108790e2456b7921e773f23db5630261102233eb355a3b79" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/07/26/246ab11455b2549b9233dbd44d358d033a2f780fa9007b61a913c5b2d24e/pillow-12.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:aee2810642b2898bb187ced9b349e95d2a7272930796e022efaf12e99dccd293" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/b2/8b/07587069c27be7535ac1fe33874e32de118fbd34e2a73b7f83436a88368c/pillow-12.1.1-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a0b1cd6232e2b618adcc54d9882e4e662a089d5768cd188f7c245b4c8c44a397" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/ff/79/6df7b2ee763d619cda2fb4fea498e5f79d984dae304d45a8999b80d6cf5c/pillow-12.1.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7aac39bcf8d4770d089588a2e1dd111cbaa42df5a94be3114222057d68336bd0" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/2c/5e/2ba19e7e7236d7529f4d873bdaf317a318896bac289abebd4bb00ef247f0/pillow-12.1.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:ab174cd7d29a62dd139c44bf74b698039328f45cb03b4596c43473a46656b2f3" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/03/03/31216ec124bb5c3dacd74ce8efff4cc7f52643653bad4825f8f08c697743/pillow-12.1.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:339ffdcb7cbeaa08221cd401d517d4b1fe7a9ed5d400e4a8039719238620ca35" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/1f/e7/7c4552d80052337eb28653b617eafdef39adfb137c49dd7e831b8dc13bc5/pillow-12.1.1-cp312-cp312-win32.whl", hash = "sha256:5d1f9575a12bed9e9eedd9a4972834b08c97a352bd17955ccdebfeca5913fa0a" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/3d/17/688626d192d7261bbbf98846fc98995726bddc2c945344b65bec3a29d731/pillow-12.1.1-cp312-cp312-win_amd64.whl", hash = "sha256:21329ec8c96c6e979cd0dfd29406c40c1d52521a90544463057d2aaa937d66a6" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/ed/fe/a0ef1f73f939b0eca03ee2c108d0043a87468664770612602c63266a43c4/pillow-12.1.1-cp312-cp312-win_arm64.whl", hash = "sha256:af9a332e572978f0218686636610555ae3defd1633597be015ed50289a03c523" },
     { url = "https://mirrors.aliyun.com/pypi/packages/d5/11/6db24d4bd7685583caeae54b7009584e38da3c3d4488ed4cd25b439de486/pillow-12.1.1-cp313-cp313-ios_13_0_arm64_iphoneos.whl", hash = "sha256:d242e8ac078781f1de88bf823d70c1a9b3c7950a44cdf4b7c012e22ccbcd8e4e" },
     { url = "https://mirrors.aliyun.com/pypi/packages/33/c0/ce6d3b1fe190f0021203e0d9b5b99e57843e345f15f9ef22fcd43842fd21/pillow-12.1.1-cp313-cp313-ios_13_0_arm64_iphonesimulator.whl", hash = "sha256:02f84dfad02693676692746df05b89cf25597560db2857363a208e393429f5e9" },
     { url = "https://mirrors.aliyun.com/pypi/packages/a0/c6/d5eb6a4fb32a3f9c21a8c7613ec706534ea1cf9f4b3663e99f0d83f6fca8/pillow-12.1.1-cp313-cp313-ios_13_0_x86_64_iphonesimulator.whl", hash = "sha256:e65498daf4b583091ccbb2556c7000abf0f3349fcd57ef7adc9a84a394ed29f6" },
@@ -1184,6 +1188,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-olm"
+version = "3.2.16"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+dependencies = [
+    { name = "cffi" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/b8/eb/23ca73cbdc8c7466a774e515dfd917d9fbe747c1257059246fdc63093f04/python-olm-3.2.16.tar.gz", hash = "sha256:a1c47fce2505b7a16841e17694cbed4ed484519646ede96ee9e89545a49643c9" }
+
+[[package]]
 name = "python-socks"
 version = "2.8.1"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -1470,6 +1483,15 @@ dependencies = [
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/c2/14/e2a54fabd4f08cd7af1c07030603c3356b74da07f7cc056e600436edfa17/tzlocal-5.3.1-py3-none-any.whl", hash = "sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d" },
+]
+
+[[package]]
+name = "unpaddedbase64"
+version = "2.1.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/4d/f8/114266b21a7a9e3d09b352bb63c9d61d918bb7aa35d08c722793bfbfd28f/unpaddedbase64-2.1.0.tar.gz", hash = "sha256:7273c60c089de39d90f5d6d4a7883a79e319dc9d9b1c8924a7fab96178a5f005" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/4c/a7/563b2d8fb7edc07320bf69ac6a7eedcd7a1a9d663a6bb90a4d9bd2eda5f7/unpaddedbase64-2.1.0-py3-none-any.whl", hash = "sha256:485eff129c30175d2cd6f0cd8d2310dff51e666f7f36175f738d75dfdbd0b1c6" },
 ]
 
 [[package]]

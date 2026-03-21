@@ -12,6 +12,8 @@
 #   password      – Login password (required unless access_token is set)
 #   access_token  – Access token (alternative to password)
 #   max_file_size – Max bytes per attachment (default 50 MB)
+#   enable_e2e    – Enable end-to-end encryption support (default: False)
+#   store_path    – Path to store encryption keys (required if enable_e2e is True)
 #
 # Rule channel keys:
 #   room_id – Matrix room ID, e.g. "!abc123:matrix.org"
@@ -37,9 +39,11 @@ from mautrix.types import (
     VideoInfo,
 )
 from mautrix.api import HTTPAPI
+from mautrix.crypto import OlmMachine
 from typing import cast
 from aiohttp import ClientSession, TCPConnector
 from aiohttp_socks import ProxyConnector
+from pathlib import Path
 
 from pydantic import model_validator
 
@@ -58,11 +62,20 @@ class MatrixConfig(_DriverConfig):
     access_token: str = ""
     max_file_size: int = 10 * 1024 * 1024
     proxy: str | None = UNSET
+    enable_e2e: bool = False
+    store_path: str = "data/e2e"
+    connect_timeout: int = 30
 
     @model_validator(mode="after")
     def _require_auth(self) -> "MatrixConfig":
         if not self.password and not self.access_token:
             raise ValueError("requires 'password' or 'access_token'")
+        return self
+
+    @model_validator(mode="after")
+    def _require_e2e_store_path(self) -> "MatrixConfig":
+        if self.enable_e2e and not self.store_path:
+            raise ValueError("store_path is required when enable_e2e is True")
         return self
 
 
@@ -92,6 +105,8 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
     def __init__(self, instance_id: str, config: MatrixConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._client: Client | None = None
+        self._crypto: OlmMachine | None = None
+        self._crypto_store: CryptoStore | None = None
         self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
@@ -134,6 +149,77 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 logger.error(f"Matrix [{self.instance_id}] login failed: {e}")
                 return
 
+        # Initialize E2E encryption if enabled
+        if self.config.enable_e2e:
+            try:
+                import pickle
+                from contextlib import asynccontextmanager
+                from mautrix.crypto import StateStore
+                from mautrix.crypto.store import MemoryCryptoStore
+                from mautrix.client.state_store import MemoryStateStore
+
+                # Create a custom CryptoStore that overrides the transaction() method
+                class CustomCryptoStore(MemoryCryptoStore):
+                    @asynccontextmanager
+                    async def transaction(self):
+                        yield None
+
+                # Create a custom StateStore that adds the find_shared_rooms method
+                class CustomStateStore(MemoryStateStore):
+                    async def find_shared_rooms(self, user_id):
+                        # For now, return an empty list as we don't track shared rooms
+                        return []
+                
+                logger.info(f"Matrix [{self.instance_id}] Initializing E2E encryption...")
+                
+                # Create store directory if it doesn't exist
+                store_path = Path(self.config.store_path)
+                store_path.mkdir(parents=True, exist_ok=True)
+                logger.debug(f"Matrix [{self.instance_id}] E2E store path: {store_path}")
+                
+                # Initialize crypto store
+                logger.debug(f"Matrix [{self.instance_id}] Using in-memory crypto store")
+                self._crypto_store = CustomCryptoStore(
+                    account_id=user_id,
+                    pickle_key="nextbridge_e2e",
+                )
+                logger.debug(f"Matrix [{self.instance_id}] Crypto store initialized")
+
+                # Try to delete old crypto store data to avoid corrupted sessions
+                try:
+                    await self._crypto_store.delete()
+                    logger.debug(f"Matrix [{self.instance_id}] Old crypto store data deleted")
+                except Exception as e:
+                    logger.debug(f"Matrix [{self.instance_id}] No old crypto store data to delete: {e}")
+
+                # Initialize state store
+                logger.debug(f"Matrix [{self.instance_id}] Using in-memory state store")
+                self._state_store = CustomStateStore()
+                logger.debug(f"Matrix [{self.instance_id}] State store initialized")
+                
+                # Initialize Olm machine for E2E encryption
+                logger.debug(f"Matrix [{self.instance_id}] Initializing Olm machine...")
+                self._crypto = OlmMachine(
+                    client=self._client,
+                    crypto_store=self._crypto_store,
+                    state_store=self._state_store,
+                )
+                await self._crypto.load()
+                logger.debug(f"Matrix [{self.instance_id}] Olm machine initialized")
+                
+                # Set up state store and crypto on the client
+                self._client.state_store = self._state_store
+                self._client.crypto = self._crypto
+                
+                logger.info(f"Matrix [{self.instance_id}] E2E encryption enabled")
+            except Exception as e:
+                logger.opt(exception=True).error(f"Matrix [{self.instance_id}] E2E initialization failed: {e}")
+                logger.warning(f"Matrix [{self.instance_id}] continuing without E2E encryption")
+                self._crypto = None
+                self._crypto_store = None
+        else:
+            logger.info(f"Matrix [{self.instance_id}] E2E encryption is disabled")
+
         # Skip the initial sync batch so historical messages are not bridged
         self._client.ignore_first_sync = True
         self._client.ignore_initial_sync = True
@@ -141,6 +227,16 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         self._client.add_event_handler(
             EventType.ROOM_MESSAGE, cast(EventHandler, self._on_message)
         )
+        
+        # Add event handler for encrypted events
+        if self._crypto:
+            self._client.add_event_handler(
+                EventType.ROOM_ENCRYPTED, cast(EventHandler, self._on_encrypted_message)
+            )
+            # Add event handler for room key events (needed for E2E encryption)
+            self._client.add_event_handler(
+                EventType.TO_DEVICE_ENCRYPTED, cast(EventHandler, self._crypto.handle_to_device_event)
+            )
 
         # Register only after the client is fully ready so send() is never
         # called while self._client is None (e.g. after a config error above).
@@ -187,6 +283,38 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
     # ------------------------------------------------------------------
     # Receive
     # ------------------------------------------------------------------
+
+    async def _on_encrypted_message(self, event) -> None:
+        """Handle encrypted messages by decrypting them and processing the content."""
+        if not self._crypto:
+            logger.warning(f"Matrix [{self.instance_id}] Received encrypted message but E2E is not initialized")
+            return
+            
+        try:
+            # Decrypt the event
+            decrypted_event = await self._crypto.decrypt_megolm_event(event)
+            
+            # Convert to a regular MessageEvent and process
+            if decrypted_event:
+                # Create a mock MessageEvent with the decrypted content
+                from mautrix.types import MessageEvent, RoomID, UserID
+                
+                # Create a new event with decrypted content
+                decrypted_msg_event = MessageEvent(
+                    content=decrypted_event,
+                    type=EventType.ROOM_MESSAGE,
+                    room_id=RoomID(event.room_id),
+                    event_id=event.event_id,
+                    sender=UserID(event.sender),
+                    timestamp=event.timestamp,
+                )
+                
+                # Process the decrypted message
+                await self._on_message(decrypted_msg_event)
+            else:
+                logger.warning(f"Matrix [{self.instance_id}] Failed to decrypt event")
+        except Exception as e:
+            logger.opt(exception=True).error(f"Matrix [{self.instance_id}] Error decrypting message: {e}")
 
     async def _on_message(self, event: MessageEvent) -> None:
         if self._client and event.sender == self._client.mxid:
@@ -347,6 +475,8 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 else None
             )
             try:
+                # If E2E is enabled, the client will automatically encrypt messages
+                # to encrypted rooms. The crypto module handles this transparently.
                 if is_html:
                     await self._client.send_text(
                         room_id, text, html=html_text, relates_to=relates_obj
