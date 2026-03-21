@@ -12,7 +12,7 @@
 | **Yunhu** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | Webhook receive; open API send; **native mentions not yet supported** |
 | **KOOK** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | WebSocket receive; bot API send; uploads to KOOK CDN |
 | **VoceChat** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
-| **Matrix** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Client sync loop; no E2E encryption support yet |
+| **Matrix** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | E2E encryption supported when `enable_e2e` is enabled |
 | **Signal** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Requires signal-cli REST API |
 | **Microsoft Teams** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Bot Framework connector |
 | **Google Chat** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | REST API with service account |

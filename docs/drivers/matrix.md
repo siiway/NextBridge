@@ -24,7 +24,7 @@ Add under `matrix.<instance_id>` in your config file:
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
 | `proxy` | No | — | Proxy URL for all Matrix API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 | `enable_e2e` | No | `false` | Enable end-to-end encryption support for encrypted rooms. When enabled, the bot will automatically encrypt messages sent to encrypted rooms and decrypt received messages. |
-| `store_path` | No** | `data/e2e` | Path to store encryption keys (required if `enable_e2e` is `true`). This directory will be created if it doesn't exist. |
+| `store_path` | No | `data/e2e` | Path to store encryption keys (required if `enable_e2e` is `true`). This directory will be created if it doesn't exist. |
 
 \* Either `password` or `access_token` must be provided.
 \** Required when `enable_e2e` is `true`.
