@@ -106,7 +106,6 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         super().__init__(instance_id, config, bridge)
         self._client: Client | None = None
         self._crypto: OlmMachine | None = None
-        self._crypto_store: CryptoStore | None = None
         self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
@@ -152,7 +151,6 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         # Initialize E2E encryption if enabled
         if self.config.enable_e2e:
             try:
-                import pickle
                 from contextlib import asynccontextmanager
                 from mautrix.crypto import StateStore
                 from mautrix.crypto.store import MemoryCryptoStore
@@ -202,7 +200,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 self._crypto = OlmMachine(
                     client=self._client,
                     crypto_store=self._crypto_store,
-                    state_store=self._state_store,
+                    state_store=cast(StateStore, self._state_store),
                 )
                 await self._crypto.load()
                 logger.debug(f"Matrix [{self.instance_id}] Olm machine initialized")
