@@ -6,7 +6,7 @@ Docs (English): https://nextbridge.siiway.org
 
 文档 (中文): https://nextbridge.siiway.org/zh
 
-## To-Do List
+## Platform List
 
  - [x] [Tencent QQ](https://im.qq.com) (with [NapCat](https://napneko.github.io))
  - [x] [Discord](https://discord.gg)
@@ -28,6 +28,16 @@ Docs (English): https://nextbridge.siiway.org
  - [ ] [Zulip](https://zulip.com)
  - [ ] [LINE](https://line.me)
  - [ ] [Viber](https://viber.com)
+
+## To-Do List
+
+- [ ] custom prefix for mention binging function (and rename)
+- [ ] dc -> others: tenor.com link parse
+- [ ] qq -> others: live stickers
+- [ ] cross-platform reply fixes
+- [ ] mention control
+- [ ] `/recall` or `/rm` function for security
+- ...
 
 ## Special Thanks
 
