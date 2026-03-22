@@ -32,7 +32,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -42,7 +42,7 @@ class TeamsConfig(_DriverConfig):
     listen_port: int = 3978
     listen_path: str = "/api/messages"
     max_file_size: int = 20 * 1024 * 1024
-    proxy: str = ""
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -57,7 +57,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         self._session: aiohttp.ClientSession | None = None
         self._access_token: str = ""
         self._token_expires: float = 0.0
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle

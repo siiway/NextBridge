@@ -2,28 +2,30 @@
 
 # Platform Support Status
 
-| Platform | Status | Mentions | Replies | Media | Custom Proxy | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ⚠️ | |
-| **Discord** | ✅ | ✅ | ✅ | ✅ | ⚠️ | |
-| **Telegram** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
-| **VoceChat** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
-| **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ❌ | SDK doesn't support proxy |
-| **Yunhu** | ✅ | ❌ | ✅ | ✅ | ✅ | Native mentions not yet supported |
-| **KOOK** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
-| **DingTalk** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ❌ | SDK doesn't support proxy |
-| **Matrix** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | No E2E encryption support yet |
-| **Signal** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Microsoft Teams** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Google Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Mattermost** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **Rocket.Chat** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | |
-| **WhatsApp** | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | Uses neonize (go-whatsapp); media received as text fallback |
-| **WeChat** | ⏸️ | - | - | - | - | High risk of account ban |
-| **Tailchat** | ❌ | - | - | - | - | Planned |
-| **Zulip** | ❌ | - | - | - | - | Planned |
-| **LINE** | ❌ | - | - | - | - | Planned |
-| **Viber** | ❌ | - | - | - | - | Planned |
+| Platform | Status | Receive | Send | Mentions | Replies | Media | Custom Proxy | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Tencent QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | Uses unofficial NapCat WebSocket bridge |
+| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | Receive via bot gateway; send via webhook or bot |
+| **Telegram** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Uses long polling |
+| **Feishu / Lark** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | Webhook receive; IM API send; **SDK doesn't support proxy** |
+| **DingTalk** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | Webhook receive; Robot API send; **SDK doesn't support proxy** |
+| **Yunhu** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | Webhook receive; open API send; **native mentions not yet supported** |
+| **KOOK** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | WebSocket receive; bot API send; uploads to KOOK CDN |
+| **VoceChat** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
+| **Matrix** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | E2E encryption supported when `enable_e2e` is enabled |
+| **Signal** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Requires signal-cli REST API |
+| **Microsoft Teams** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Bot Framework connector |
+| **Google Chat** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | REST API with service account |
+| **Slack** | ⚠️ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ⚠️ | Socket Mode or Events API receive; bot or webhook send |
+| **Mattermost** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | WebSocket receive; REST API send |
+| **Rocket.Chat** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Outgoing webhook receive; REST API or incoming webhook send |
+| **Webhook** | ⚠️ | ❌ | ✅ | - | - | ⚠️ | ⚠️ | Send-only generic HTTP webhook |
+| **WhatsApp** | ⚠️ | ⚠️ | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | Uses neonize (go-whatsapp); media received as text fallback |
+| **WeChat** | ⏸️ | - | - | - | - | - | - | High risk of account ban |
+| **Tailchat** | ❌ | - | - | - | - | - | - | Planned |
+| **Zulip** | ❌ | - | - | - | - | - | - | Planned |
+| **LINE** | ❌ | - | - | - | - | - | - | Planned |
+| **Viber** | ❌ | - | - | - | - | - | - | Planned |
 
 ## Legend
 - ✅ **Supported**: Fully implemented and verified.

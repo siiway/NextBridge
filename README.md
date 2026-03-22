@@ -12,7 +12,7 @@ Docs (English): https://nextbridge.siiway.org
  - [x] [Discord](https://discord.gg)
  - [x] [Telegram](https://telegram.org)
  - [x] [VoceChat](https://voce.chat)
- - [x] [WhatsApp](https://whatsapp.com) (with [Neonize](https://github.com/krypton-byte/neonize)
+ - [x] [WhatsApp](https://whatsapp.com) (with [Neonize](https://github.com/krypton-byte/neonize))
  - [x] [DingTalk](https://dingtalk.com) - Not Tested
  - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
  - [ ] ~~[WeChat / WeiXin](https://weixin.qq.com)~~ - paused cuz i dont want to get my wechat account banned
@@ -31,10 +31,17 @@ Docs (English): https://nextbridge.siiway.org
 
 ## Special Thanks
 
- - discord.py
  - NapCat
+ - discord.py
  - python-telegram-bot
  - mautrix-python
+ - lark-oapi
+ - alibabacloud-dingtalk
+ - khl-py
+ - yunhu
+ - slack-sdk
+ - google-auth
+ - neonize
 
 ## License
 

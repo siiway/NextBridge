@@ -24,7 +24,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from services.db import msg_db
 from drivers import BaseDriver
 
@@ -35,7 +35,7 @@ from aiohttp_socks import ProxyConnector
 class KookConfig(_DriverConfig):
     token: str
     max_file_size: int = 25 * 1024 * 1024
-    proxy: str = ""
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -45,7 +45,7 @@ class KookDriver(BaseDriver[KookConfig]):
     def __init__(self, instance_id: str, config: KookConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._bot: khl.Bot | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -179,7 +179,7 @@ class KookDriver(BaseDriver[KookConfig]):
             if not att.url and att.data is None:
                 continue
 
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
             if not result:
                 label = att.name or att.url or ""
                 attachment_fragments.append(f"\n[{att.type.capitalize()}: {label}]")

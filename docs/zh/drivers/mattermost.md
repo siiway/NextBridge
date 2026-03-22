@@ -31,7 +31,7 @@ Mattermost 驱动器通过 **WebSocket API** 实时接收消息，通过 **REST 
 | `server_url` | 是 | — | Mattermost 服务器基础 URL，例如 `"https://mattermost.example.com"` |
 | `token` | 是 | — | 机器人令牌或个人访问令牌 |
 | `max_file_size` | 否 | `52428800`（50 MB）| 附件大小上限（字节） |
-| `proxy` | 否 | — | 所有 Mattermost API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。 |
+| `proxy` | 否 | — | 所有 Mattermost API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
 
 ```json
 {

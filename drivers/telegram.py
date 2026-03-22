@@ -32,14 +32,14 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 
 
 class TelegramConfig(_DriverConfig):
     bot_token: str
     max_file_size: int = 50 * 1024 * 1024
-    rich_header_host: str = ""
-    proxy: str = ""
+    rich_header_host: str = "https://richheader.siiway.top"
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -68,7 +68,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     def __init__(self, instance_id: str, config: TelegramConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._app: Application | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
@@ -136,8 +136,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app = None
 
     async def _on_error(self, _: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logger.exception(
-            "Telegram [%s] handler error", self.instance_id, exc_info=context.error
+        logger.opt(exception=True).exception(
+            "Telegram [%s] handler error", self.instance_id
         )
 
     # ------------------------------------------------------------------

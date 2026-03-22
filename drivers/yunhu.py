@@ -28,7 +28,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -36,9 +36,9 @@ class YunhuConfig(_DriverConfig):
     token: str = ""
     webhook_port: int = 8765
     webhook_path: str = "/yunhu-webhook"
-    proxy_host: str = ""
+    proxy_host: str = "https://yh-proxy.siiway.top"
     max_file_size: int = 10 * 1024 * 1024
-    proxy: str = ""
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -59,7 +59,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         super().__init__(instance_id, config, bridge)
         self._token: str = config.token
         self._session: aiohttp.ClientSession | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle

@@ -6,11 +6,13 @@ import sys
 from pathlib import Path
 
 from pydantic import ValidationError
+from tomllib import load as load_toml
 
 import services.error  # noqa: F401
 import services.logger as log
 import services.util as u
 import services.config_io as config_io
+from services.config_schema import GlobalConfig
 from services.bridge import bridge
 
 logger = log.get_logger()
@@ -38,19 +40,19 @@ def cmd_convert(src: str, dst: str) -> None:
     dst_path = Path(dst)
 
     if not src_path.is_file():
-        print(f"Error: source file not found: {src_path}", file=sys.stderr)
+        logger.error(f"Source file not found: {src_path}")
         sys.exit(1)
 
     try:
         data = config_io.load_config(src_path)
-    except Exception as e:
-        print(f"Error reading {src_path}: {e}", file=sys.stderr)
+    except:
+        logger.opt(exception=True).critical(f"Error reading {src_path}")
         sys.exit(1)
 
     try:
         config_io.save_config(data, dst_path)
-    except Exception as e:
-        print(f"Error writing {dst_path}: {e}", file=sys.stderr)
+    except:
+        logger.opt(exception=True).critical(f"Error reading {dst_path}")
         sys.exit(1)
 
     print(f"Converted {src_path} → {dst_path}")
@@ -82,7 +84,6 @@ async def main():
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
 
     # Validate database configuration
-    from services.config_schema import GlobalConfig
 
     try:
         validated_global = GlobalConfig.model_validate(global_config)
@@ -90,7 +91,15 @@ async def main():
         logger.opt(exception=exc).critical("Global configuration error")
         return
 
-    log.set_console_level(validated_global.log_level)
+    # Logging configuration
+    log.set_console_level(validated_global.log.level)
+    log.set_log_dir(validated_global.log.dir)
+    log.set_log_rotation(
+        rotation_size=validated_global.log.rotation_size,
+        retention_days=validated_global.log.retention_days,
+        compression=validated_global.log.compression,
+        file_level=validated_global.log.file_level,
+    )
 
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()
@@ -118,6 +127,17 @@ async def main():
         exc = task.exception()
         if exc is not None:
             logger.opt(exception=exc).error(f"Driver '{task.get_name()}' crashed")
+
+    try:
+        # get version info
+        with open('pyproject.toml', 'rb', encoding='utf-8') as f:
+            version: str = load_toml(f).get('project', {}).get('version', 'UNKNOWN')
+            f.close()
+    except:
+        logger.warning(f'Read version info failed', exc_info=True)
+        version = 'UNKNOWN'
+
+    logger.info(f"========== NextBridge v{version} Starting ==========")
 
     driver_tasks: list[asyncio.Task] = []
     for platform, (_, driver_cls) in registry.items():

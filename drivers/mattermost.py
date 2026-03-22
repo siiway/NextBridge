@@ -28,7 +28,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -36,7 +36,7 @@ class MattermostConfig(_DriverConfig):
     server_url: str
     token: str
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = ""
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -59,7 +59,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         self._bot_user_id: str = ""
         self._user_cache: dict[str, tuple[str, str]] = {}
         self._username_cache: dict[str, str] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -121,9 +121,8 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                                 try:
                                     await self._on_event(json.loads(msg.data), server)
                                 except Exception as e:
-                                    logger.error(
-                                        f"Mattermost [{self.instance_id}] "
-                                        f"handler error: {e}"
+                                    logger.exception(
+                                        f"Mattermost [{self.instance_id}] handler error"
                                     )
                             elif msg.type in (
                                 aiohttp.WSMsgType.CLOSE,
@@ -132,8 +131,8 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                             ):
                                 break
                 except aiohttp.ClientError as e:
-                    logger.error(
-                        f"Mattermost [{self.instance_id}] connection error: {e}"
+                    logger.exception(
+                        f"Mattermost [{self.instance_id}] connection error"
                     )
 
                 logger.info(f"Mattermost [{self.instance_id}] reconnecting in 5 s…")

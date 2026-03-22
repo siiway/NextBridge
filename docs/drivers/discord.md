@@ -20,12 +20,11 @@ Add under `discord.<instance_id>` in `config.json`:
 |---|---|---|---|
 | `bot_token` | No* | — | Discord bot token. Required for receiving messages and for `bot` send mode |
 | `send_method` | No | `webhook` | `"webhook"` or `"bot"` |
-| `webhook_url` | No | — | Default webhook URL for sending. Can be overridden per-rule via `msg` config (see below). |
 | `max_file_size` | No | `8388608` (8 MB) | Maximum bytes per attachment when sending |
 | `send_as_bot_when_using_cqface_emoji` | No | `false` | When `true`, messages containing `:cqface<id>:` tokens (emitted by the NapCat driver's `cqface_mode: "emoji"`) are sent via the bot instead of the webhook, even if `send_method` is `"webhook"`. Requires `bot_token`. |
-| `proxy` | No | — | Proxy URL for all Discord API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). When set, SSL verification is disabled for the proxy connection. |
+| `proxy` | No | — | Proxy URL for all Discord API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). When set, SSL verification is disabled for the proxy connection. Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
-\* At least `bot_token` (for receive) or a `webhook_url` (either in config or per-rule) must be provided.
+\* For receiving messages, `bot_token` must be provided. For webhook-only sending, only `webhook_url` in rules is required.
 
 ```json
 {
@@ -33,7 +32,6 @@ Add under `discord.<instance_id>` in `config.json`:
     "dc_main": {
       "bot_token": "your_bot_token",
       "send_method": "webhook",
-      "webhook_url": "https://discord.com/api/webhooks/ID/TOKEN",
       "max_file_size": 8388608,
       "proxy": "http://proxy.example.com:8080"
     }
@@ -67,12 +65,14 @@ Use under `channels` or `from`/`to` in `rules.json`:
 |---|---|
 | `server_id` | Discord guild (server) ID |
 | `channel_id` | Discord channel ID |
+| `webhook_url` | Webhook URL for this channel (required when using webhook send mode) |
 
 ```json
 {
   "dc_main": {
     "server_id": "1061629481267245086",
-    "channel_id": "1269706305661309030"
+    "channel_id": "1269706305661309030",
+    "webhook_url": "https://discord.com/api/webhooks/ID/TOKEN"
   }
 }
 ```
@@ -83,7 +83,6 @@ These can be placed in the rule's `msg` block and are picked up by the Discord d
 
 | Key | Description |
 |---|---|
-| `webhook_url` | Webhook URL for this specific rule. Overrides the `webhook_url` from driver config. Supports template variables. |
 | `webhook_msg_format` | Overrides `msg_format` when the message is sent via webhook. Supports the same template variables. |
 | `bot_msg_format` | Overrides `msg_format` when the message is sent via the bot (including when `send_as_bot_when_using_cqface_emoji` triggers). Supports the same template variables. |
 | `webhook_title` | Display name shown on the webhook message (`send_method: "webhook"` only) |

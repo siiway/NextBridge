@@ -30,7 +30,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from services.db import msg_db
 from drivers import BaseDriver
 
@@ -42,7 +42,7 @@ class NapCatConfig(_DriverConfig):
     file_send_mode: Literal["stream", "base64"] = "stream"
     cqface_mode: Literal["gif", "emoji"] = "gif"
     stream_threshold: int = 0
-    proxy: Optional[str] = None
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -102,7 +102,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         self._ws: Any = None  # websockets connection (type varies by version)
         # echo_id → Future; used to await responses for specific actions
         self._pending: dict[str, asyncio.Future] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle

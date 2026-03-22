@@ -14,9 +14,9 @@
 # Config keys (under discord.<instance_id>):
 #   bot_token     – Optional. Required for receive and bot-send mode.
 #   send_method   – "webhook" (default) | "bot"
-#   webhook_url   – Required when send_method == "webhook"
-#   max_file_size – Max bytes per attachment when sending (default 8 MB,
-#                   Discord webhook limit)
+#   max_file_size – Max bytes per attachment when sending (default 8 MB, Discord webhook limit)
+#
+# Note: webhook_url should be configured per channel in rules, not at instance level.
 
 from drivers.registry import register
 import io
@@ -34,17 +34,16 @@ import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
 from services.config_schema import _DriverConfig, CoercedBool
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
 class DiscordConfig(_DriverConfig):
     send_method: Literal["webhook", "bot"] = "webhook"
-    webhook_url: str = ""
     bot_token: str = ""
     max_file_size: int = 8 * 1024 * 1024
     send_as_bot_when_using_cqface_emoji: CoercedBool = False
-    proxy: str = ""
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -55,13 +54,12 @@ _CQFACE_RE = re.compile(r":cqface(\d+):")
 class DiscordDriver(BaseDriver[DiscordConfig]):
     def __init__(self, instance_id: str, config: DiscordConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        self.config = config
         self._client: discord.Client | None = None
         self._session: aiohttp.ClientSession | None = None
         self._send_method: str = config.send_method
-        self._webhook_url: str | None = config.webhook_url or None
         self._bot_token: str | None = config.bot_token or None
-        # Use local proxy if set, otherwise fall back to global proxy
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
         # face_id (str) → "<:name:id>" resolved Discord emoji string
         self._emoji_cache: dict[str, str] = {}
         # name → emoji_id index built lazily from discord_emojis.json
@@ -278,9 +276,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             and self._client is not None
         )
 
-        # Get webhook_url from rule msg config (kwargs), channel dict, or driver config
+        # Get webhook_url from rule msg config (kwargs) or channel dict
         webhook_url = (
-            kwargs.get("webhook_url") or channel.get("webhook_url") or self._webhook_url
+            kwargs.get("webhook_url") or channel.get("webhook_url")
         )
 
         # Resolve the send path first so we know which format override to apply
@@ -310,7 +308,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         if is_webhook_send:
             assert webhook_url is not None  # Type narrowing for type checker
-            return await self._send_webhook(text, attachments, webhook_url, **kwargs)
+            # Remove webhook_url from kwargs to avoid duplicate argument
+            webhook_kwargs = {k: v for k, v in kwargs.items() if k != "webhook_url"}
+            return await self._send_webhook(text, attachments, webhook_url, **webhook_kwargs)
         elif self._client is not None:
             return await self._send_bot(channel, text, attachments, **kwargs)
         else:
@@ -380,8 +380,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     logger.error(
                         f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
                     )
-        except Exception as e:
-            logger.error(f"Discord [{self.instance_id}] webhook exception: {e}")
+        except:
+            logger.exception(f"Discord [{self.instance_id}] webhook exception")
         return None
 
     async def _send_bot(
@@ -455,8 +455,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
             sent = await ch.send(**send_kwargs)
             return str(sent.id)
-        except Exception as e:
-            logger.error(f"Discord [{self.instance_id}] send error: {e}")
+        except:
+            logger.exception(f"Discord [{self.instance_id}] send error")
         return None
 
 

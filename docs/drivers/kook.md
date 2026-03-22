@@ -20,7 +20,7 @@ Add under `kook.<instance_id>` in `config.json`:
 |---|---|---|---|
 | `token` | Yes | — | Bot token from the KOOK developer portal |
 | `max_file_size` | No | `26214400` (25 MB) | Maximum bytes per attachment when uploading |
-| `proxy` | No | — | Proxy URL for all Kook API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+| `proxy` | No | — | Proxy URL for all Kook API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 
 ```json
