@@ -272,6 +272,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             else None,
             mentions=mentions,
             time=msg.date.isoformat() if msg.date else None,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(normalized)
 
@@ -362,13 +363,14 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     )
                     text = text.replace(f"@{html.escape(m['name'])}", link)
 
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         try:
             for att in attachments or []:
                 if not att.url and att.data is None:
                     continue
 
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if not result:
                     # Oversized or failed — append as text (escape if in HTML mode)

@@ -171,6 +171,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             if message.reference
             else None,
             mentions=mentions,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(msg)
 
@@ -286,10 +287,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             self._send_method == "webhook" and webhook_url is not None and not force_bot
         )
 
-        # Apply send-path-specific msg_format override if provided
-        fmt_key = "webhook_msg_format" if is_webhook_send else "bot_msg_format"
-        if fmt_key in kwargs:
-            text = kwargs[fmt_key]
+        # Note: webhook_msg_format and bot_msg_format are handled by bridge.py
+        # The 'text' parameter passed here is already formatted
 
         # Expand :cqface<id>: tokens into proper Discord custom emoji strings
         if has_cqface:
@@ -328,18 +327,47 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return None
 
         payload: dict = {"content": text}
+
+        # Format webhook_title and webhook_avatar if they are format strings
+        ctx = {
+            "platform": kwargs.get("platform"),
+            "instance_id": kwargs.get("instance_id"),
+            "from": kwargs.get("from"),
+            "user": kwargs.get("user"),
+            "user_id": kwargs.get("user_id"),
+            "user_avatar": kwargs.get("user_avatar"),
+            "msg": kwargs.get("msg"),
+            "time": kwargs.get("time"),
+        }
+
         if title := kwargs.get("webhook_title"):
-            payload["username"] = title
+            if isinstance(title, str) and "{" in title:
+                try:
+                    payload["username"] = title.format(**ctx)
+                except KeyError as e:
+                    logger.warning(f"webhook_title missing key {e}; using raw title")
+                    payload["username"] = title
+            else:
+                payload["username"] = title
+
         if avatar := kwargs.get("webhook_avatar"):
-            payload["avatar_url"] = avatar
+            if isinstance(avatar, str) and "{" in avatar:
+                try:
+                    payload["avatar_url"] = avatar.format(**ctx)
+                except KeyError as e:
+                    logger.warning(f"webhook_avatar missing key {e}; using raw avatar")
+                    payload["avatar_url"] = avatar
+            else:
+                payload["avatar_url"] = avatar
 
         # Download each attachment; collect as (bytes, mime, filename) triples
         files: list[tuple[bytes, str, str]] = []
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if result:
                 data_bytes, mime = result

@@ -274,6 +274,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             reply_parent=str(event.get("thread_ts", ""))
             if event.get("thread_ts")
             else None,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(normalized)
 

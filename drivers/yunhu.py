@@ -253,6 +253,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             attachments=attachments,
             message_id=str(mid) if mid else None,
             reply_parent=str(pid) if pid else None,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(msg)
 
@@ -314,13 +315,14 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 )
             )
 
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
             # Fetch the data first
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 label = att.name or att.url or ""

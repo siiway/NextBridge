@@ -131,6 +131,7 @@ class KookDriver(BaseDriver[KookConfig]):
             text=text,
             attachments=[],
             mentions=mentions,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(normalized)
 
@@ -175,11 +176,12 @@ class KookDriver(BaseDriver[KookConfig]):
         has_image = False
         attachment_fragments: list[str] = []
 
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(att, self.config.max_file_size, source_proxy)
             if not result:
                 label = att.name or att.url or ""
                 attachment_fragments.append(f"\n[{att.type.capitalize()}: {label}]")

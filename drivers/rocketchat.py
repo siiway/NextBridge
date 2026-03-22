@@ -191,6 +191,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             text=text,
             attachments=attachments,
             mentions=mentions,
+            source_proxy=self._proxy,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return web.json_response({})

@@ -175,6 +175,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             reply_parent=str(detail.get("parent_mid", ""))
             if detail.get("parent_mid")
             else None,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(normalized)
 
@@ -307,11 +308,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             if not first_msg_id:
                 first_msg_id = mid
 
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 label = att.name or att.url or ""

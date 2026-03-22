@@ -294,10 +294,16 @@ class Bridge:
         return True
 
     def _build_formatted(
-        self, msg: NormalizedMessage, msg_cfg: dict
+        self, msg: NormalizedMessage, msg_cfg: dict, is_webhook: bool = False
     ) -> tuple[str, dict]:
         """Return (formatted_text, extra_kwargs) for a given msg config block."""
-        fmt = msg_cfg.get("msg_format", '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}')
+        # Choose format based on send path
+        if is_webhook and "webhook_msg_format" in msg_cfg:
+            fmt = msg_cfg["webhook_msg_format"]
+        elif not is_webhook and "bot_msg_format" in msg_cfg:
+            fmt = msg_cfg["bot_msg_format"]
+        else:
+            fmt = msg_cfg.get("msg_format", '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}')
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
@@ -317,11 +323,18 @@ class Bridge:
         formatted, rich_header = _parse_richheader(formatted)
 
         extra: dict = {}
+        # Always pass the original message context to extra for drivers to use
+        extra.update(ctx)
+        # Pass source proxy for downloading attachments from source platform
+        extra["source_proxy"] = msg.source_proxy
         if rich_header is not None:
             rich_header["avatar"] = msg.user_avatar
             extra["rich_header"] = rich_header
         for k, v in msg_cfg.items():
-            if k == "msg_format":
+            # Skip msg_format and webhook/bot-specific format keys - they will be handled by the driver
+            if k in ("msg_format", "webhook_msg_format", "bot_msg_format"):
+                # Pass these format strings to extra without formatting - driver will handle them
+                extra[k] = v
                 continue
             try:
                 extra[k] = v.format(**ctx) if isinstance(v, str) else v
@@ -340,7 +353,12 @@ class Bridge:
         bridge_id: str,
         reply_bridge_id: str | None = None,
     ):
-        formatted, extra = self._build_formatted(msg, rule.get("msg", {}))
+        # Check if any target uses webhook
+        is_webhook = any(
+            "webhook_url" in ch
+            for ch in rule.get("to", {}).values()
+        )
+        formatted, extra = self._build_formatted(msg, rule.get("msg", {}), is_webhook=is_webhook)
 
         for target_id, target_channel in rule.get("to", {}).items():
             # Skip echo based on strict_echo_match configuration
@@ -420,10 +438,11 @@ class Bridge:
             merged_msg_cfg = {**global_msg_cfg, **target_cfg.get("msg", {})}
 
             # Ensure webhook_url is passed to extra if present in target_cfg
-            if "webhook_url" in target_cfg:
+            is_webhook = "webhook_url" in target_cfg
+            if is_webhook:
                 merged_msg_cfg["webhook_url"] = target_cfg["webhook_url"]
 
-            formatted, extra = self._build_formatted(msg, merged_msg_cfg)
+            formatted, extra = self._build_formatted(msg, merged_msg_cfg, is_webhook=is_webhook)
 
             if self._is_sensitive(formatted):
                 logger.warning(

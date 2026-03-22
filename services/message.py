@@ -30,3 +30,4 @@ class NormalizedMessage:
         default_factory=list
     )  # list of {"id": str, "name": str}
     time: str | None = None
+    source_proxy: str | None = None  # proxy URL for downloading attachments from source platform

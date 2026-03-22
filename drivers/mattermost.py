@@ -201,6 +201,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             text=text,
             attachments=attachments,
             mentions=mentions,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(normalized)
 

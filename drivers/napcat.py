@@ -210,6 +210,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             reply_parent=reply_id,
             mentions=mentions,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(msg)
 
@@ -545,13 +546,14 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             if last_idx < len(text):
                 segments.append({"type": "text", "data": {"text": text[last_idx:]}})
 
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
             if att.type == "image":
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if result:
                     data_bytes, _ = result
@@ -569,7 +571,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             elif att.type == "voice":
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if result:
                     data_bytes, _ = result
@@ -587,7 +589,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             elif att.type == "video":
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if result:
                     data_bytes, _ = result
@@ -622,7 +624,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             else:  # file
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if result:
                     data_bytes, _ = result
