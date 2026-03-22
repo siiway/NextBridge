@@ -16,7 +16,7 @@
 | 云湖 | [云湖](/zh/drivers/yunhu) | ✅ | ✅ | Webhook 接收；开放 API 发送 |
 | KOOK（开黑啦） | [KOOK](/zh/drivers/kook) | ✅ | ✅ | WebSocket 接收；机器人 API 发送；上传至 KOOK CDN |
 | VoceChat | [VoceChat](/zh/drivers/vocechat) | ✅ | ✅ | |
-| Matrix | [Matrix](/zh/drivers/matrix) | ✅ | ✅ | 客户端同步循环；暂不支持 E2E 加密 |
+| Matrix | [Matrix](/zh/drivers/matrix) | ✅ | ✅ | 客户端同步循环；启用 `enable_e2e` 时支持 E2E 加密 |
 | Signal | [Signal](/zh/drivers/signal) | ✅ | ✅ | 需要 signal-cli REST API |
 | Microsoft Teams | [Teams](/zh/drivers/teams) | ✅ | ✅ | Bot Framework 连接器 |
 | Google Chat | [Google Chat](/zh/drivers/googlechat) | ✅ | ✅ | 使用服务账号的 REST API |

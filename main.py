@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 import importlib
-import pkgutil
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -15,21 +15,24 @@ import services.config_io as config_io
 from services.config_schema import GlobalConfig
 from services.bridge import bridge
 
-import drivers as _drivers_pkg
-
 logger = log.get_logger()
 
 
-def _load_all_drivers() -> None:
+def _load_all_drivers(enabled_platforms: list[str]) -> None:
     """Import every module in the ``drivers/`` package.
 
     Each driver module calls ``drivers.registry.register()`` at import time,
     so this one pass is enough to populate the registry.  The ``registry``
     module itself is skipped to avoid a circular bootstrap.
     """
-    for _, mod_name, _ in pkgutil.iter_modules(_drivers_pkg.__path__):
-        if mod_name != "registry":
-            importlib.import_module(f"drivers.{mod_name}")
+    for platform in enabled_platforms:
+        module_name = f"drivers.{platform}"
+        if importlib.util.find_spec(module_name) is None:
+            logger.warning(
+                f"Driver module for platform '{platform}' not found, skipping."
+            )
+            continue
+        importlib.import_module(module_name)
 
 
 def cmd_convert(src: str, dst: str) -> None:
@@ -56,13 +59,6 @@ def cmd_convert(src: str, dst: str) -> None:
 
 
 async def main():
-    _load_all_drivers()
-    from drivers.registry import all_drivers
-
-    logger.info("NextBridge starting…")
-
-    bridge.load_rules()
-
     config_path = config_io.find_config(Path(u.get_data_path()))
     if config_path is None:
         logger.critical(
@@ -70,10 +66,18 @@ async def main():
         )
         return
 
+    bridge.load_rules()
+
     logger.info(f"Loading config from: {config_path}")
     raw: dict = config_io.load_config(config_path)
 
     bridge.load_sensitive_values(raw)
+
+    enabled_platforms = [key for key in raw.keys() if key != "global"]
+    _load_all_drivers(enabled_platforms)
+    from drivers.registry import all_drivers
+
+    logger.info("NextBridge starting…")
 
     # Load global configuration
     global_config = raw.get("global", {})

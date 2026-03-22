@@ -16,7 +16,7 @@ A **driver** is the adapter between NextBridge and a specific chat platform. Eac
 | Yunhu (云湖) | [Yunhu](/drivers/yunhu) | ✅ | ✅ | Webhook receive; open API send |
 | KOOK (开黑啦) | [KOOK](/drivers/kook) | ✅ | ✅ | WebSocket receive; bot API send; uploads to KOOK CDN |
 | VoceChat | [VoceChat](/drivers/vocechat) | ✅ | ✅ | |
-| Matrix | [Matrix](/drivers/matrix) | ✅ | ✅ | Client sync loop; no E2E encryption support yet |
+| Matrix | [Matrix](/drivers/matrix) | ✅ | ✅ | Client sync loop; E2E encryption supported when `enable_e2e` is enabled |
 | Signal | [Signal](/drivers/signal) | ✅ | ✅ | Requires signal-cli REST API |
 | Microsoft Teams | [Teams](/drivers/teams) | ✅ | ✅ | Bot Framework connector |
 | Google Chat | [Google Chat](/drivers/googlechat) | ✅ | ✅ | REST API with service account |
