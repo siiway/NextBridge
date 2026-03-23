@@ -24,7 +24,7 @@ VoceChat 驱动器将自托管的 [VoceChat](https://voce.chat/) 服务器与其
 
 对于每个需要桥接的频道，在 VoceChat 的频道设置中点击 **添加机器人**，选择对应的机器人。
 
-> Webhook 端点必须能从 VoceChat 服务器访问。开发阶段可使用反向代理或 ngrok。
+> Webhook 端点必须能从 VoceChat 服务器访问。开发阶段可使用反向代理或 ngrok / Cloudflare Tunnel。
 
 ## 配置项
 

@@ -80,6 +80,6 @@ The text portion (including any rich-header prefix) is sent first, then each att
 
 ## Notes
 
-- Yunhu must be able to reach the webhook URL from the internet. When running behind NAT, use a reverse proxy or a tunnel such as `ngrok`.
+- Yunhu must be able to reach the webhook URL from the internet. When running behind NAT, use a reverse proxy or a tunnel such as `ngrok / Cloudflare Tunnel`.
 - Each NextBridge instance binds a single port. If you have multiple Yunhu instances, give each a different `webhook_port`.
 - The bot token is sent as a query parameter (`?token=…`) on every outgoing request — keep it secret.

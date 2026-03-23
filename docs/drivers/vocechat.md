@@ -22,7 +22,7 @@ No extra Python packages are needed beyond what NextBridge already uses.
 
 For each channel the bot should bridge, go to the channel settings in VoceChat, click **Add Bot**, and select your bot.
 
-> The webhook endpoint must be reachable from the VoceChat server. Use a reverse proxy or ngrok for development.
+> The webhook endpoint must be reachable from the VoceChat server. Use a reverse proxy or ngrok / Cloudflare Tunnel for development.
 
 ## Config keys
 

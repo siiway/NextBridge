@@ -20,7 +20,7 @@ The Google Chat driver bridges Google Chat spaces with the rest of your platform
    - Under **Visibility**, choose which users or groups can install the bot.
 5. **Add the bot to a space**: In Google Chat, create or open a space, click *Add people & apps*, and add your bot by name.
 
-> The HTTP endpoint must be publicly reachable over HTTPS. Use a reverse proxy (nginx, Caddy) or a tunnel (ngrok) for development.
+> The HTTP endpoint must be publicly reachable over HTTPS. Use a reverse proxy (nginx, Caddy) or a tunnel (ngrok / Cloudflare Tunnel) for development.
 
 ## Config keys
 

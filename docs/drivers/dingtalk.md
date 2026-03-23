@@ -14,7 +14,7 @@ The DingTalk driver receives messages via an HTTP webhook (outgoing robot) and s
 6. Add the bot to the target group.
 
 ::: warning Public endpoint required
-DingTalk must be able to reach your HTTP endpoint from the internet. Use a reverse proxy, tunnel (e.g. ngrok), or deploy on a public server.
+DingTalk must be able to reach your HTTP endpoint from the internet. Use a reverse proxy, tunnel (e.g. ngrok / Cloudflare Tunnel), or deploy on a public server.
 :::
 
 ## Config keys

@@ -10,7 +10,7 @@ The Teams driver bridges Microsoft Teams with the rest of your platforms using t
 2. On the bot resource, note the **Application (client) ID** and create a **client secret** under *Certificates & secrets*.
 3. Under *Channels*, add the **Microsoft Teams** channel.
 4. Set the bot's **Messaging endpoint** to `https://<your-host>:<listen_port><listen_path>`.
-   The endpoint must be publicly reachable over HTTPS (use a reverse proxy such as nginx or a tunnel like ngrok for development).
+   The endpoint must be publicly reachable over HTTPS (use a reverse proxy such as nginx or a tunnel like ngrok / Cloudflare Tunnel for development).
 
 ## Config keys
 

@@ -20,7 +20,7 @@ Google Chat 驱动器通过**服务账号**和 **Google Chat REST API** 将 Goog
    - 在 **可见性** 下选择可安装该机器人的用户或群组。
 5. **将机器人添加到空间**：在 Google Chat 中创建或打开一个空间，点击 *添加用户和应用*，按名称添加机器人。
 
-> HTTP 端点必须通过 HTTPS 公开可访问。开发阶段可使用 nginx/Caddy 反向代理或 ngrok 隧道工具。
+> HTTP 端点必须通过 HTTPS 公开可访问。开发阶段可使用 nginx/Caddy 反向代理或 ngrok / Cloudflare Tunnel 隧道工具。
 
 ## 配置项
 

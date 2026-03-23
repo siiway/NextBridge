@@ -15,10 +15,10 @@ Docs (English): https://nextbridge.siiway.org
  - [x] [WhatsApp](https://whatsapp.com) (with [Neonize](https://github.com/krypton-byte/neonize))
  - [x] [DingTalk](https://dingtalk.com) - Not Tested
  - [x] [Feishu](https://feishu.cn) and [Lark](https://larksuite.com)
- - [ ] ~~[WeChat / WeiXin](https://weixin.qq.com)~~ - paused cuz i dont want to get my wechat account banned
+ - [ ] ~~[WeChat / WeiXin](https://weixin.qq.com)~~ - paused cuz i *(nt)* dont want to get my wechat account banned
  - [x] [Yunhu](https://www.yhchat.com/)
  - [x] [Kook](https://www.kookapp.cn/)
- - [x] [Matrix](https://matrix.org) - No E2E though
+ - [x] [Matrix](https://matrix.org)
  - [x] [Signal](https://signal.org) - Not Tested
  - [x] [Microsoft Teams](https://teams.microsoft.com) - Not Tested
  - [x] [Google Chat](https://chat.google.com) - Not Tested
@@ -31,12 +31,20 @@ Docs (English): https://nextbridge.siiway.org
 
 ## To-Do List
 
-- [ ] custom prefix for mention binging function (and rename)
-- [ ] dc -> others: tenor.com link parse
-- [ ] qq -> others: live stickers
 - [ ] cross-platform reply fixes
-- [ ] mention control
+- [ ] better richheader page
+- [ ] dc -> others: tenor.com link parse
 - [ ] `/recall` or `/rm` function for security
+- [ ] qq -> others: cqface mapping to unicode emojis
+- [ ] custom prefix for mention binging function (and rename)
+- [ ] mention control
+- [ ] qq -> others: live stickers
+- [ ] message delete / recall events forwarding with config
+- [ ] message edit events forwarding with config
+- [ ] only use 1 web server (fastapi) for incoming requests
+- [ ] incoming webhook
+- [ ] webhook custom payload (incoming & outgoing)
+- [ ] websocket driver
 - ...
 
 ## Special Thanks
@@ -56,9 +64,3 @@ Docs (English): https://nextbridge.siiway.org
 ## License
 
 GNU General Public License v3.0. See [LICENSE](./LICENSE) for details.
-
-## Thanks
-
-### [neonize](https://github.com/krypton-byte/neonize)
-
-Licensed under Apache-2.0 license.

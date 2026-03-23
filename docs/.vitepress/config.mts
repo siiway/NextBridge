@@ -77,6 +77,18 @@ export default defineConfig({
     hostname: "https://nextbridge.siiway.org",
   },
 
+  head: [
+    ["meta", { name: "theme-color", content: "#0078d4" }],
+    [
+      "link",
+      {
+        rel: "icon",
+        type: "image/svg+xml",
+        href: "https://icons.siiway.org/nextbridge/icon.svg",
+      },
+    ],
+  ],
+
   locales: {
     root: {
       label: 'English',
@@ -122,5 +134,13 @@ export default defineConfig({
     socialLinks: [
       { icon: 'github', link: 'https://github.com/siiway/NextBridge' },
     ],
+    logo: {
+      light: "https://icons.siiway.org/nextbridge/icon.svg",
+      dark: "https://icons.siiway.org/nextbridge/icon.svg",
+      alt: "NextBridge",
+    },
+    search: {
+      provider: "local",
+    },
   },
 })

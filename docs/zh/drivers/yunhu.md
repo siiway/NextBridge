@@ -80,6 +80,6 @@
 
 ## 注意事项
 
-- 云湖必须能够从外网访问 Webhook 地址。若运行在 NAT 环境后，请使用反向代理或 `ngrok` 等隧道工具。
+- 云湖必须能够从外网访问 Webhook 地址。若运行在 NAT 环境后，请使用反向代理或 `ngrok / Cloudflare Tunnel` 等隧道工具。
 - 每个 NextBridge 实例绑定一个独立端口。如果配置了多个云湖实例，请为每个实例设置不同的 `webhook_port`。
 - 机器人 Token 以查询参数（`?token=…`）形式随每次发送请求发出，请妥善保管。

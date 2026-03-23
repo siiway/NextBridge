@@ -39,7 +39,7 @@ Feishu pushes events to an HTTP endpoint you expose. The driver starts an aiohtt
 6. Publish the app version and add the bot to the target group chat.
 
 ::: warning Public endpoint required
-Feishu must be able to reach your HTTP endpoint from the internet. Use a reverse proxy, tunnel (e.g. ngrok), or deploy on a public server.
+Feishu must be able to reach your HTTP endpoint from the internet. Use a reverse proxy, tunnel (e.g. ngrok / Cloudflare Tunnel), or deploy on a public server.
 :::
 
 ### Long connection / WebSocket
