@@ -408,7 +408,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     logger.error(
                         f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
                     )
-        except:
+        except Exception:
             logger.exception(f"Discord [{self.instance_id}] webhook exception")
         return None
 
@@ -483,7 +483,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
             sent = await ch.send(**send_kwargs)
             return str(sent.id)
-        except:
+        except Exception:
             logger.exception(f"Discord [{self.instance_id}] send error")
         return None
 

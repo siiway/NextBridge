@@ -45,13 +45,13 @@ def cmd_convert(src: str, dst: str) -> None:
 
     try:
         data = config_io.load_config(src_path)
-    except:
+    except Exception:
         logger.opt(exception=True).critical(f"Error reading {src_path}")
         sys.exit(1)
 
     try:
         config_io.save_config(data, dst_path)
-    except:
+    except Exception:
         logger.opt(exception=True).critical(f"Error reading {dst_path}")
         sys.exit(1)
 
@@ -133,7 +133,7 @@ async def main():
         with open('pyproject.toml', 'rb') as f:
             version: str = load_toml(f).get('project', {}).get('version', 'UNKNOWN')
             f.close()
-    except:
+    except Exception:
         logger.opt(exception=True).warning('Read version info failed')
         version = 'UNKNOWN'
 

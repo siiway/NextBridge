@@ -115,7 +115,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
     async def _handle_http(self, request: web.Request) -> web.Response:
         try:
             body: dict = await request.json()
-        except:
+        except Exception:
             return web.json_response({"message": "bad request"}, status=400)
 
         if self.config.signing_secret:
@@ -194,7 +194,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
 
         try:
             token = await self._get_access_token()
-        except:
+        except Exception:
             logger.exception(f"DingTalk [{self.instance_id}] access token error")
             return
 
@@ -288,7 +288,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                     req, headers, util_models.RuntimeOptions()
                 ),
             )
-        except:
+        except Exception:
             logger.exception(f"DingTalk [{self.instance_id}] send failed (msg {msg_key})")
 
     async def _upload_media(
@@ -319,7 +319,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                     f"DingTalk [{self.instance_id}] media upload failed "
                     f"HTTP {resp.status}: {body[:200]}"
                 )
-        except:
+        except Exception:
             logger.exception(f"DingTalk [{self.instance_id}] media upload error")
         return None
 

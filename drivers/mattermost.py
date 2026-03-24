@@ -120,7 +120,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 try:
                                     await self._on_event(json.loads(msg.data), server)
-                                except Exception as e:
+                                except Exception:
                                     logger.exception(
                                         f"Mattermost [{self.instance_id}] handler error"
                                     )
@@ -130,7 +130,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                                 aiohttp.WSMsgType.CLOSED,
                             ):
                                 break
-                except aiohttp.ClientError as e:
+                except aiohttp.ClientError:
                     logger.exception(
                         f"Mattermost [{self.instance_id}] connection error"
                     )

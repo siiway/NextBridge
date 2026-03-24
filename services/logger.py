@@ -42,8 +42,6 @@ def replace_sensitive(msg: str) -> str:
         if secret in msg:
             msg = msg.replace(secret, "***")
     return msg
-
-
 def _masking_filter(record: "loguru.Record") -> bool:
     """Redact sensitive values from every log record before emission."""
     if _sensitive:
@@ -53,9 +51,19 @@ def _masking_filter(record: "loguru.Record") -> bool:
     return True
 
 
+_LEVEL_NAME_MAP = {
+    "DEBUG": "DBG",
+    "INFO": "INF",
+    "WARNING": "WRN",
+    "ERROR": "ERR",
+    "CRITICAL": "CRT",
+}
+def _format_level_name(record: "loguru.Record") -> str:
+    return _LEVEL_NAME_MAP.get(record["level"].name, record["level"].name[:3])
+
 _CONSOLE_FORMAT = (
     "<dim>[{time:YYYY-MM-DD HH:mm:ss}]</dim> "
-    "<level>[{level.name:.3}]</level> "
+    "<level>[{_format_level_name}]</level> "
     "| <dim>{file}:{line}</dim> | {message}"
 )
 _FILE_FORMAT = (
