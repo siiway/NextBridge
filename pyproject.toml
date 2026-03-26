@@ -38,8 +38,10 @@ url = "https://mirrors.aliyun.com/pypi/simple/"
 line-length = 88
 indent-width = 4
 
-[dependency-groups]
-dev = [
-    "ruff>=0.15.6",
-    "ty>=0.0.23",
+[tool.ruff.lint]
+ignore = [
+    "E741", # Ambiguous variable name: l / O / I
 ]
+
+[dependency-groups]
+dev = ["ruff>=0.15.6", "ty>=0.0.23"]

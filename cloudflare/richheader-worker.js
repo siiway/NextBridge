@@ -47,7 +47,12 @@ export default {
   ${content ? `<meta property="og:title" content="${e(content)}">` : ''}
   ${avatar  ? `<meta property="og:image"       content="${e(avatar)}">` : ''}
 </head>
-<body>There is nothing here.</body>
+<body style="font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 40px; max-width: 600px; margin: 0 auto;">
+    ${avatar ? `<img src="${e(avatar)}" alt="Avatar" style="width: 128px; height: 128px; border-radius: 50%; margin-bottom: 20px;">` : ''}
+    ${title ? `<h1 style="margin: 0 0 10px 0; color: #333;">${e(title)}</h1>` : ''}
+    ${content ? `<p style="margin: 0; color: #666;">${e(content)}</p>` : ''}
+    <p style="margin-top: 40px; font-size: 14px; color: #999;">This page is used for Open Graph meta tags (richheader) only.</p>
+</body>
 </html>`;
 
     return new Response(html, {
