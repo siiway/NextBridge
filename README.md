@@ -2,9 +2,9 @@
 
 > The chat bridge that links up all the major chat platforms!
 
-Docs (English): https://nextbridge.siiway.org
+**Docs (English): <https://nextbridge.siiway.org>**
 
-文档 (中文): https://nextbridge.siiway.org/zh
+**文档 (中文): <https://nextbridge.siiway.org/zh>**
 
 ## Platform List
 
@@ -31,22 +31,9 @@ Docs (English): https://nextbridge.siiway.org
 
 ## To-Do List
 
-- [ ] cross-platform reply fixes
-- [ ] better richheader page
-- [ ] 
-- [ ] dc -> others: tenor.com link parse
-- [ ] `/recall` or `/rm` function for security
-- [ ] qq -> others: cqface mapping to unicode emojis
-- [ ] custom prefix for mention binging function (and rename)
-- [ ] mention control
-- [ ] qq -> others: live stickers
-- [ ] message delete / recall events forwarding with config
-- [ ] message edit events forwarding with config
-- [ ] only use 1 web server (fastapi) for incoming requests
-- [ ] incoming webhook
-- [ ] webhook custom payload (incoming & outgoing)
-- [ ] websocket driver
-- ...
+**See <https://glint.siiway.org/shared/58f09c61cf844a2393dcefad1263fe45>**
+
+[![Todo](https://glint.siiway.org/api/shared/58f09c61cf844a2393dcefad1263fe45/todo-list.svg?theme=dark&maxItems=25)](https://glint.siiway.org/shared/58f09c61cf844a2393dcefad1263fe45)
 
 ## Special Thanks
 

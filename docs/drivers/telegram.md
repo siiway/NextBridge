@@ -20,6 +20,7 @@ Add under `telegram.<instance_id>` in `config.json`:
 | `bot_token` | Yes | — | Bot token from @BotFather |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
 | `rich_header_host` | No | — | Base URL of your Cloudflare rich-header worker (see [Rich Header](#rich-header)) |
+| `avatar_proxy_host` | No | — | Base URL of your Cloudflare avatar proxy worker (see [Avatar Proxy](#avatar-proxy)) |
 | `proxy` | No | — | Proxy URL for all Telegram API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
@@ -28,7 +29,8 @@ Add under `telegram.<instance_id>` in `config.json`:
     "tg_main": {
       "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
       "max_file_size": 52428800,
-      "rich_header_host": "https://richheader.yourname.workers.dev"
+      "rich_header_host": "https://richheader.yourname.workers.dev",
+      "avatar_proxy_host": "https://tg-avatar-proxy.yourname.workers.dev"
     }
   }
 }
@@ -108,6 +110,24 @@ We provide a public endpoint, `https://richheader.siiway.top`. Feel free to use 
 |---|---|
 | `rich_header_host` is not set | Bold/italic HTML header prepended to the message text |
 | Message includes media attachments | Same bold/italic HTML fallback (Telegram captions cannot carry link previews) |
+
+## Avatar Proxy
+
+When `avatar_proxy_host` is configured, NextBridge uses a Cloudflare Worker to proxy Telegram user avatars, avoiding exposure of the bot token in URLs. The worker only serves avatar images (jpeg, png, gif, webp) from paths starting with `photos/` or `profile_photos/`.
+
+### Cloudflare Worker setup
+
+1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create**.
+2. Paste the contents of [`cloudflare/tg-avatar-proxy.js`](https://github.com/siiway/NextBridge/blob/main/cloudflare/tg-avatar-proxy.js) into the editor and deploy.
+3. Set the `BOT_TOKEN` environment variable in the worker settings (use the same bot token as your Telegram instance).
+4. Copy the worker's URL (e.g. `https://tg-avatar-proxy.yourname.workers.dev`).
+5. Set `avatar_proxy_host` in your Telegram instance config to that URL.
+
+### Fallback behaviour
+
+| Condition | Behaviour |
+|---|---|
+| `avatar_proxy_host` is not set | Avatar URLs are not included in messages |
 
 ## Notes
 

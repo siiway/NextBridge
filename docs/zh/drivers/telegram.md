@@ -20,6 +20,7 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
 | `bot_token` | 是 | — | 来自 @BotFather 的 Bot Token |
 | `max_file_size` | 否 | `52428800`（50 MB） | 发送附件时单个文件的最大字节数 |
 | `rich_header_host` | 否 | — | Cloudflare 富头部 Worker 的基础 URL（见 [富头部](#富头部)） |
+| `avatar_proxy_host` | 否 | — | Cloudflare 头像代理 Worker 的基础 URL（见 [头像代理](#头像代理)） |
 | `proxy` | 否 | — | 所有 Telegram API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
 
 ```json
@@ -28,7 +29,8 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
     "tg_main": {
       "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
       "max_file_size": 52428800,
-      "rich_header_host": "https://richheader.yourname.workers.dev"
+      "rich_header_host": "https://richheader.yourname.workers.dev",
+      "avatar_proxy_host": "https://tg-avatar-proxy.yourname.workers.dev"
     }
   }
 }
@@ -108,6 +110,24 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
 |---|---|
 | 未配置 `rich_header_host` | 加粗/斜体 HTML 头部文字附加在消息文本前 |
 | 消息包含媒体附件 | 同上（Telegram 的媒体 Caption 不支持链接预览） |
+
+## 头像代理
+
+当配置了 `avatar_proxy_host` 时，NextBridge 会使用 Cloudflare Worker 代理 Telegram 用户头像，避免在 URL 中暴露 bot token。该 Worker 仅提供头像图片（jpeg、png、gif、webp），且只允许访问以 `photos/` 或 `profile_photos/` 开头的路径。
+
+### Cloudflare Worker 部署步骤
+
+1. 进入 [Cloudflare 控制台](https://dash.cloudflare.com/) → **Workers & Pages** → **创建**。
+2. 将 [`cloudflare/tg-avatar-proxy.js`](https://github.com/siiway/NextBridge/blob/main/cloudflare/tg-avatar-proxy.js) 的内容粘贴到编辑器中并部署。
+3. 在 Worker 设置中添加 `BOT_TOKEN` 环境变量（使用与 Telegram 实例相同的 bot token）。
+4. 复制 Worker 的 URL（如 `https://tg-avatar-proxy.yourname.workers.dev`）。
+5. 将该 URL 设置为 Telegram 实例配置中的 `avatar_proxy_host`。
+
+### 回退行为
+
+| 条件 | 行为 |
+|---|---|
+| 未配置 `avatar_proxy_host` | 消息中不包含头像 URL |
 
 ## 注意事项
 

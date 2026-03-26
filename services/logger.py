@@ -50,22 +50,20 @@ def _masking_filter(record: "loguru.Record") -> bool:
         record["message"] = msg
     return True
 
-
-_LEVEL_NAME_MAP = {
-    "DEBUG": "DBG",
-    "INFO": "INF",
-    "WARNING": "WRN",
-    "ERROR": "ERR",
-    "CRITICAL": "CRT",
-}
-def _format_level_name(record: "loguru.Record") -> str:
-    return _LEVEL_NAME_MAP.get(record["level"].name, record["level"].name[:3])
+# Custom logging level icons
+logger.level("TRACE", icon="TRC")
+logger.level("DEBUG", icon="DBG")
+logger.level("INFO", icon="INF")
+logger.level("WARNING", icon="WRN")
+logger.level("ERROR", icon="ERR")
+logger.level("CRITICAL", icon="CRT")
 
 _CONSOLE_FORMAT = (
     "<dim>[{time:YYYY-MM-DD HH:mm:ss}]</dim> "
-    "<level>[{_format_level_name}]</level> "
+    "<level>[{level.icon}]</level> "
     "| <dim>{file}:{line}</dim> | {message}"
 )
+
 _FILE_FORMAT = (
     "[{time:YYYY-MM-DD HH:mm:ss}] [{level}] | {file}:{line} | {message}{exception}"
 )
