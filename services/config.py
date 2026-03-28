@@ -28,7 +28,9 @@ def stable_rule_hash(rule: dict) -> str:
     sanitized = _strip_msg_blocks(rule)
     if isinstance(sanitized, dict):
         sanitized.pop("id", None)
-    raw = json.dumps(sanitized, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    raw = json.dumps(
+        sanitized, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
