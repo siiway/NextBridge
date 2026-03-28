@@ -130,12 +130,12 @@ async def main():
 
     try:
         # get version info
-        with open('pyproject.toml', 'rb') as f:
-            version: str = load_toml(f).get('project', {}).get('version', 'UNKNOWN')
+        with open("pyproject.toml", "rb") as f:
+            version: str = load_toml(f).get("project", {}).get("version", "UNKNOWN")
             f.close()
     except Exception:
-        logger.opt(exception=True).warning('Read version info failed')
-        version = 'UNKNOWN'
+        logger.opt(exception=True).warning("Read version info failed")
+        version = "UNKNOWN"
 
     logger.info(f"========== NextBridge v{version} Starting ==========")
 

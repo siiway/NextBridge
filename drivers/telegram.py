@@ -192,7 +192,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         user_avatar = ""
         if from_user and self._app:
             try:
-                photos = await self._app.bot.get_user_profile_photos(user_id=int(user_id), limit=1)
+                photos = await self._app.bot.get_user_profile_photos(
+                    user_id=int(user_id), limit=1
+                )
                 if photos.photos:
                     photo = photos.photos[0][-1]  # Get the largest size
                     f = await photo.get_file()
@@ -203,29 +205,42 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         # file_path should be a relative path like 'photos/file_6.jpg'
                         # If it's a full URL, extract the photos/ or profile_photos/ part
                         file_path = f.file_path
-                        logger.debug(f"Telegram [{self.instance_id}] original file_path: {file_path}")
-                        if file_path.startswith('http'):
+                        logger.debug(
+                            f"Telegram [{self.instance_id}] original file_path: {file_path}"
+                        )
+                        if file_path.startswith("http"):
                             from urllib.parse import urlparse
+
                             parsed = urlparse(file_path)
-                            path = parsed.path.lstrip('/')
-                            logger.debug(f"Telegram [{self.instance_id}] parsed path: {path}")
+                            path = parsed.path.lstrip("/")
+                            logger.debug(
+                                f"Telegram [{self.instance_id}] parsed path: {path}"
+                            )
                             # Extract the part after 'bot<token>/'
-                            parts = path.split('/')
-                            logger.debug(f"Telegram [{self.instance_id}] path parts: {parts}")
+                            parts = path.split("/")
+                            logger.debug(
+                                f"Telegram [{self.instance_id}] path parts: {parts}"
+                            )
                             if len(parts) >= 2:
                                 # Find the index of 'photos' or 'profile_photos'
                                 for i, part in enumerate(parts):
-                                    if part in ('photos', 'profile_photos'):
-                                        file_path = '/'.join(parts[i:])
-                                        logger.debug(f"Telegram [{self.instance_id}] extracted file_path: {file_path}")
+                                    if part in ("photos", "profile_photos"):
+                                        file_path = "/".join(parts[i:])
+                                        logger.debug(
+                                            f"Telegram [{self.instance_id}] extracted file_path: {file_path}"
+                                        )
                                         break
-                        logger.debug(f"Telegram [{self.instance_id}] final avatar URL: {host}/file/{file_path}")
+                        logger.debug(
+                            f"Telegram [{self.instance_id}] final avatar URL: {host}/file/{file_path}"
+                        )
                         user_avatar = f"{host}/file/{file_path}"
                     elif f.file_path:
                         # Fallback: use direct Telegram API URL
                         user_avatar = f.file_path
             except Exception as e:
-                logger.warning(f"Telegram [{self.instance_id}] failed to fetch avatar for user {user_id}: {e}")
+                logger.warning(
+                    f"Telegram [{self.instance_id}] failed to fetch avatar for user {user_id}: {e}"
+                )
 
         attachments: list[Attachment] = []
 
@@ -428,7 +443,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
-                
+
                 # validate photo data
                 if not data_bytes or len(data_bytes) == 0:
                     logger.warning(f"Empty image data for {fname}, skipping")
@@ -437,7 +452,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         label = html.escape(label)
                     text += f"\n[{att.type.capitalize()}: {label}]"
                     continue
-                
+
                 bio = io.BytesIO(data_bytes)
                 bio.name = fname
                 caption = text if not caption_used else None

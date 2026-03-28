@@ -42,6 +42,8 @@ def replace_sensitive(msg: str) -> str:
         if secret in msg:
             msg = msg.replace(secret, "***")
     return msg
+
+
 def _masking_filter(record: "loguru.Record") -> bool:
     """Redact sensitive values from every log record before emission."""
     if _sensitive:
@@ -49,6 +51,7 @@ def _masking_filter(record: "loguru.Record") -> bool:
         msg = replace_sensitive(msg)
         record["message"] = msg
     return True
+
 
 # Custom logging level icons
 logger.level("TRACE", icon="TRC")
@@ -93,16 +96,16 @@ def set_log_dir(log_dir: str | None) -> None:
 
     Args:
         log_dir: Path to the log directory. If None or empty, file logging will be disabled.
-    
+
     Call this once after the config is loaded.
     """
     global LOG_DIR, LOG_FILE_PATH, _file_id
-    
+
     # Remove existing file sink if any
     if _file_id is not None:
         logger.remove(_file_id)
         _file_id = None
-    
+
     LOG_DIR = log_dir
     if LOG_DIR is not None:
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -140,7 +143,12 @@ def set_log_rotation(
 
     Call this once after the config is loaded. Changes take effect on next rotation.
     """
-    global LOG_ROTATION_SIZE, LOG_RETENTION_DAYS, LOG_COMPRESSION, LOG_FILE_LEVEL, _file_id
+    global \
+        LOG_ROTATION_SIZE, \
+        LOG_RETENTION_DAYS, \
+        LOG_COMPRESSION, \
+        LOG_FILE_LEVEL, \
+        _file_id
 
     if rotation_size is not None:
         LOG_ROTATION_SIZE = rotation_size

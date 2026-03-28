@@ -77,20 +77,22 @@ class LoggingConfig(BaseModel):
     """Number of days to keep log files. Older log files are automatically deleted.
     Set to 0 to disable automatic deletion."""
 
-    compression: Literal["gz", "bz2", "xz", "lzma", "tar", "tar.gz", "tar.bz2", "tar.xz", "zip", None] = "zip"
+    compression: Literal[
+        "gz", "bz2", "xz", "lzma", "tar", "tar.gz", "tar.bz2", "tar.xz", "zip", None
+    ] = "zip"
     """Compression format for rotated log files (e.g., "zip", "gz", "tar.gz").
     Set to None to disable compression."""
 
-    @field_validator('level', 'file_level', mode='before')
+    @field_validator("level", "file_level", mode="before")
     def normalize_level(cls, v):
         if v is None:
             return v
         if not isinstance(v, str):
-            raise ValueError(f'Invaild log level: {v}')
+            raise ValueError(f"Invaild log level: {v}")
         upper = v.strip().upper()
-        valid = {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}
+        valid = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         if upper not in valid:
-            raise ValueError(f'Invaild log level: {v}')
+            raise ValueError(f"Invaild log level: {v}")
         return upper
 
 
@@ -115,7 +117,7 @@ class GlobalConfig(BaseModel):
     database: DatabaseConfig = DatabaseConfig()
     """Database configuration for message and user mappings."""
 
-    @field_validator('proxy', mode='after')
+    @field_validator("proxy", mode="after")
     def get_proxy_from_env(cls, v: str):
         if v.lower() in ["disabled", "disable", "unset"]:
             logger.debug("Global proxy disabled manually")
@@ -135,6 +137,7 @@ class GlobalConfig(BaseModel):
 
         logger.debug("No global proxy configuration found")
         return None
+
 
 # ---------------------------------------------------------------------------
 # Base for all driver config blocks — unknown keys are a validation error

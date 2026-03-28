@@ -167,16 +167,22 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     async def find_shared_rooms(self, user_id):
                         # For now, return an empty list as we don't track shared rooms
                         return []
-                
-                logger.info(f"Matrix [{self.instance_id}] Initializing E2E encryption...")
-                
+
+                logger.info(
+                    f"Matrix [{self.instance_id}] Initializing E2E encryption..."
+                )
+
                 # Create store directory if it doesn't exist
                 store_path = Path(self.config.store_path)
                 store_path.mkdir(parents=True, exist_ok=True)
-                logger.debug(f"Matrix [{self.instance_id}] E2E store path: {store_path}")
-                
+                logger.debug(
+                    f"Matrix [{self.instance_id}] E2E store path: {store_path}"
+                )
+
                 # Initialize crypto store
-                logger.debug(f"Matrix [{self.instance_id}] Using in-memory crypto store")
+                logger.debug(
+                    f"Matrix [{self.instance_id}] Using in-memory crypto store"
+                )
                 self._crypto_store = CustomCryptoStore(
                     account_id=user_id,
                     pickle_key="nextbridge_e2e",
@@ -186,15 +192,19 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 # Try to delete old crypto store data to avoid corrupted sessions
                 try:
                     await self._crypto_store.delete()
-                    logger.debug(f"Matrix [{self.instance_id}] Old crypto store data deleted")
+                    logger.debug(
+                        f"Matrix [{self.instance_id}] Old crypto store data deleted"
+                    )
                 except Exception as e:
-                    logger.debug(f"Matrix [{self.instance_id}] No old crypto store data to delete: {e}")
+                    logger.debug(
+                        f"Matrix [{self.instance_id}] No old crypto store data to delete: {e}"
+                    )
 
                 # Initialize state store
                 logger.debug(f"Matrix [{self.instance_id}] Using in-memory state store")
                 self._state_store = CustomStateStore()
                 logger.debug(f"Matrix [{self.instance_id}] State store initialized")
-                
+
                 # Initialize Olm machine for E2E encryption
                 logger.debug(f"Matrix [{self.instance_id}] Initializing Olm machine...")
                 self._crypto = OlmMachine(
@@ -204,15 +214,19 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 )
                 await self._crypto.load()
                 logger.debug(f"Matrix [{self.instance_id}] Olm machine initialized")
-                
+
                 # Set up state store and crypto on the client
                 self._client.state_store = self._state_store
                 self._client.crypto = self._crypto
-                
+
                 logger.info(f"Matrix [{self.instance_id}] E2E encryption enabled")
             except Exception as e:
-                logger.opt(exception=True).error(f"Matrix [{self.instance_id}] E2E initialization failed: {e}")
-                logger.warning(f"Matrix [{self.instance_id}] continuing without E2E encryption")
+                logger.opt(exception=True).error(
+                    f"Matrix [{self.instance_id}] E2E initialization failed: {e}"
+                )
+                logger.warning(
+                    f"Matrix [{self.instance_id}] continuing without E2E encryption"
+                )
                 self._crypto = None
                 self._crypto_store = None
         else:
@@ -225,7 +239,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         self._client.add_event_handler(
             EventType.ROOM_MESSAGE, cast(EventHandler, self._on_message)
         )
-        
+
         # Add event handler for encrypted events
         if self._crypto:
             self._client.add_event_handler(
@@ -233,7 +247,8 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             )
             # Add event handler for room key events (needed for E2E encryption)
             self._client.add_event_handler(
-                EventType.TO_DEVICE_ENCRYPTED, cast(EventHandler, self._crypto.handle_to_device_event)
+                EventType.TO_DEVICE_ENCRYPTED,
+                cast(EventHandler, self._crypto.handle_to_device_event),
             )
 
         # Register only after the client is fully ready so send() is never
@@ -285,34 +300,38 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
     async def _on_encrypted_message(self, event) -> None:
         """Handle encrypted messages by decrypting them and processing the content."""
         if not self._crypto:
-            logger.warning(f"Matrix [{self.instance_id}] Received encrypted message but E2E is not initialized")
+            logger.warning(
+                f"Matrix [{self.instance_id}] Received encrypted message but E2E is not initialized"
+            )
             return
-            
+
         try:
             # Decrypt the event
             decrypted_event = await self._crypto.decrypt_megolm_event(event)
-            
+
             # Convert to a regular MessageEvent and process
             if decrypted_event:
                 # Create a mock MessageEvent with the decrypted content
                 from mautrix.types import MessageEvent, RoomID, UserID
-                
+
                 # Create a new event with decrypted content
                 decrypted_msg_event = MessageEvent(
-                    content=decrypted_event, # type: ignore
+                    content=decrypted_event,  # type: ignore
                     type=EventType.ROOM_MESSAGE,
                     room_id=RoomID(event.room_id),
                     event_id=event.event_id,
                     sender=UserID(event.sender),
                     timestamp=event.timestamp,
                 )
-                
+
                 # Process the decrypted message
                 await self._on_message(decrypted_msg_event)
             else:
                 logger.warning(f"Matrix [{self.instance_id}] Failed to decrypt event")
         except Exception as e:
-            logger.opt(exception=True).error(f"Matrix [{self.instance_id}] Error decrypting message: {e}")
+            logger.opt(exception=True).error(
+                f"Matrix [{self.instance_id}] Error decrypting message: {e}"
+            )
 
     async def _on_message(self, event: MessageEvent) -> None:
         if self._client and event.sender == self._client.mxid:

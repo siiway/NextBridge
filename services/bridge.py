@@ -221,9 +221,7 @@ class Bridge:
         #     f"on_message: platform={msg.platform} instance={msg.instance_id} "
         #     f"channel={msg.channel} user={msg.user!r} text={msg.text!r}"
         # )
-        logger.debug(
-            f'on_message: {str(msg)}'
-        )
+        logger.debug(f"on_message: {str(msg)}")
         # Handle internal commands
         if msg.text.startswith("/bind"):
             await self._handle_bind_command(msg)
@@ -307,7 +305,10 @@ class Bridge:
         elif not is_webhook and "bot_msg_format" in msg_cfg:
             fmt = msg_cfg["bot_msg_format"]
         else:
-            fmt = msg_cfg.get("msg_format", '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}')
+            fmt = msg_cfg.get(
+                "msg_format",
+                '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}',
+            )
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
@@ -358,11 +359,10 @@ class Bridge:
         reply_bridge_id: str | None = None,
     ):
         # Check if any target uses webhook
-        is_webhook = any(
-            "webhook_url" in ch
-            for ch in rule.get("to", {}).values()
+        is_webhook = any("webhook_url" in ch for ch in rule.get("to", {}).values())
+        formatted, extra = self._build_formatted(
+            msg, rule.get("msg", {}), is_webhook=is_webhook
         )
-        formatted, extra = self._build_formatted(msg, rule.get("msg", {}), is_webhook=is_webhook)
 
         for target_id, target_channel in rule.get("to", {}).items():
             # Skip echo based on strict_echo_match configuration
@@ -446,7 +446,9 @@ class Bridge:
             if is_webhook:
                 merged_msg_cfg["webhook_url"] = target_cfg["webhook_url"]
 
-            formatted, extra = self._build_formatted(msg, merged_msg_cfg, is_webhook=is_webhook)
+            formatted, extra = self._build_formatted(
+                msg, merged_msg_cfg, is_webhook=is_webhook
+            )
 
             if self._is_sensitive(formatted):
                 logger.warning(

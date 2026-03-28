@@ -289,7 +289,9 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 ),
             )
         except Exception:
-            logger.exception(f"DingTalk [{self.instance_id}] send failed (msg {msg_key})")
+            logger.exception(
+                f"DingTalk [{self.instance_id}] send failed (msg {msg_key})"
+            )
 
     async def _upload_media(
         self,

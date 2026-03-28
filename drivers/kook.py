@@ -181,7 +181,9 @@ class KookDriver(BaseDriver[KookConfig]):
             if not att.url and att.data is None:
                 continue
 
-            result = await media.fetch_attachment(att, self.config.max_file_size, source_proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, source_proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 attachment_fragments.append(f"\n[{att.type.capitalize()}: {label}]")

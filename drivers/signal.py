@@ -284,7 +284,9 @@ class SignalDriver(BaseDriver[SignalConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if result:
                 data_bytes, mime = result
                 b64_atts.append(

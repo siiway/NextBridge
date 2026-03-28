@@ -278,9 +278,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         )
 
         # Get webhook_url from rule msg config (kwargs) or channel dict
-        webhook_url = (
-            kwargs.get("webhook_url") or channel.get("webhook_url")
-        )
+        webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
 
         # Resolve the send path first so we know which format override to apply
         is_webhook_send = (
@@ -309,7 +307,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             assert webhook_url is not None  # Type narrowing for type checker
             # Remove webhook_url from kwargs to avoid duplicate argument
             webhook_kwargs = {k: v for k, v in kwargs.items() if k != "webhook_url"}
-            return await self._send_webhook(text, attachments, webhook_url, **webhook_kwargs)
+            return await self._send_webhook(
+                text, attachments, webhook_url, **webhook_kwargs
+            )
         elif self._client is not None:
             return await self._send_bot(channel, text, attachments, **kwargs)
         else:

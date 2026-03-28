@@ -133,10 +133,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
         self._session = aiohttp.ClientSession(connector=connector)
 
         if bot_token:
-            self._web = AsyncWebClient(
-                token=bot_token,
-                session=self._session
-            )
+            self._web = AsyncWebClient(token=bot_token, session=self._session)
 
         # ------ Socket Mode receive (preferred when app_token is present) ----
         if app_token:
@@ -417,7 +414,9 @@ class SlackDriver(BaseDriver[SlackConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size, self._proxy)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if not result:
                 try:
                     label = att.name or att.url or ""
