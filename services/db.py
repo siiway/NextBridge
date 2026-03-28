@@ -1,5 +1,6 @@
 import time
 import uuid
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -82,11 +83,13 @@ class MessageDB:
             SQLAlchemy Engine instance configured according to database settings.
         """
         db_config: dict = config.get("database", {})
-        url = db_config.get("url", "sqlite:///data/messages.db")
+        # Relative SQLite paths are resolved under data/ by the logic below.
+        # Use sqlite:///messages.db as default to avoid data/data/messages.db.
+        url = db_config.get("url", "sqlite:///messages.db")
 
         # Handle SQLite relative paths
         if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
-            # Convert relative path to absolute path
+            # Convert relative path to absolute path under the data directory
             db_path = url.replace("sqlite:///", "")
             if not Path(db_path).is_absolute():
                 data_path = Path(u.get_data_path())
@@ -115,6 +118,41 @@ class MessageDB:
 
     def _session(self) -> Session:
         return Session(self._engine)
+
+    def _normalize_channel_id(self, channel_id) -> str:
+        """Serialize channel identifiers into a stable canonical string.
+
+        Notes:
+        - Dict/list values are recursively normalized with scalar values cast to str,
+          so int/str mismatches do not break lookups.
+        - Known transport-only keys such as webhook_url are dropped because they are
+          not part of a channel address and are absent in inbound events.
+        """
+
+        def _normalize_value(value):
+            if isinstance(value, dict):
+                normalized_obj = {}
+                for k in sorted(value.keys()):
+                    if k in ("webhook_url", "msg"):
+                        continue
+                    normalized_obj[str(k)] = _normalize_value(value[k])
+                return normalized_obj
+            if isinstance(value, list):
+                return [_normalize_value(v) for v in value]
+            return str(value)
+
+        if channel_id is None:
+            return ""
+
+        if isinstance(channel_id, (dict, list)):
+            return json.dumps(
+                _normalize_value(channel_id),
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+
+        return str(channel_id)
 
     # ------------------------------------------------------------------
     # Binding codes
@@ -320,16 +358,17 @@ class MessageDB:
     # ------------------------------------------------------------------
 
     def save_mapping(
-        self, bridge_id: str, instance_id: str, channel_id: str, platform_msg_id: str
+        self, bridge_id: str, instance_id: str, channel_id, platform_msg_id: str
     ):
         """Store a mapping between a bridge ID and a platform-specific message ID."""
         try:
+            normalized_channel = self._normalize_channel_id(channel_id)
             with self._session() as s:
                 s.merge(
                     MessageMapping(
                         bridge_id=bridge_id,
                         instance_id=instance_id,
-                        channel_id=channel_id,
+                        channel_id=normalized_channel,
                         platform_msg_id=platform_msg_id,
                     )
                 )
@@ -348,17 +387,34 @@ class MessageDB:
             ).scalar_one_or_none()
 
     def get_platform_msg_id(
-        self, bridge_id: str, instance_id: str, channel_id: str | None = None
+        self, bridge_id: str, instance_id: str, channel_id=None
     ) -> str | None:
         """Find the platform-specific message ID for a given bridge ID and target instance."""
         with self._session() as s:
-            stmt = select(MessageMapping.platform_msg_id).where(
+            base_stmt = select(MessageMapping.platform_msg_id).where(
                 MessageMapping.bridge_id == bridge_id,
                 MessageMapping.instance_id == instance_id,
             )
+
             if channel_id:
-                stmt = stmt.where(MessageMapping.channel_id == channel_id)
-            return s.execute(stmt).scalar_one_or_none()
+                # Try canonical form first.
+                normalized = self._normalize_channel_id(channel_id)
+                strict_stmt = base_stmt.where(MessageMapping.channel_id == normalized)
+                strict_hit = s.execute(strict_stmt).scalars().first()
+                if strict_hit:
+                    return strict_hit
+
+                # Compatibility for legacy rows written as plain str(dict(...)).
+                legacy = str(channel_id)
+                if legacy != normalized:
+                    legacy_stmt = base_stmt.where(MessageMapping.channel_id == legacy)
+                    legacy_hit = s.execute(legacy_stmt).scalars().first()
+                    if legacy_hit:
+                        return legacy_hit
+
+            # Final fallback: if there are multiple rows, pick the first deterministically
+            # instead of raising MultipleResultsFound.
+            return s.execute(base_stmt).scalars().first()
 
 
 # Shared singleton

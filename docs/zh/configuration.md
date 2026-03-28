@@ -140,7 +140,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 
 | 键 | 是否必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `database.url` | 否 | `sqlite:///data/messages.db` | SQLAlchemy 数据库 URL。不同数据库的示例请参见下方。 |
+| `database.url` | 否 | `sqlite:///messages.db` | SQLAlchemy 数据库 URL。SQLite 相对路径会按 `data/` 目录解析。 |
 | `database.echo` | 否 | `false` | 启用 SQLAlchemy 查询日志用于调试。 |
 | `database.pool_size` | 否 | — | 非 SQLite 数据库的连接池大小。未指定时使用 SQLAlchemy 默认值。 |
 | `database.max_overflow` | 否 | — | 非 SQLite 数据库的连接池最大溢出大小。未指定时使用 SQLAlchemy 默认值。 |
@@ -153,7 +153,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 {
   "global": {
     "database": {
-      "url": "sqlite:///data/messages.db"
+      "url": "sqlite:///messages.db"
     }
   }
 }
@@ -188,7 +188,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 ```
 
 ::: tip SQLite 路径处理
-  使用 SQLite 的相对路径（如 `sqlite:///data/messages.db`）时，路径将相对于数据目录解析。绝对路径（如 `sqlite:////var/lib/nextbridge/messages.db`）将按原样使用。
+  使用 SQLite 的相对路径（如 `sqlite:///messages.db`）时，路径将相对于数据目录（`data/`）解析。绝对路径（如 `sqlite:////var/lib/nextbridge/messages.db`）将按原样使用。
 :::
 
 ::: warning 连接池

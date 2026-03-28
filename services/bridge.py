@@ -264,6 +264,11 @@ class Bridge:
         reply_bridge_id = None
         if msg.reply_parent:
             reply_bridge_id = msg_db().get_bridge_id(msg.instance_id, msg.reply_parent)
+            if reply_bridge_id is None:
+                logger.debug(
+                    f"Reply parent mapping not found: instance={msg.instance_id} "
+                    f"parent={msg.reply_parent}"
+                )
 
         for rule in self._rules:
             rule_id = str(rule.get("id", ""))
@@ -271,18 +276,21 @@ class Bridge:
                 rule_id = config.stable_rule_hash(rule)
 
             bridge_id = self._build_bridge_id(rule_id, msg)
-            if msg.message_id:
-                msg_db().save_mapping(
-                    bridge_id, msg.instance_id, str(msg.channel), msg.message_id
-                )
-
             if rule.get("type") == "connect":
                 matched = self._matches_channel(msg, rule.get("channels", {}))
                 # logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
                 if matched:
+                    if msg.message_id:
+                        msg_db().save_mapping(
+                            bridge_id, msg.instance_id, msg.channel, msg.message_id
+                        )
                     await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:
                 if self._matches_from(msg, rule.get("from", {})):
+                    if msg.message_id:
+                        msg_db().save_mapping(
+                            bridge_id, msg.instance_id, msg.channel, msg.message_id
+                        )
                     await self._dispatch(msg, rule, bridge_id, reply_bridge_id)
 
     def _matches_channel(self, msg: NormalizedMessage, channels: dict) -> bool:
@@ -406,10 +414,19 @@ class Bridge:
             target_reply_id = None
             if reply_bridge_id:
                 target_reply_id = msg_db().get_platform_msg_id(
-                    reply_bridge_id, target_id, str(target_channel)
+                    reply_bridge_id, target_id, target_channel
                 )
                 if target_reply_id:
                     extra["reply_to_id"] = target_reply_id
+                    logger.debug(
+                        f"Reply mapping resolved for {target_id}: "
+                        f"bridge_id={reply_bridge_id} -> {target_reply_id}"
+                    )
+                else:
+                    logger.debug(
+                        f"Reply mapping missing for {target_id}: "
+                        f"bridge_id={reply_bridge_id}, channel={target_channel}"
+                    )
 
             # Resolve target mentions
             target_mentions = []
@@ -433,7 +450,7 @@ class Bridge:
                 )
                 if new_msg_id:
                     msg_db().save_mapping(
-                        bridge_id, target_id, str(target_channel), str(new_msg_id)
+                        bridge_id, target_id, target_channel, str(new_msg_id)
                     )
             except Exception as e:
                 logger.error(f"Failed to send to '{target_id}': {e}")
@@ -487,10 +504,19 @@ class Bridge:
             target_reply_id = None
             if reply_bridge_id:
                 target_reply_id = msg_db().get_platform_msg_id(
-                    reply_bridge_id, target_id, str(target_channel)
+                    reply_bridge_id, target_id, target_channel
                 )
                 if target_reply_id:
                     extra["reply_to_id"] = target_reply_id
+                    logger.debug(
+                        f"Reply mapping resolved for {target_id}: "
+                        f"bridge_id={reply_bridge_id} -> {target_reply_id}"
+                    )
+                else:
+                    logger.debug(
+                        f"Reply mapping missing for {target_id}: "
+                        f"bridge_id={reply_bridge_id}, channel={target_channel}"
+                    )
 
             # Resolve target mentions
             target_mentions = []
@@ -514,7 +540,7 @@ class Bridge:
                 )
                 if new_msg_id:
                     msg_db().save_mapping(
-                        bridge_id, target_id, str(target_channel), str(new_msg_id)
+                        bridge_id, target_id, target_channel, str(new_msg_id)
                     )
             except asyncio.CancelledError:
                 logger.info(f"Message dispatch cancelled during send to {target_id}")

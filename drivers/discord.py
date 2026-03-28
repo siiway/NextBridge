@@ -15,6 +15,7 @@
 #   bot_token     – Optional. Required for receive and bot-send mode.
 #   send_method   – "webhook" (default) | "bot"
 #   max_file_size – Max bytes per attachment when sending (default 8 MB, Discord webhook limit)
+#   send_replies_as_bot – If true, reply messages are sent by bot when available.
 #
 # Note: webhook_url should be configured per channel in rules, not at instance level.
 
@@ -43,6 +44,7 @@ class DiscordConfig(_DriverConfig):
     bot_token: str = ""
     max_file_size: int = 8 * 1024 * 1024
     send_as_bot_when_using_cqface_emoji: CoercedBool = False
+    send_replies_as_bot: CoercedBool = True
     proxy: str | None = UNSET
 
 
@@ -271,11 +273,21 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         **kwargs,
     ):
         has_cqface = bool(re.search(r":cqface\d+:", text))
+        reply_to_id = kwargs.get("reply_to_id")
         force_bot = (
             has_cqface
             and self.config.send_as_bot_when_using_cqface_emoji
             and self._client is not None
         )
+
+        # Discord webhook mode does not support specifying reply targets.
+        # If bot client is available, prefer bot send for reply messages.
+        if reply_to_id and self._client is not None and self.config.send_replies_as_bot:
+            force_bot = True
+            logger.debug(
+                f"Discord [{self.instance_id}] forcing bot send for reply "
+                f"reference={reply_to_id}"
+            )
 
         # Get webhook_url from rule msg config (kwargs) or channel dict
         webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
@@ -305,10 +317,16 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         if is_webhook_send:
             assert webhook_url is not None  # Type narrowing for type checker
+            if reply_to_id:
+                logger.debug(
+                    f"Discord [{self.instance_id}] webhook send does not support "
+                    f"reply reference; sending as normal message. "
+                    "Set send_replies_as_bot=true with bot_token for reply bridging."
+                )
             # Remove webhook_url from kwargs to avoid duplicate argument
             webhook_kwargs = {k: v for k, v in kwargs.items() if k != "webhook_url"}
             return await self._send_webhook(
-                text, attachments, webhook_url, **webhook_kwargs
+                channel, text, attachments, webhook_url, **webhook_kwargs
             )
         elif self._client is not None:
             return await self._send_bot(channel, text, attachments, **kwargs)
@@ -318,6 +336,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
     async def _send_webhook(
         self,
+        channel: dict,
         text: str,
         attachments: list[Attachment] | None,
         webhook_url: str,

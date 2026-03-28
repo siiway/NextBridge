@@ -39,8 +39,8 @@ class DatabaseConfig(BaseModel):
         - PostgreSQL: postgresql://user:password@host:port/database
     """
 
-    url: str = "sqlite:///data/messages.db"
-    """SQLAlchemy database URL. Defaults to SQLite in the data directory."""
+    url: str = "sqlite:///messages.db"
+    """SQLAlchemy database URL. Relative SQLite paths are resolved under the data directory."""
 
     echo: bool = False
     """Enable SQLAlchemy query logging for debugging."""

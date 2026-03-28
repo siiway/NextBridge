@@ -4,9 +4,9 @@
 
 | Platform                    | Status | Receive | Send | Mentions | Replies | Media | Custom Proxy | Notes                                                                   |
 | :-------------------------- | :----- | :------ | :--- | :------- | :------ | :---- | :----------- | :---------------------------------------------------------------------- |
-| **Tencent QQ** (via NapCat) | ✅      | ✅       | ✅    | ✅        | ⚠️      | ✅     | ✅            | Uses unofficial NapCat WebSocket bridge                                 |
-| **Discord**                 | ✅      | ✅       | ✅    | ✅        | ⚠️      | ✅     | ✅            | Receive via bot gateway; send via webhook or bot                        |
-| **Telegram**                | ✅      | ✅       | ✅    | ✅        | ⚠️      | ⚠️    | ✅            | Uses long polling                                                       |
+| **Tencent QQ** (via NapCat) | ✅      | ✅       | ✅    | ✅        | ✅       | ✅     | ✅            | Uses unofficial NapCat WebSocket bridge                                 |
+| **Discord**                 | ✅      | ✅       | ✅    | ✅        | ℹ️      | ✅     | ✅            | Webhook cannot specify reply target; reply bridging requires bot path   |
+| **Telegram**                | ✅      | ✅       | ✅    | ✅        | ✅       | ⚠️    | ✅            | Uses long polling                                                       |
 | **Feishu / Lark**           | ✅      | ✅       | ✅    | ⚠️       | ⚠️      | ❌     | ❌            | Webhook / WebSocket receive; IM API send; **SDK doesn't support proxy** |
 | **DingTalk**                | ✅      | ✅       | ✅    | ⚠️       | ⚠️      | ✅     | ❌            | Webhook receive; Robot API send; **SDK doesn't support proxy**          |
 | **Yunhu**                   | ✅      | ✅       | ✅    | ❌        | ⚠️      | ✅     | ✅            | Webhook receive; open API send; **native mentions not yet supported**   |
@@ -30,5 +30,6 @@
 ## Legend
 - ✅ **Supported**: Implemented and verified.
 - ⚠️ **Supported (Not Tested)**: Implemented and basically tested but requires further testing to ensure stability.
+- ℹ️ **Supported (Limited)**: Supported, but has known platform/API limitations. See the corresponding driver documentation for details.
 - ⏸️ **Paused**: Development suspended due to technical or policy limitations.
 - ❌ **Not Supported**: Not yet implemented.
