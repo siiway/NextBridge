@@ -25,23 +25,7 @@
 
 ## 接收模式
 
-### HTTP Webhook（默认）
-
-飞书将事件推送到你暴露的 HTTP 端点，驱动器会在可配置的端口上启动一个 aiohttp 服务器。
-
-**准备工作**
-
-1. 前往[飞书开放平台](https://open.feishu.cn)（或 [Lark 开发者平台](https://open.larksuite.com)）。
-2. 创建一个**自建应用**，并在**权限管理**中开通上述权限范围。
-3. 在**事件订阅**中开启 **im.message.receive_v1** 事件，并将请求 URL 设为 `http://your-host:8080/event`（与 `listen_port` 和 `listen_path` 配置一致）。
-4. 复制 **App ID**、**App Secret**、**验证 Token** 和**加密 Key**（不需要加密可留空）。
-5. 发布应用版本，并将机器人添加到目标群聊。
-
-::: warning 需要公网可访问的地址
-飞书需要从公网访问你的 HTTP 端点。请使用反向代理、内网穿透工具（如 ngrok / Cloudflare Tunnel）或将服务部署在公网服务器上。
-:::
-
-### 长连接 / WebSocket
+### 长连接 / WebSocket（默认）
 
 驱动器向飞书服务器建立持久的出站 WebSocket 连接，无需暴露公网 HTTP 端点，适合本地或有防火墙的部署环境。
 
@@ -49,10 +33,26 @@
 
 1. 前往[飞书开放平台](https://open.feishu.cn)（或 [Lark 开发者平台](https://open.larksuite.com)）。
 2. 创建一个**自建应用**，并在**权限管理**中开通上述权限范围。
-3. 在**事件订阅**中开启 **im.message.receive_v1** 事件，并选择**"使用长连接接收事件"**，无需设置请求 URL。
+3. 在**事件订阅**中开启 **im.message.receive_v1** 事件，并选择 **"使用长连接接收事件"**，无需设置请求 URL。
 4. 复制 **App ID** 和 **App Secret**。
 5. 发布应用版本，并将机器人添加到目标群聊。
-6. 在配置中设置 `use_long_connection: true`。
+
+### HTTP Webhook
+
+飞书将事件推送到你暴露的 HTTP 端点，驱动器会在可配置的端口上启动一个 aiohttp 服务器。
+
+**准备工作**
+
+1. 前往[飞书开放平台](https://open.feishu.cn)（或 [Lark 开发者平台](https://open.larksuite.com)）。
+2. 创建一个**自建应用**，并在**权限管理**中开通上述权限范围。
+4. 在**事件订阅**中开启 **im.message.receive_v1** 事件，并将请求 URL 设为 `http://your-host:8080/event`（与 `listen_port` 和 `listen_path` 配置一致）。
+5. 复制 **App ID**、**App Secret**、**验证 Token** 和**加密 Key**（不需要加密可留空）。
+6. 发布应用版本，并将机器人添加到目标群聊。
+7. 在配置中设置 `use_long_connection: false`。
+
+::: warning 需要公网可访问的地址
+飞书需要从公网访问你的 HTTP 端点。请使用反向代理、内网穿透工具（如 ngrok / Cloudflare Tunnel）或将服务部署在公网服务器上。
+:::
 
 ## 配置项
 
@@ -62,11 +62,24 @@
 |---|---|---|---|
 | `app_id` | 是 | — | 飞书/Lark App ID |
 | `app_secret` | 是 | — | 飞书/Lark App Secret |
-| `use_long_connection` | 否 | `false` | `true` = WebSocket 长连接；`false` = HTTP Webhook |
+| `use_long_connection` | 否 | `true` | `true` = WebSocket 长连接；`false` = HTTP Webhook |
 | `verification_token` | 否 | `""` | 事件验证 Token——仅 HTTP Webhook 模式使用 |
 | `encrypt_key` | 否 | `""` | 事件加密 Key——仅 HTTP Webhook 模式使用（留空表示不加密） |
 | `listen_port` | 否 | `8080` | 监听传入事件的 HTTP 端口——仅 HTTP Webhook 模式使用 |
 | `listen_path` | 否 | `"/event"` | 监听传入事件的 HTTP 路径——仅 HTTP Webhook 模式使用 |
+
+**长连接示例**
+
+```json
+{
+  "feishu": {
+    "fs_main": {
+      "app_id": "cli_xxxxxxxxxxxx",
+      "app_secret": "your_app_secret"
+    }
+  }
+}
+```
 
 **HTTP Webhook 示例**
 
@@ -79,21 +92,8 @@
       "verification_token": "your_verification_token",
       "encrypt_key": "",
       "listen_port": 8080,
-      "listen_path": "/event"
-    }
-  }
-}
-```
-
-**长连接示例**
-
-```json
-{
-  "feishu": {
-    "fs_main": {
-      "app_id": "cli_xxxxxxxxxxxx",
-      "app_secret": "your_app_secret",
-      "use_long_connection": true
+      "listen_path": "/event",
+      "use_long_connection": false
     }
   }
 }

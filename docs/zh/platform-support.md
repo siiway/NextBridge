@@ -2,30 +2,30 @@
 
 # 平台支持状态
 
-| 平台 | 状态 | 接收 | 发送 | 提及 (Mention) | 回复 (Reply) | 媒体文件 | 自定义代理 | 备注 |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **腾讯 QQ** (via NapCat) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | 使用非官方 NapCat WebSocket 桥接方案 |
-| **Discord** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | 通过 Bot 网关接收；通过 Webhook 或 Bot 发送 |
-| **Telegram** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | 使用长轮询 |
-| **飞书 / Lark** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | Webhook 接收；IM API 发送；**SDK 不支持设置代理** |
-| **钉钉** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ❌ | Webhook 接收；机器人 API 发送；SDK **不支持设置代理** |
-| **云湖** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | Webhook 接收；开放 API 发送；**暂未支持原生提及语法** |
-| **KOOK**（开黑啦） | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | WebSocket 接收；机器人 API 发送；上传至 KOOK CDN |
-| **VoceChat** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | |
-| **Matrix** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | 启用 `enable_e2e` 时支持 E2E 加密 |
-| **Signal** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | 需要 signal-cli REST API |
-| **Microsoft Teams** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Bot Framework 连接器 |
-| **Google Chat** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | 使用服务账号的 REST API |
-| **Slack** | ⚠️ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ⚠️ | Socket Mode 或 Events API 接收；Bot 或 Webhook 发送 |
-| **Mattermost** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | WebSocket 接收；REST API 发送 |
-| **Rocket.Chat** | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | Outgoing webhook 接收；REST API 或 incoming webhook 发送 |
-| **Webhook** | ⚠️ | ❌ | ✅ | - | - | ⚠️ | ⚠️ | 仅发送的通用 HTTP webhook |
-| **WhatsApp** | ⚠️ | ⚠️ | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | 使用 neonize（go-whatsapp）；媒体以文本回退形式接收 |
-| **微信** | ⏸️ | - | - | - | - | - | - | 账号封禁风险极高 |
-| **Tailchat** | ❌ | - | - | - | - | - | - | 计划中 |
-| **Zulip** | ❌ | - | - | - | - | - | - | 计划中 |
-| **LINE** | ❌ | - | - | - | - | - | - | 计划中 |
-| **Viber** | ❌ | - | - | - | - | - | - | 计划中 |
+| 平台                     | 状态  | 接收  | 发送  | 提及 (Mention) | 回复 (Reply) | 媒体文件 | 自定义代理 | 备注                                                 |
+| :--------------------- | :-- | :-- | :-- | :----------- | :--------- | :--- | :---- | :------------------------------------------------- |
+| **腾讯 QQ** (via NapCat) | ✅   | ✅   | ✅   | ✅            | ⚠️         | ✅    | ⚠️    | 使用非官方 NapCat WebSocket 桥接方案                        |
+| **Discord**            | ✅   | ✅   | ✅   | ✅            | ⚠️         | ✅    | ⚠️    | 通过 Bot 网关接收；通过 Webhook 或 Bot 发送                    |
+| **Telegram**           | ✅   | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ⚠️    | 使用长轮询                                              |
+| **飞书 / Lark**          | ✅   | ✅   | ✅   | ✅            | ⚠️         | ✅    | ❌     | Webhook 接收；IM API 发送；**SDK 不支持设置代理**               |
+| **钉钉**                 | ✅   | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ❌     | Webhook 接收；机器人 API 发送；SDK **不支持设置代理**              |
+| **云湖**                 | ✅   | ✅   | ✅   | ❌            | ⚠️         | ✅    | ✅     | Webhook 接收；开放 API 发送；**暂未支持原生提及语法**                |
+| **KOOK**（开黑啦）          | ✅   | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ⚠️    | WebSocket 接收；机器人 API 发送；上传至 KOOK CDN               |
+| **VoceChat**           | ✅   | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ⚠️    |                                                    |
+| **Matrix**             | ✅   | ✅   | ✅   | ⚠️           | ⚠️         | ⚠️   | ⚠️    | 启用 `enable_e2e` 时支持 E2E 加密                         |
+| **Signal**             | ⚠️  | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ⚠️    | 需要 signal-cli REST API                             |
+| **Microsoft Teams**    | ⚠️  | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ⚠️    | Bot Framework 连接器                                  |
+| **Google Chat**        | ⚠️  | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ⚠️    | 使用服务账号的 REST API                                   |
+| **Slack**              | ⚠️  | ✅   | ✅   | ✅            | ⚠️         | ✅    | ⚠️    | Socket Mode 或 Events API 接收；Bot 或 Webhook 发送       |
+| **Mattermost**         | ⚠️  | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ⚠️    | WebSocket 接收；REST API 发送                           |
+| **Rocket.Chat**        | ⚠️  | ✅   | ✅   | ⚠️           | ⚠️         | ✅    | ⚠️    | Outgoing webhook 接收；REST API 或 incoming webhook 发送 |
+| **Webhook**            | ⚠️  | ❌   | ✅   | -            | -          | ⚠️   | ⚠️    | 仅发送的通用 HTTP webhook                                |
+| **WhatsApp**           | ⚠️  | ⚠️  | ⚠️  | ❌            | ❌          | ⚠️   | ❌     | 使用 neonize（go-whatsapp）；媒体以文本回退形式接收                |
+| **微信**                 | ⏸️  | -   | -   | -            | -          | -    | -     | 账号封禁风险极高                                           |
+| **Tailchat**           | ❌   | -   | -   | -            | -          | -    | -     | 计划中                                                |
+| **Zulip**              | ❌   | -   | -   | -            | -          | -    | -     | 计划中                                                |
+| **LINE**               | ❌   | -   | -   | -            | -          | -    | -     | 计划中                                                |
+| **Viber**              | ❌   | -   | -   | -            | -          | -    | -     | 计划中                                                |
 
 ## 图例
 - ✅ **已支持**: 已完全实现并经过验证。

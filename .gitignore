@@ -21,6 +21,7 @@ node_modules/
 dist/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+docs/.obsidian/
 
 # claude
 .claude/

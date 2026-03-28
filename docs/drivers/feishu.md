@@ -25,24 +25,7 @@ If you see `Access denied` errors in the logs, the app version is missing one or
 
 ## Receive modes
 
-### HTTP webhook (default)
-
-Feishu pushes events to an HTTP endpoint you expose. The driver starts an aiohttp server on a configurable port.
-
-**Setup**
-
-1. Go to the [Feishu Open Platform](https://open.feishu.cn) (or [Lark Developer](https://open.larksuite.com)).
-2. Create a **custom app** and grant the scopes listed above.
-3. Enable the **im.message.receive_v1** event under **Event Subscriptions**.
-4. Set the request URL to `http://your-host:8080/event` (matching your `listen_port` and `listen_path`).
-5. Copy the **App ID**, **App Secret**, **Verification Token**, and **Encrypt Key** (leave encrypt key blank to disable encryption).
-6. Publish the app version and add the bot to the target group chat.
-
-::: warning Public endpoint required
-Feishu must be able to reach your HTTP endpoint from the internet. Use a reverse proxy, tunnel (e.g. ngrok / Cloudflare Tunnel), or deploy on a public server.
-:::
-
-### Long connection / WebSocket
+### Long connection / WebSocket (default)
 
 The driver establishes a persistent outbound WebSocket connection to Feishu's servers. No public HTTP endpoint is required — useful for local or firewalled deployments.
 
@@ -54,7 +37,24 @@ The driver establishes a persistent outbound WebSocket connection to Feishu's se
 4. Select **"Use long connection to receive events"** instead of setting a request URL.
 5. Copy the **App ID** and **App Secret**.
 6. Publish the app version and add the bot to the target group chat.
-7. Set `use_long_connection: true` in your config.
+
+Feishu pushes events to an HTTP endpoint you expose. The driver starts an aiohttp server on a configurable port.
+
+### HTTP webhook
+
+**Setup**
+
+1. Go to the [Feishu Open Platform](https://open.feishu.cn) (or [Lark Developer](https://open.larksuite.com)).
+2. Create a **custom app** and grant the scopes listed above.
+3. Enable the **im.message.receive_v1** event under **Event Subscriptions**.
+4. Set the request URL to `http://your-host:8080/event` (matching your `listen_port` and `listen_path`).
+5. Copy the **App ID**, **App Secret**, **Verification Token**, and **Encrypt Key** (leave encrypt key blank to disable encryption).
+6. Publish the app version and add the bot to the target group chat.
+7. Set `use_long_connection: false` in your config.
+
+::: warning Public endpoint required
+Feishu must be able to reach your HTTP endpoint from the internet. Use a reverse proxy, tunnel (e.g. ngrok / Cloudflare Tunnel), or deploy on a public server.
+:::
 
 ## Config keys
 
@@ -64,11 +64,24 @@ Add under `feishu.<instance_id>` in `config.json`:
 |---|---|---|---|
 | `app_id` | Yes | — | Feishu/Lark App ID |
 | `app_secret` | Yes | — | Feishu/Lark App Secret |
-| `use_long_connection` | No | `false` | `true` = WebSocket long connection; `false` = HTTP webhook |
+| `use_long_connection` | No | `true` | `true` = WebSocket long connection; `false` = HTTP webhook |
 | `verification_token` | No | `""` | Event verification token — HTTP webhook mode only |
 | `encrypt_key` | No | `""` | Event encryption key — HTTP webhook mode only (leave empty to disable) |
 | `listen_port` | No | `8080` | HTTP port to listen on — HTTP webhook mode only |
 | `listen_path` | No | `"/event"` | HTTP path for incoming events — HTTP webhook mode only |
+
+**Long connection example**
+
+```json
+{
+  "feishu": {
+    "fs_main": {
+      "app_id": "cli_xxxxxxxxxxxx",
+      "app_secret": "your_app_secret"
+    }
+  }
+}
+```
 
 **HTTP webhook example**
 
@@ -81,21 +94,8 @@ Add under `feishu.<instance_id>` in `config.json`:
       "verification_token": "your_verification_token",
       "encrypt_key": "",
       "listen_port": 8080,
-      "listen_path": "/event"
-    }
-  }
-}
-```
-
-**Long connection example**
-
-```json
-{
-  "feishu": {
-    "fs_main": {
-      "app_id": "cli_xxxxxxxxxxxx",
-      "app_secret": "your_app_secret",
-      "use_long_connection": true
+      "listen_path": "/event",
+      "use_long_connection": false
     }
   }
 }

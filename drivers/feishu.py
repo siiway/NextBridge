@@ -2,7 +2,7 @@
 #
 # Receive (two modes, controlled by use_long_connection):
 #
-#   HTTP webhook (default, use_long_connection = false):
+#   Long connection / WebSocket (default, use_long_connection = true):
 #     Feishu pushes events to an HTTP endpoint you expose.
 #     This driver starts an aiohttp server on a configurable port.
 #     Set that URL in the Feishu developer console under
@@ -19,7 +19,7 @@
 # Config keys (under feishu.<instance_id>):
 #   app_id               – Feishu app ID  (required)
 #   app_secret           – Feishu app secret  (required)
-#   use_long_connection  – true = WebSocket mode; false = HTTP webhook mode  (default: false)
+#   use_long_connection  – true = WebSocket mode; false = HTTP webhook mode  (default: true)
 #   verification_token   – Event verification token  (HTTP mode only)
 #   encrypt_key          – Event encryption key  (HTTP mode; leave "" to disable)
 #   listen_port          – HTTP port to listen on  (HTTP mode; default: 8080)
@@ -61,7 +61,7 @@ from drivers import BaseDriver
 class FeishuConfig(_DriverConfig):
     app_id: str
     app_secret: str
-    use_long_connection: bool = False
+    use_long_connection: bool = True
     verification_token: str = ""
     encrypt_key: str = ""
     listen_port: int = 8080
