@@ -76,10 +76,10 @@ _WSS_URL_RE = re.compile(r"wss://\S+")
 
 class _LarkLogBridge(logging.Handler):
     """Forwards lark-oapi WS logs to the system logger, masking wss:// URLs."""
+
     def __init__(self, instance_id: str):
         self.instance_id = instance_id
         super().__init__()
-
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = _WSS_URL_RE.sub("wss://***", record.getMessage())

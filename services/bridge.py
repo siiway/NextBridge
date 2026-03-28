@@ -40,7 +40,7 @@ def _parse_richheader(text: str) -> tuple[str, dict | None]:
     if not m:
         return text, None
     attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[: m.start()] + text[m.end():]).strip()
+    clean = (text[: m.start()] + text[m.end() :]).strip()
     return clean, attrs or None
 
 
@@ -278,9 +278,7 @@ class Bridge:
                 continue  # config-only field (webhook_url, msg_format, ...) — skip
             if str(msg.channel[key]) != str(expected):
                 return False
-        logger.debug(
-            f"Channel match success for {msg.instance_id}: {key}={expected!r}"
-        )
+        logger.debug(f"Channel match success for {msg.instance_id}: {key}={expected!r}")
         return True
 
     def _matches_from(self, msg: NormalizedMessage, from_cfg: dict) -> bool:

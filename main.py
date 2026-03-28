@@ -159,19 +159,20 @@ async def main():
                 logger.error(f"Driver '{task.get_name()}' exited with error: {result}")
     except asyncio.CancelledError:
         logger.info("NextBridge shutting down...")
-        
+
         # stop all tasks explicitly
         for task in driver_tasks:
             if not task.done():
                 task.cancel()
-        
+
         # wait for all drivers to clean up
         await asyncio.gather(*driver_tasks, return_exceptions=True)
-        
+
         # close all sessions to avoid connection leaks
         from services.media import close_all_sessions
+
         await close_all_sessions()
-        
+
         logger.info("NextBridge stopped.")
 
 
