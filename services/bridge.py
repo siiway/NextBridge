@@ -2,6 +2,7 @@ import re
 import uuid
 from pathlib import Path
 from typing import Callable
+import asyncio
 
 import services.util as u
 import services.logger as log
@@ -492,8 +493,12 @@ class Bridge:
                     msg_db().save_mapping(
                         bridge_id, target_id, str(target_channel), str(new_msg_id)
                     )
-            except:
-                logger.opt(exception=True).error(f"Failed to send to '{target_id}'")
+            except asyncio.CancelledError:
+                logger.info(f"Message dispatch cancelled during send to {target_id}")
+                return
+            except Exception:
+                logger.exception(f"Failed to send to '{target_id}")
+                return
 
 
 # Shared singleton used by all drivers

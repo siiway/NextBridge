@@ -27,8 +27,8 @@
 
 const MIME_EXT = {
   'image/jpeg': 'jpg',
-  'image/png':  'png',
-  'image/gif':  'gif',
+  'image/png': 'png',
+  'image/gif': 'gif',
   'image/webp': 'webp',
 };
 
@@ -83,7 +83,6 @@ export default {
       const upstream = await fetch(tgUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0',
-          'X-Robots-Tag': 'none',
         },
       });
 
@@ -131,6 +130,7 @@ export default {
           'Content-Disposition': `inline; filename="${filename}"`,
           'Cache-Control': 'public, max-age=86400',
           'Access-Control-Allow-Origin': '*',
+          'X-Robots-Tag': 'none',
         },
       });
     } catch (error) {

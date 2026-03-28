@@ -4,13 +4,14 @@ on:
   push:
     branches-ignore:
       - "dependabot/**"
-      - 'temp/**'
-      - 'scratch/**'
+      - "temp/**"
+      - "scratch/**"
     paths-ignore:
       - ".github/**"
       - "docs/**"
       - "**/*.md"
   pull_request:
+  workflow_dispatch:
 
 jobs:
   ruff:
