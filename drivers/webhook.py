@@ -107,7 +107,7 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
             ],
         }
 
-        # Merge any extra msg config keys (webhook_title, webhook_avatar, custom fields…)
+        # Merge any extra msg config keys (webhook_title, webhook_avatar, custom fields...)
         payload.update(kwargs)
 
         headers = {"Content-Type": "application/json", **self.config.headers}

@@ -107,7 +107,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
                 except aiohttp.ClientError as e:
                     logger.error(f"Signal [{self.instance_id}] connection error: {e}")
 
-                logger.info(f"Signal [{self.instance_id}] reconnecting in 5 s…")
+                logger.info(f"Signal [{self.instance_id}] reconnecting in 5 s...")
                 await asyncio.sleep(5)
         finally:
             await self._session.close()

@@ -76,17 +76,21 @@ _WSS_URL_RE = re.compile(r"wss://\S+")
 
 class _LarkLogBridge(logging.Handler):
     """Forwards lark-oapi WS logs to the system logger, masking wss:// URLs."""
+    def __init__(self, instance_id: str):
+        self.instance_id = instance_id
+        super().__init__()
+
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = _WSS_URL_RE.sub("wss://***", record.getMessage())
         if record.levelno >= logging.ERROR:
-            logger.error("Feishu WS: %s", msg)
+            logger.error(f"Feishu [{self.instance_id}] [WS] {msg}")
         elif record.levelno >= logging.WARNING:
-            logger.warning("Feishu WS: %s", msg)
+            logger.warning(f"Feishu [{self.instance_id}] [WS] {msg}")
         elif record.levelno >= logging.INFO:
-            logger.info("Feishu WS: %s", msg)
+            logger.info(f"Feishu [{self.instance_id}] [WS] {msg}")
         else:
-            logger.debug("Feishu WS: %s", msg)
+            logger.debug(f"Feishu [{self.instance_id}] [WS] {msg}")
 
 
 class FeishuDriver(BaseDriver[FeishuConfig]):
@@ -152,7 +156,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             # Redirect the lark-oapi "Lark" logger to the system logger.
             lark_logger = logging.getLogger("Lark")
             lark_logger.handlers.clear()
-            lark_logger.addHandler(_LarkLogBridge())
+            lark_logger.addHandler(_LarkLogBridge(self.instance_id))
             lark_logger.propagate = False
 
             ws_client = lark.ws.Client(

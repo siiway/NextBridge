@@ -135,7 +135,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                         f"Mattermost [{self.instance_id}] connection error"
                     )
 
-                logger.info(f"Mattermost [{self.instance_id}] reconnecting in 5 s…")
+                logger.info(f"Mattermost [{self.instance_id}] reconnecting in 5 s...")
                 await asyncio.sleep(5)
         finally:
             await self._session.close()

@@ -113,7 +113,9 @@
 }
 ```
 
-Chat ID 可在飞书开发者后台查看，也可从机器人在该群收到的事件 payload 中获取。
+Chat ID 可在飞书群设置页 / API 调试台查看，也可从机器人在该群收到的事件 payload 中获取。
+
+**飞书官方文档: [群 ID 说明](https://open.feishu.cn/document/server-docs/group/chat/chat-id-description?lang=zh-CN)** - *包含获取 Chat ID 的详细指引*
 
 ## 注意事项
 

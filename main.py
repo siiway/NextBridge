@@ -77,7 +77,7 @@ async def main():
     _load_all_drivers(enabled_platforms)
     from drivers.registry import all_drivers
 
-    logger.info("NextBridge starting…")
+    logger.info("NextBridge starting...")
 
     # Load global configuration
     global_config = raw.get("global", {})
@@ -158,12 +158,20 @@ async def main():
             if isinstance(result, Exception):
                 logger.error(f"Driver '{task.get_name()}' exited with error: {result}")
     except asyncio.CancelledError:
-        logger.info("NextBridge shutting down…")
-        # Close all aiohttp sessions to avoid connection leaks
+        logger.info("NextBridge shutting down...")
+        
+        # stop all tasks explicitly
+        for task in driver_tasks:
+            if not task.done():
+                task.cancel()
+        
+        # wait for all drivers to clean up
+        await asyncio.gather(*driver_tasks, return_exceptions=True)
+        
+        # close all sessions to avoid connection leaks
         from services.media import close_all_sessions
-
         await close_all_sessions()
-
+        
         logger.info("NextBridge stopped.")
 
 

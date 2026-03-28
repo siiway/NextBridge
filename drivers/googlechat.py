@@ -206,7 +206,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             return web.Response(status=400, text="Bad JSON")
 
         if event.get("type") != "MESSAGE":
-            # Acknowledge other events (ADDED_TO_SPACE, REMOVED_FROM_SPACE…)
+            # Acknowledge other events (ADDED_TO_SPACE, REMOVED_FROM_SPACE...)
             return web.json_response({"text": ""})
 
         message = event.get("message", {})

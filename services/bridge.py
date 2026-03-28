@@ -40,7 +40,7 @@ def _parse_richheader(text: str) -> tuple[str, dict | None]:
     if not m:
         return text, None
     attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[: m.start()] + text[m.end() :]).strip()
+    clean = (text[: m.start()] + text[m.end():]).strip()
     return clean, attrs or None
 
 
@@ -254,7 +254,7 @@ class Bridge:
         for rule in self._rules:
             if rule.get("type") == "connect":
                 matched = self._matches_channel(msg, rule.get("channels", {}))
-                logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
+                # logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
                 if matched:
                     await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:
@@ -275,13 +275,12 @@ class Bridge:
             if key in ("msg",):  # reserved — not a channel address field
                 continue
             if key not in msg.channel:
-                continue  # config-only field (webhook_url, msg_format, …) — skip
+                continue  # config-only field (webhook_url, msg_format, ...) — skip
             if str(msg.channel[key]) != str(expected):
-                logger.debug(
-                    f"Channel match fail for {msg.instance_id}: "
-                    f"{key}={msg.channel[key]!r} != expected {expected!r}"
-                )
                 return False
+        logger.debug(
+            f"Channel match success for {msg.instance_id}: {key}={expected!r}"
+        )
         return True
 
     def _matches_from(self, msg: NormalizedMessage, from_cfg: dict) -> bool:
@@ -433,7 +432,7 @@ class Bridge:
 
             # Skip echo based on strict_echo_match configuration
             if self._should_skip_echo(target_id, target_channel, msg):
-                logger.debug(f"Skipping echo to {target_id}")
+                # logger.debug(f"Skipping echo to {target_id}")
                 continue
 
             logger.debug(f"Dispatching to {target_id} channel={target_channel}")
@@ -497,7 +496,8 @@ class Bridge:
                     )
             except asyncio.CancelledError:
                 logger.info(f"Message dispatch cancelled during send to {target_id}")
-                return
+                # Don't return - continue to process other targets
+                continue
             except Exception:
                 logger.exception(f"Failed to send to '{target_id}")
                 return

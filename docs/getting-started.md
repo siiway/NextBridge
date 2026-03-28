@@ -97,6 +97,6 @@ NextBridge/
 │   ├── config.json   # credentials & connection settings
 │   └── rules.json    # message routing rules
 ├── drivers/          # one file per supported platform
-├── services/         # shared utilities (bridge engine, media, logger…)
+├── services/         # shared utilities (bridge engine, media, logger...)
 └── main.py           # entry point
 ```

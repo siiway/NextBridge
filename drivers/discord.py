@@ -103,9 +103,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         @self._client.event
         async def on_message(message: discord.Message):
             if message.author.bot:
-                logger.debug(
-                    f"Discord [{self.instance_id}] ignoring bot message from {message.author}"
-                )
+                # logger.debug(
+                #     f"Discord [{self.instance_id}] ignoring bot message from {message.author}"
+                # )
                 return
             await self._on_message(message)
 

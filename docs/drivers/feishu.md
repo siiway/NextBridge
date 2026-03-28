@@ -115,7 +115,9 @@ Use under `channels` or `from`/`to` in `rules.json`:
 }
 ```
 
-You can find the chat ID in the Feishu developer console, or from the event payload of any message sent to the bot in that chat.
+You can find the chat ID in Group Settings / the Feishu API Debugging Platform, or from the event payload of any message sent to the bot in that chat.
+
+**Feishu Official Document: [Chat ID description](https://open.feishu.cn/document/server-docs/group/chat/chat-id-description?lang=en-US)** - *includes the detailed instructions to obtain chat id*
 
 ## Notes
 

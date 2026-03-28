@@ -138,7 +138,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             finally:
                 self._ws = None
 
-            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5s…")
+            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5s...")
             await asyncio.sleep(5)
 
     # ------------------------------------------------------------------
