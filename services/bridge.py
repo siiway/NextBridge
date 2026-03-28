@@ -1,12 +1,11 @@
 import re
-import uuid
-from pathlib import Path
+import json
+import hashlib
 from typing import Callable
 import asyncio
 
-import services.util as u
 import services.logger as log
-import services.config_io as config_io
+import services.config as config
 from services.message import NormalizedMessage
 from services.db import msg_db
 
@@ -81,16 +80,38 @@ class Bridge:
     # ------------------------------------------------------------------
 
     def load_rules(self):
-        # Try to find rules file in supported formats
-        rules_path = config_io.find_rules(Path(u.get_data_path()))
+        # Load rules and normalize each rule with a stable id
+        rules, rules_path = config.load_rules_with_ids()
         if rules_path is None:
             logger.warning("No rules file found")
             self._rules = []
             return
 
-        data = config_io.load_config(rules_path)
-        self._rules = data.get("rules", [])
+        self._rules = rules
         logger.info(f"Loaded {len(self._rules)} bridge rule(s) from {rules_path.name}")
+
+    def _build_bridge_id(self, rule_id: str, msg: NormalizedMessage) -> str:
+        """Build a deterministic bridge id based on rule id and message fingerprint."""
+        if msg.message_id:
+            return f"{rule_id}:{msg.instance_id}:{msg.message_id}"
+
+        # Some drivers may not provide message_id; fallback to a stable fingerprint.
+        fingerprint_obj = {
+            "instance_id": msg.instance_id,
+            "channel": msg.channel,
+            "user_id": msg.user_id,
+            "text": msg.text,
+            "time": msg.time,
+        }
+        raw = json.dumps(
+            fingerprint_obj,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            default=str,
+        )
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return f"{rule_id}:{digest}"
 
     def _should_skip_echo(
         self, target_id: str, target_channel: dict, msg: NormalizedMessage
@@ -240,18 +261,21 @@ class Bridge:
         if msg.user_id:
             msg_db().save_user(msg.instance_id, msg.user_id, msg.user)
 
-        # Generate or resolve bridge_id for the incoming message
-        bridge_id = str(uuid.uuid4())
-        if msg.message_id:
-            msg_db().save_mapping(
-                bridge_id, msg.instance_id, str(msg.channel), msg.message_id
-            )
-
         reply_bridge_id = None
         if msg.reply_parent:
             reply_bridge_id = msg_db().get_bridge_id(msg.instance_id, msg.reply_parent)
 
         for rule in self._rules:
+            rule_id = str(rule.get("id", ""))
+            if not rule_id:
+                rule_id = config.stable_rule_hash(rule)
+
+            bridge_id = self._build_bridge_id(rule_id, msg)
+            if msg.message_id:
+                msg_db().save_mapping(
+                    bridge_id, msg.instance_id, str(msg.channel), msg.message_id
+                )
+
             if rule.get("type") == "connect":
                 matched = self._matches_channel(msg, rule.get("channels", {}))
                 # logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")

@@ -1,3 +1,5 @@
+import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,73 @@ logger = log.get_logger()
 
 _config_cache = None
 _config_path: Path | None = None
+
+
+def _strip_msg_blocks(obj):
+    """Return a copy of *obj* with every ``msg`` block removed recursively."""
+    if isinstance(obj, dict):
+        return {k: _strip_msg_blocks(v) for k, v in obj.items() if k != "msg"}
+    if isinstance(obj, list):
+        return [_strip_msg_blocks(item) for item in obj]
+    return obj
+
+
+def stable_rule_hash(rule: dict) -> str:
+    """Build a stable hash for a rule, ignoring ``id`` and all ``msg`` blocks."""
+    sanitized = _strip_msg_blocks(rule)
+    if isinstance(sanitized, dict):
+        sanitized.pop("id", None)
+    raw = json.dumps(sanitized, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def resolve_rule_id(rule: dict) -> str:
+    """Resolve rule id from explicit config, or fallback to stable rule hash."""
+    configured = rule.get("id")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    return stable_rule_hash(rule)
+
+
+def normalize_rules_with_ids(rules: list[dict]) -> list[dict]:
+    """Normalize rules so each rule has a non-empty id."""
+    normalized: list[dict] = []
+    seen_ids: dict[str, int] = {}
+    for idx, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            logger.warning(f"Skip invalid rule at index {idx}: not an object")
+            continue
+
+        base_id = resolve_rule_id(rule)
+        count = seen_ids.get(base_id, 0) + 1
+        seen_ids[base_id] = count
+        resolved_id = base_id if count == 1 else f"{base_id}#{count}"
+
+        if count > 1:
+            logger.warning(
+                f"Duplicate rule id '{base_id}' detected, auto-adjust to '{resolved_id}'"
+            )
+
+        rule_with_id = dict(rule)
+        rule_with_id["id"] = resolved_id
+        normalized.append(rule_with_id)
+
+    return normalized
+
+
+def load_rules_with_ids() -> tuple[list[dict], Path | None]:
+    """Load rules file and normalize every rule with a stable id."""
+    rules_path = config_io.find_rules(Path(u.get_data_path()))
+    if rules_path is None:
+        return [], None
+
+    data = config_io.load_config(rules_path)
+    raw_rules = data.get("rules", [])
+    if not isinstance(raw_rules, list):
+        logger.warning("Invalid rules format: 'rules' must be an array")
+        return [], rules_path
+
+    return normalize_rules_with_ids(raw_rules), rules_path
 
 
 def _load_config():
