@@ -19,7 +19,7 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
 |---|---|---|---|
 | `bot_token` | 是 | — | 来自 @BotFather 的 Bot Token |
 | `max_file_size` | 否 | `52428800`（50 MB） | 发送附件时单个文件的最大字节数 |
-| `rich_header_host` | 否 | — | Cloudflare 富头部 Worker 的基础 URL（见 [富头部](#富头部)） |
+| `rich_header_host` | 否 | `"https://richheader.siiway.top"` | Cloudflare 富头部 Worker 的基础 URL（见 [富头部](#富头部)） |
 | `avatar_proxy_host` | 否 | — | Cloudflare 头像代理 Worker 的基础 URL（见 [头像代理](#头像代理)） |
 | `proxy` | 否 | — | 所有 Telegram API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
 
@@ -29,7 +29,7 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
     "tg_main": {
       "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
       "max_file_size": 52428800,
-      "rich_header_host": "https://richheader.yourname.workers.dev",
+      "rich_header_host": "https://richheader.siiway.top",
       "avatar_proxy_host": "https://tg-avatar-proxy.yourname.workers.dev"
     }
   }
@@ -133,4 +133,3 @@ Telegram 驱动器使用 [python-telegram-bot](https://python-telegram-bot.org/)
 
 - Telegram Bot 无法主动发起对话，请确保在运行 NextBridge 前 Bot 已在目标群组中。
 - Bot 自身发送的消息不会被回显（Telegram 不会将 Bot 消息的事件推送给 Bot 自身）。
-- 暂不获取发送者的头像 URL（需要额外的 API 调用）。

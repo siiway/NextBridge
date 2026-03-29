@@ -51,6 +51,17 @@ class DiscordConfig(_DriverConfig):
 logger = log.get_logger()
 
 _CQFACE_RE = re.compile(r":cqface(\d+):")
+_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
+_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+
+
+def _parse_richheader(text: str) -> tuple[str, dict | None]:
+    m = _RICHHEADER_RE.search(text)
+    if not m:
+        return text, None
+    attrs = dict(_ATTR_RE.findall(m.group(1)))
+    clean = (text[: m.start()] + text[m.end() :]).strip()
+    return clean, attrs or None
 
 
 class DiscordDriver(BaseDriver[DiscordConfig]):
@@ -297,6 +308,34 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             self._send_method == "webhook" and webhook_url is not None and not force_bot
         )
 
+        # Bridge formats by expected send path. If we switch from webhook to bot
+        # (e.g. reply bridging), re-apply bot formatting here so bot_msg_format/
+        # msg_format and richheader still work.
+        if force_bot and self._send_method == "webhook" and webhook_url is not None:
+            fmt = kwargs.get("bot_msg_format") or kwargs.get("msg_format")
+            if isinstance(fmt, str) and fmt:
+                ctx = {
+                    "platform": kwargs.get("platform"),
+                    "instance_id": kwargs.get("instance_id"),
+                    "from": kwargs.get("from"),
+                    "user": kwargs.get("user"),
+                    "user_id": kwargs.get("user_id"),
+                    "user_avatar": kwargs.get("user_avatar"),
+                    "msg": kwargs.get("msg"),
+                    "time": kwargs.get("time"),
+                }
+                try:
+                    text = fmt.format(**ctx)
+                except KeyError as e:
+                    logger.warning(
+                        f"Discord [{self.instance_id}] bot format missing key {e}; using incoming text"
+                    )
+                else:
+                    text, parsed_rich_header = _parse_richheader(text)
+                    if parsed_rich_header is not None:
+                        parsed_rich_header["avatar"] = kwargs.get("user_avatar") or ""
+                        kwargs["rich_header"] = parsed_rich_header
+
         # Note: webhook_msg_format and bot_msg_format are handled by bridge.py
         # The 'text' parameter passed here is already formatted
 
@@ -401,6 +440,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         url = webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true"
 
         try:
+            logger.debug(
+                f"Discord [{self.instance_id}] webhook payload overrides: "
+                f"username={payload.get('username')!r}, "
+                f"avatar_url is {'set' if payload.get('avatar_url') else 'unset'}"
+            )
             if files:
                 form = aiohttp.FormData()
                 form.add_field(
@@ -413,6 +457,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 async with self._session.post(url, data=form) as resp:
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
+                        author = data.get("author") or {}
+                        logger.debug(
+                            f"Discord [{self.instance_id}] webhook sent message "
+                            f"id={data.get('id')} author={author.get('username')!r}"
+                        )
                         return str(data.get("id", ""))
                     body = await resp.text()
                     logger.error(
@@ -422,6 +471,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 async with self._session.post(url, json=payload) as resp:
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
+                        author = data.get("author") or {}
+                        logger.debug(
+                            f"Discord [{self.instance_id}] webhook sent message "
+                            f"id={data.get('id')} author={author.get('username')!r}"
+                        )
                         return str(data.get("id", ""))
                     body = await resp.text()
                     logger.error(

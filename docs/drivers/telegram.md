@@ -19,7 +19,7 @@ Add under `telegram.<instance_id>` in `config.json`:
 |---|---|---|---|
 | `bot_token` | Yes | — | Bot token from @BotFather |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
-| `rich_header_host` | No | — | Base URL of your Cloudflare rich-header worker (see [Rich Header](#rich-header)) |
+| `rich_header_host` | No | `"https://richheader.siiway.top"` | Base URL of your Cloudflare rich-header worker (see [Rich Header](#rich-header)) |
 | `avatar_proxy_host` | No | — | Base URL of your Cloudflare avatar proxy worker (see [Avatar Proxy](#avatar-proxy)) |
 | `proxy` | No | — | Proxy URL for all Telegram API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
@@ -29,7 +29,7 @@ Add under `telegram.<instance_id>` in `config.json`:
     "tg_main": {
       "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
       "max_file_size": 52428800,
-      "rich_header_host": "https://richheader.yourname.workers.dev",
+      "rich_header_host": "https://richheader.siiway.top",
       "avatar_proxy_host": "https://tg-avatar-proxy.yourname.workers.dev"
     }
   }
@@ -133,4 +133,3 @@ When `avatar_proxy_host` is configured, NextBridge uses a Cloudflare Worker to p
 
 - Telegram bots cannot initiate conversations with users. Make sure the bot is already in the target group before running NextBridge.
 - The bot's own messages are not echoed back (Telegram does not send bot message events to the bot itself).
-- Avatar URLs are not fetched for incoming messages (doing so would require an extra API call per message).
