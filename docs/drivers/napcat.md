@@ -17,12 +17,12 @@ Add under `napcat.<instance_id>` in `config.json`:
 | Key | Required | Default | Description |
 |---|---|---|---|
 | `ws_url` | No | `ws://127.0.0.1:3001` | WebSocket URL of the NapCat server |
-| `ws_token` | No | — | Access token (appended as `?access_token=…`) |
+| `ws_token` | No | — | Access token (appended as `?access_token=...`) |
 | `max_file_size` | No | `10485760` (10 MB) | Maximum bytes to download per attachment when sending |
 | `cqface_mode` | No | `"gif"` | How to represent QQ face/emoji segments. `"gif"` uploads the face as an animated GIF (from the local `db/cqface-gif/` database); `"emoji"` renders it as inline text, e.g. `:cqface306:`. |
 | `file_send_mode` | No | `"stream"` | How to upload files and videos to QQ. `"stream"` uses chunked `upload_file_stream` (recommended for large files); `"base64"` encodes the whole payload and passes it directly to `upload_group_file`. |
 | `stream_threshold` | No | `0` (disabled) | If greater than 0, automatically switches to `"stream"` mode when a file or video exceeds this many bytes, regardless of `file_send_mode`. |
-| `proxy` | No | — | Proxy URL for WebSocket connection and media downloading (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+| `proxy` | No | — | Proxy URL for WebSocket connection and media downloading (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
 {
@@ -66,14 +66,14 @@ Incoming messages are parsed from OneBot 11 segment arrays:
 | `record` | Forwarded as `voice` attachment |
 | `video` | Forwarded as `video` attachment |
 | `file` | Forwarded as `file` attachment |
-| Others (face, reply, forward…) | Silently skipped |
+| Others (face, reply, forward...) | Silently skipped |
 
 ## Sending
 
 | Attachment type | Method |
 |---|---|
-| `image` | Downloaded and sent as base64 (`base64://…`) |
-| `voice` | Downloaded and sent as base64 (`base64://…`) |
+| `image` | Downloaded and sent as base64 (`base64://...`) |
+| `voice` | Downloaded and sent as base64 (`base64://...`) |
 | `video` | Downloaded and sent via `file_send_mode` (stream or base64) |
 | `file` | Downloaded and sent via `file_send_mode` (stream or base64) |
 

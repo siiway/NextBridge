@@ -32,7 +32,9 @@ def _get_session(proxy: str | None = None) -> aiohttp.ClientSession:
     connector = ProxyConnector.from_url(proxy, rdns=True) if proxy else None
     session = aiohttp.ClientSession(connector=connector)
     _sessions[proxy] = session
-    logger.debug(f"New {'proxy' if proxy else 'direct'} session {session}")
+    logger.debug(
+        f"New {'proxy' if proxy else 'direct'} session {session}{f'({session._default_proxy})' if proxy else ''}"
+    )
     return session
 
 

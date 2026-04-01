@@ -34,7 +34,7 @@ from aiohttp_socks import ProxyConnector
 import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.config import get
+from services.config import get_proxy, UNSET
 from services.config_schema import _DriverConfig
 from drivers import BaseDriver
 
@@ -45,7 +45,7 @@ class VoceChatConfig(_DriverConfig):
     listen_port: int = 8091
     listen_path: str = "/vocechat/webhook"
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = ""
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -67,7 +67,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         self._session: aiohttp.ClientSession | None = None
         # uid → (name, avatar)
         self._user_cache: dict[int, tuple[str, str]] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -175,6 +175,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             reply_parent=str(detail.get("parent_mid", ""))
             if detail.get("parent_mid")
             else None,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(normalized)
 
@@ -307,11 +308,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             if not first_msg_id:
                 first_msg_id = mid
 
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 label = att.name or att.url or ""

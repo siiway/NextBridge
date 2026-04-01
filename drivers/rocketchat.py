@@ -52,7 +52,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -69,7 +69,7 @@ class RocketChatConfig(_DriverConfig):
     listen_path: str = "/rocketchat/webhook"
     webhook_token: str = ""
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = ""
+    proxy: str | None = UNSET
 
     @model_validator(mode="after")
     def _check_send_config(self) -> "RocketChatConfig":
@@ -94,7 +94,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
         self._username_cache: dict[str, str] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -191,6 +191,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             text=text,
             attachments=attachments,
             mentions=mentions,
+            source_proxy=self._proxy,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return web.json_response({})

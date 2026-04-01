@@ -22,9 +22,12 @@ Add under `matrix.<instance_id>` in your config file:
 | `password` | No* | — | Login password |
 | `access_token` | No* | — | Access token (alternative to `password`) |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
-| `proxy` | No | — | Proxy URL for all Matrix API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+| `proxy` | No | — | Proxy URL for all Matrix API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
+| `enable_e2e` | No | `false` | Enable end-to-end encryption support for encrypted rooms. When enabled, the bot will automatically encrypt messages sent to encrypted rooms and decrypt received messages. |
+| `store_path` | No | `data/e2e` | Path to store encryption keys (required if `enable_e2e` is `true`). This directory will be created if it doesn't exist. |
 
 \* Either `password` or `access_token` must be provided.
+\** Required when `enable_e2e` is `true`.
 
 ```json
 {
@@ -61,4 +64,4 @@ Use under `channels` or `from`/`to` in `rules.json`:
 - Media received from Matrix is downloaded via the authenticated client before being forwarded, so downstream platforms do not need Matrix credentials.
 - Outgoing media is uploaded to the homeserver via the Matrix media API and sent as native Matrix media events (`m.image`, `m.video`, `m.audio`, `m.file`).
 - Historical messages from before the bot connected are skipped automatically on startup.
-- E2E encryption is not currently supported.
+- E2E encryption is supported when `enable_e2e` is set to `true`. When enabled, the bot will automatically encrypt messages sent to encrypted rooms and decrypt received messages. The encryption keys are stored in the path specified by `store_path`.

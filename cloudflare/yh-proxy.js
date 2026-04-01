@@ -29,20 +29,20 @@
 
 const YUNHU_REFERER = 'https://myapp.jwznb.com';
 
-const YUNHU_HOSTS   = ['.jwznb.com', '.jwzhd.com'];
+const YUNHU_HOSTS = ['.jwznb.com', '.jwzhd.com'];
 const DISCORD_HOSTS = ['.discordapp.com', '.discordapp.net', '.discord.com'];
 
 const MIME_EXT = {
   'image/jpeg': 'jpg',
-  'image/png':  'png',
-  'image/gif':  'gif',
+  'image/png': 'png',
+  'image/gif': 'gif',
   'image/webp': 'webp',
-  'video/mp4':  'mp4',
+  'video/mp4': 'mp4',
   'video/webm': 'webm',
-  'audio/ogg':  'ogg',
+  'audio/ogg': 'ogg',
   'audio/mpeg': 'mp3',
-  'audio/aac':  'aac',
-  'audio/amr':  'amr',
+  'audio/aac': 'aac',
+  'audio/amr': 'amr',
 };
 
 function hostAllowed(hostname, allowlist) {
@@ -71,6 +71,7 @@ async function proxyUrl(url, extraHeaders = {}) {
       'Cache-Control': 'public, max-age=86400',
       // codescan:ignore-next-line:EXPLOIT019
       'Access-Control-Allow-Origin': '*',
+      'X-Robots-Tag': 'none',
     },
   });
 }

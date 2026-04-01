@@ -1,9 +1,9 @@
 [project]
 name = "nextbridge"
-version = "0.1.0"
+version = "0.2.0"
 description = "The chat bridge that links up all the major chat platforms!"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "discord-py>=2.6.3",
     "websockets>=13.0",
@@ -15,7 +15,10 @@ dependencies = [
     "yunhu>=0.0.11",
     "pyyaml>=6.0",
     "tomli-w>=1.0",
-    "mautrix>=0.21.0",
+    "mautrix[crypto]>=0.21.0",
+    "vodozemac>=0.6.0",
+    "unpaddedbase64>=2.1.0",
+    "base58>=2.1.1",
     "slack-sdk>=3.40.1",
     "pydantic>=2.0",
     "google-auth>=2.0",
@@ -35,8 +38,10 @@ url = "https://mirrors.aliyun.com/pypi/simple/"
 line-length = 88
 indent-width = 4
 
-[dependency-groups]
-dev = [
-    "ruff>=0.15.6",
-    "ty>=0.0.23",
+[tool.ruff.lint]
+ignore = [
+    "E741", # Ambiguous variable name: l / O / I
 ]
+
+[dependency-groups]
+dev = ["ruff>=0.15.6", "ty>=0.0.23"]

@@ -14,9 +14,10 @@
 # Config keys (under discord.<instance_id>):
 #   bot_token     – Optional. Required for receive and bot-send mode.
 #   send_method   – "webhook" (default) | "bot"
-#   webhook_url   – Required when send_method == "webhook"
-#   max_file_size – Max bytes per attachment when sending (default 8 MB,
-#                   Discord webhook limit)
+#   max_file_size – Max bytes per attachment when sending (default 8 MB, Discord webhook limit)
+#   send_replies_as_bot – If true, reply messages are sent by bot when available.
+#
+# Note: webhook_url should be configured per channel in rules, not at instance level.
 
 from drivers.registry import register
 import io
@@ -34,34 +35,44 @@ import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
 from services.config_schema import _DriverConfig, CoercedBool
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
 class DiscordConfig(_DriverConfig):
     send_method: Literal["webhook", "bot"] = "webhook"
-    webhook_url: str = ""
     bot_token: str = ""
     max_file_size: int = 8 * 1024 * 1024
     send_as_bot_when_using_cqface_emoji: CoercedBool = False
-    proxy: str = ""
+    send_replies_as_bot: CoercedBool = True
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
 
 _CQFACE_RE = re.compile(r":cqface(\d+):")
+_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
+_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+
+
+def _parse_richheader(text: str) -> tuple[str, dict | None]:
+    m = _RICHHEADER_RE.search(text)
+    if not m:
+        return text, None
+    attrs = dict(_ATTR_RE.findall(m.group(1)))
+    clean = (text[: m.start()] + text[m.end() :]).strip()
+    return clean, attrs or None
 
 
 class DiscordDriver(BaseDriver[DiscordConfig]):
     def __init__(self, instance_id: str, config: DiscordConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        self.config = config
         self._client: discord.Client | None = None
         self._session: aiohttp.ClientSession | None = None
         self._send_method: str = config.send_method
-        self._webhook_url: str | None = config.webhook_url or None
         self._bot_token: str | None = config.bot_token or None
-        # Use local proxy if set, otherwise fall back to global proxy
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
         # face_id (str) → "<:name:id>" resolved Discord emoji string
         self._emoji_cache: dict[str, str] = {}
         # name → emoji_id index built lazily from discord_emojis.json
@@ -105,9 +116,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         @self._client.event
         async def on_message(message: discord.Message):
             if message.author.bot:
-                logger.debug(
-                    f"Discord [{self.instance_id}] ignoring bot message from {message.author}"
-                )
+                # logger.debug(
+                #     f"Discord [{self.instance_id}] ignoring bot message from {message.author}"
+                # )
                 return
             await self._on_message(message)
 
@@ -173,6 +184,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             if message.reference
             else None,
             mentions=mentions,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(msg)
 
@@ -272,26 +284,60 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         **kwargs,
     ):
         has_cqface = bool(re.search(r":cqface\d+:", text))
+        reply_to_id = kwargs.get("reply_to_id")
         force_bot = (
             has_cqface
             and self.config.send_as_bot_when_using_cqface_emoji
             and self._client is not None
         )
 
-        # Get webhook_url from rule msg config (kwargs), channel dict, or driver config
-        webhook_url = (
-            kwargs.get("webhook_url") or channel.get("webhook_url") or self._webhook_url
-        )
+        # Discord webhook mode does not support specifying reply targets.
+        # If bot client is available, prefer bot send for reply messages.
+        if reply_to_id and self._client is not None and self.config.send_replies_as_bot:
+            force_bot = True
+            logger.debug(
+                f"Discord [{self.instance_id}] forcing bot send for reply "
+                f"reference={reply_to_id}"
+            )
+
+        # Get webhook_url from rule msg config (kwargs) or channel dict
+        webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
 
         # Resolve the send path first so we know which format override to apply
         is_webhook_send = (
             self._send_method == "webhook" and webhook_url is not None and not force_bot
         )
 
-        # Apply send-path-specific msg_format override if provided
-        fmt_key = "webhook_msg_format" if is_webhook_send else "bot_msg_format"
-        if fmt_key in kwargs:
-            text = kwargs[fmt_key]
+        # Bridge formats by expected send path. If we switch from webhook to bot
+        # (e.g. reply bridging), re-apply bot formatting here so bot_msg_format/
+        # msg_format and richheader still work.
+        if force_bot and self._send_method == "webhook" and webhook_url is not None:
+            fmt = kwargs.get("bot_msg_format") or kwargs.get("msg_format")
+            if isinstance(fmt, str) and fmt:
+                ctx = {
+                    "platform": kwargs.get("platform"),
+                    "instance_id": kwargs.get("instance_id"),
+                    "from": kwargs.get("from"),
+                    "user": kwargs.get("user"),
+                    "user_id": kwargs.get("user_id"),
+                    "user_avatar": kwargs.get("user_avatar"),
+                    "msg": kwargs.get("msg"),
+                    "time": kwargs.get("time"),
+                }
+                try:
+                    text = fmt.format(**ctx)
+                except KeyError as e:
+                    logger.warning(
+                        f"Discord [{self.instance_id}] bot format missing key {e}; using incoming text"
+                    )
+                else:
+                    text, parsed_rich_header = _parse_richheader(text)
+                    if parsed_rich_header is not None:
+                        parsed_rich_header["avatar"] = kwargs.get("user_avatar") or ""
+                        kwargs["rich_header"] = parsed_rich_header
+
+        # Note: webhook_msg_format and bot_msg_format are handled by bridge.py
+        # The 'text' parameter passed here is already formatted
 
         # Expand :cqface<id>: tokens into proper Discord custom emoji strings
         if has_cqface:
@@ -310,7 +356,17 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         if is_webhook_send:
             assert webhook_url is not None  # Type narrowing for type checker
-            return await self._send_webhook(text, attachments, webhook_url, **kwargs)
+            if reply_to_id:
+                logger.debug(
+                    f"Discord [{self.instance_id}] webhook send does not support "
+                    f"reply reference; sending as normal message. "
+                    "Set send_replies_as_bot=true with bot_token for reply bridging."
+                )
+            # Remove webhook_url from kwargs to avoid duplicate argument
+            webhook_kwargs = {k: v for k, v in kwargs.items() if k != "webhook_url"}
+            return await self._send_webhook(
+                channel, text, attachments, webhook_url, **webhook_kwargs
+            )
         elif self._client is not None:
             return await self._send_bot(channel, text, attachments, **kwargs)
         else:
@@ -319,6 +375,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
     async def _send_webhook(
         self,
+        channel: dict,
         text: str,
         attachments: list[Attachment] | None,
         webhook_url: str,
@@ -328,18 +385,47 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return None
 
         payload: dict = {"content": text}
+
+        # Format webhook_title and webhook_avatar if they are format strings
+        ctx = {
+            "platform": kwargs.get("platform"),
+            "instance_id": kwargs.get("instance_id"),
+            "from": kwargs.get("from"),
+            "user": kwargs.get("user"),
+            "user_id": kwargs.get("user_id"),
+            "user_avatar": kwargs.get("user_avatar"),
+            "msg": kwargs.get("msg"),
+            "time": kwargs.get("time"),
+        }
+
         if title := kwargs.get("webhook_title"):
-            payload["username"] = title
+            if isinstance(title, str) and "{" in title:
+                try:
+                    payload["username"] = title.format(**ctx)
+                except KeyError as e:
+                    logger.warning(f"webhook_title missing key {e}; using raw title")
+                    payload["username"] = title
+            else:
+                payload["username"] = title
+
         if avatar := kwargs.get("webhook_avatar"):
-            payload["avatar_url"] = avatar
+            if isinstance(avatar, str) and "{" in avatar:
+                try:
+                    payload["avatar_url"] = avatar.format(**ctx)
+                except KeyError as e:
+                    logger.warning(f"webhook_avatar missing key {e}; using raw avatar")
+                    payload["avatar_url"] = avatar
+            else:
+                payload["avatar_url"] = avatar
 
         # Download each attachment; collect as (bytes, mime, filename) triples
         files: list[tuple[bytes, str, str]] = []
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if result:
                 data_bytes, mime = result
@@ -354,6 +440,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         url = webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true"
 
         try:
+            logger.debug(
+                f"Discord [{self.instance_id}] webhook payload overrides: "
+                f"username={payload.get('username')!r}, "
+                f"avatar_url is {'set' if payload.get('avatar_url') else 'unset'}"
+            )
             if files:
                 form = aiohttp.FormData()
                 form.add_field(
@@ -366,6 +457,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 async with self._session.post(url, data=form) as resp:
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
+                        author = data.get("author") or {}
+                        logger.debug(
+                            f"Discord [{self.instance_id}] webhook sent message "
+                            f"id={data.get('id')} author={author.get('username')!r}"
+                        )
                         return str(data.get("id", ""))
                     body = await resp.text()
                     logger.error(
@@ -375,13 +471,18 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 async with self._session.post(url, json=payload) as resp:
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
+                        author = data.get("author") or {}
+                        logger.debug(
+                            f"Discord [{self.instance_id}] webhook sent message "
+                            f"id={data.get('id')} author={author.get('username')!r}"
+                        )
                         return str(data.get("id", ""))
                     body = await resp.text()
                     logger.error(
                         f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
                     )
-        except Exception as e:
-            logger.error(f"Discord [{self.instance_id}] webhook exception: {e}")
+        except Exception:
+            logger.exception(f"Discord [{self.instance_id}] webhook exception")
         return None
 
     async def _send_bot(
@@ -455,8 +556,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
             sent = await ch.send(**send_kwargs)
             return str(sent.id)
-        except Exception as e:
-            logger.error(f"Discord [{self.instance_id}] send error: {e}")
+        except Exception:
+            logger.exception(f"Discord [{self.instance_id}] send error")
         return None
 
 

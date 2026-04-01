@@ -6,11 +6,31 @@ The WhatsApp driver uses [neonize](https://github.com/krypton-byte/neonize) — 
 
 ## Setup
 
-1. Install neonize (already included in NextBridge's dependencies via `uv sync`).
-2. Add a WhatsApp instance to your `config.json` (see below).
-3. Start NextBridge. On first run, a QR code is printed to the terminal.
-4. Open WhatsApp on your phone → **Linked Devices** → **Link a Device**, then scan the QR code.
-5. Auth state is saved to the `storage_dir` SQLite file; you won't need to scan again unless you log out.
+1. Add a WhatsApp instance to your `config.json` (see below).
+2. Start NextBridge. On first run, a QR code is printed to the terminal.
+3. Open WhatsApp on your phone → **Linked Devices** → **Link a Device**, then scan the QR code.
+4. Auth state is saved to the `storage_dir` SQLite file; you won't need to scan again unless you log out.
+
+## System Requirements
+
+neonize requires certain system libraries depending on your platform:
+
+- **Linux (Ubuntu/Debian)**:
+  ```bash
+  sudo apt install libmagic1
+  ```
+
+- **Linux (Fedora/RHEL)**:
+  ```bash
+  sudo dnf install file-libs
+  ```
+
+- **macOS**:
+  ```bash
+  brew install libmagic
+  ```
+
+- **Windows**: `python-magic-bin` is installed automatically with neonize.
 
 ## Config keys
 

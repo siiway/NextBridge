@@ -12,6 +12,12 @@
 #                       link-preview card shown above the text (avatar + name).
 #                       Falls back to bold HTML header when absent or when the
 #                       message carries media attachments.
+#   avatar_proxy_host – Base URL of the Cloudflare Telegram avatar proxy worker
+#                       (e.g. "https://tg-avatar-proxy.yourname.workers.dev").
+#                       When set, user avatars are proxied through this worker
+#                       to avoid exposing the bot token. The worker should be
+#                       deployed from cloudflare/tg-avatar-proxy.js with BOT_TOKEN
+#                       environment variable set. Falls back to none when absent.
 #
 # Rule channel keys:
 #   chat_id – Telegram chat ID (negative for groups, e.g. "-100123456789")
@@ -32,14 +38,15 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 
 
 class TelegramConfig(_DriverConfig):
     bot_token: str
     max_file_size: int = 50 * 1024 * 1024
-    rich_header_host: str = ""
-    proxy: str = ""
+    rich_header_host: str = "https://richheader.siiway.top"
+    avatar_proxy_host: str = ""  # Base URL for avatar proxy (e.g. "https://avatarproxy.yourname.workers.dev")
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -68,7 +75,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     def __init__(self, instance_id: str, config: TelegramConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._app: Application | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
@@ -136,8 +143,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app = None
 
     async def _on_error(self, _: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logger.exception(
-            "Telegram [%s] handler error", self.instance_id, exc_info=context.error
+        logger.opt(exception=True).exception(
+            "Telegram [%s] handler error", self.instance_id
         )
 
     # ------------------------------------------------------------------
@@ -180,6 +187,60 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             if from_user
             else user_id
         )
+
+        # Get user avatar
+        user_avatar = ""
+        if from_user and self._app:
+            try:
+                photos = await self._app.bot.get_user_profile_photos(
+                    user_id=int(user_id), limit=1
+                )
+                if photos.photos:
+                    photo = photos.photos[0][-1]  # Get the largest size
+                    f = await photo.get_file()
+
+                    # Use avatar proxy if configured
+                    if f.file_path and self.config.avatar_proxy_host:
+                        host = self.config.avatar_proxy_host.rstrip("/")
+                        # file_path should be a relative path like 'photos/file_6.jpg'
+                        # If it's a full URL, extract the photos/ or profile_photos/ part
+                        file_path = f.file_path
+                        logger.debug(
+                            f"Telegram [{self.instance_id}] original file_path: {file_path}"
+                        )
+                        if file_path.startswith("http"):
+                            from urllib.parse import urlparse
+
+                            parsed = urlparse(file_path)
+                            path = parsed.path.lstrip("/")
+                            logger.debug(
+                                f"Telegram [{self.instance_id}] parsed path: {path}"
+                            )
+                            # Extract the part after 'bot<token>/'
+                            parts = path.split("/")
+                            logger.debug(
+                                f"Telegram [{self.instance_id}] path parts: {parts}"
+                            )
+                            if len(parts) >= 2:
+                                # Find the index of 'photos' or 'profile_photos'
+                                for i, part in enumerate(parts):
+                                    if part in ("photos", "profile_photos"):
+                                        file_path = "/".join(parts[i:])
+                                        logger.debug(
+                                            f"Telegram [{self.instance_id}] extracted file_path: {file_path}"
+                                        )
+                                        break
+                        logger.debug(
+                            f"Telegram [{self.instance_id}] final avatar URL: {host}/file/{file_path}"
+                        )
+                        user_avatar = f"{host}/file/{file_path}"
+                    elif f.file_path:
+                        # Fallback: use direct Telegram API URL
+                        user_avatar = f.file_path
+            except Exception as e:
+                logger.warning(
+                    f"Telegram [{self.instance_id}] failed to fetch avatar for user {user_id}: {e}"
+                )
 
         attachments: list[Attachment] = []
 
@@ -263,7 +324,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             channel={"chat_id": chat_id},
             user=user_name,
             user_id=user_id,
-            user_avatar="",  # Telegram avatar requires an extra API call
+            user_avatar=user_avatar,
             text=text,
             attachments=attachments,
             message_id=str(msg.message_id),
@@ -272,6 +333,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             else None,
             mentions=mentions,
             time=msg.date.isoformat() if msg.date else None,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(normalized)
 
@@ -362,13 +424,14 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     )
                     text = text.replace(f"@{html.escape(m['name'])}", link)
 
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         try:
             for att in attachments or []:
                 if not att.url and att.data is None:
                     continue
 
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if not result:
                     # Oversized or failed — append as text (escape if in HTML mode)
@@ -380,6 +443,16 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
+
+                # validate photo data
+                if not data_bytes or len(data_bytes) == 0:
+                    logger.warning(f"Empty image data for {fname}, skipping")
+                    label = att.name or att.url or ""
+                    if parse_mode == "HTML":
+                        label = html.escape(label)
+                    text += f"\n[{att.type.capitalize()}: {label}]"
+                    continue
+
                 bio = io.BytesIO(data_bytes)
                 bio.name = fname
                 caption = text if not caption_used else None

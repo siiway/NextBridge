@@ -30,3 +30,27 @@ class NormalizedMessage:
         default_factory=list
     )  # list of {"id": str, "name": str}
     time: str | None = None
+    source_proxy: str | None = (
+        None  # proxy URL for downloading attachments from source platform
+    )
+
+    def __str__(self):
+        l = []
+        for i in (
+            "platform",
+            "instance_id",
+            "channel",
+            "user",
+            "user_id",
+            "user_avatar",
+            "text",
+            "reply_parent",
+            "time, source_proxy",
+        ):
+            if hasattr(self, i):
+                l.append(f"{i}: {getattr(self, i)!r}")
+        if self.attachments:
+            l.append(f"attachments: {'|'.join(repr(a.name) for a in self.attachments)}")
+        if self.mentions:
+            l.append(f"mentions: {'|'.join(repr(m) for m in self.mentions)}")
+        return ", ".join(l)

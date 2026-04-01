@@ -30,7 +30,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from services.db import msg_db
 from drivers import BaseDriver
 
@@ -42,7 +42,7 @@ class NapCatConfig(_DriverConfig):
     file_send_mode: Literal["stream", "base64"] = "stream"
     cqface_mode: Literal["gif", "emoji"] = "gif"
     stream_threshold: int = 0
-    proxy: Optional[str] = None
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -102,7 +102,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         self._ws: Any = None  # websockets connection (type varies by version)
         # echo_id → Future; used to await responses for specific actions
         self._pending: dict[str, asyncio.Future] = {}
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -138,7 +138,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             finally:
                 self._ws = None
 
-            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5s…")
+            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5s...")
             await asyncio.sleep(5)
 
     # ------------------------------------------------------------------
@@ -210,6 +210,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             reply_parent=reply_id,
             mentions=mentions,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
+            source_proxy=self._proxy,
         )
         await self.bridge.on_message(msg)
 
@@ -545,13 +546,14 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             if last_idx < len(text):
                 segments.append({"type": "text", "data": {"text": text[last_idx:]}})
 
+        source_proxy = kwargs.get("source_proxy") or self._proxy
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
 
             if att.type == "image":
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if result:
                     data_bytes, _ = result
@@ -569,7 +571,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             elif att.type == "voice":
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if result:
                     data_bytes, _ = result
@@ -587,7 +589,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             elif att.type == "video":
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if result:
                     data_bytes, _ = result
@@ -622,7 +624,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             else:  # file
                 result = await media.fetch_attachment(
-                    att, self.config.max_file_size, self._proxy
+                    att, self.config.max_file_size, source_proxy
                 )
                 if result:
                     data_bytes, _ = result

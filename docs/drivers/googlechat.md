@@ -20,7 +20,7 @@ The Google Chat driver bridges Google Chat spaces with the rest of your platform
    - Under **Visibility**, choose which users or groups can install the bot.
 5. **Add the bot to a space**: In Google Chat, create or open a space, click *Add people & apps*, and add your bot by name.
 
-> The HTTP endpoint must be publicly reachable over HTTPS. Use a reverse proxy (nginx, Caddy) or a tunnel (ngrok) for development.
+> The HTTP endpoint must be publicly reachable over HTTPS. Use a reverse proxy (nginx, Caddy) or a tunnel (ngrok / Cloudflare Tunnel) for development.
 
 ## Config keys
 
@@ -34,7 +34,7 @@ Add under `googlechat.<instance_id>` in `config.json`:
 | `listen_path` | No | `"/google-chat/events"` | HTTP path for the event endpoint |
 | `endpoint_url` | No | — | Full public URL of the endpoint (enables request signature verification) |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum attachment size in bytes |
-| `proxy` | No | — | Proxy URL for all Google Chat API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+| `proxy` | No | — | Proxy URL for all Google Chat API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 
 \* Exactly one of `service_account_file` or `service_account_json` is required.

@@ -97,6 +97,6 @@ NextBridge/
 │   ├── config.json   # 凭据与连接配置
 │   └── rules.json    # 消息路由规则
 ├── drivers/          # 每个平台对应一个驱动器文件
-├── services/         # 公共工具（桥接引擎、媒体下载、日志…）
+├── services/         # 公共工具（桥接引擎、媒体下载、日志...）
 └── main.py           # 程序入口
 ```

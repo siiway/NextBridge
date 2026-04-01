@@ -27,11 +27,13 @@ from drivers.registry import register
 from typing import Literal
 
 import aiohttp
+from aiohttp_socks import ProxyConnector
 from pydantic import Field
 
 import services.logger as log
 from services.message import Attachment
 from services.config_schema import _DriverConfig
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -39,6 +41,7 @@ class WebhookConfig(_DriverConfig):
     url: str
     method: Literal["POST", "PUT", "PATCH"] = "POST"
     headers: dict[str, str] = Field(default_factory=dict)
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -48,13 +51,20 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
     def __init__(self, instance_id: str, config: WebhookConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self):
-        self._session = aiohttp.ClientSession()
+        if self._proxy:
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+            logger.debug(f"Webhook [{self.instance_id}] using proxy {self._proxy}")
+        else:
+            connector = aiohttp.TCPConnector(ssl=True)
+
+        self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
         logger.info(
             f"Webhook [{self.instance_id}] send-only, targeting {self.config.url}"
@@ -97,7 +107,7 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
             ],
         }
 
-        # Merge any extra msg config keys (webhook_title, webhook_avatar, custom fields…)
+        # Merge any extra msg config keys (webhook_title, webhook_avatar, custom fields...)
         payload.update(kwargs)
 
         headers = {"Content-Type": "application/json", **self.config.headers}

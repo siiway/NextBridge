@@ -39,7 +39,7 @@ uv run main.py convert data/config.yaml data/config.toml
 | 层级 | 说明 |
 |---|---|
 | `global` | 全局配置选项，适用于所有驱动，除非在特定驱动配置中被覆盖 |
-| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`matrix`、`signal`、`slack` 之一 |
+| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`vocechat`、`matrix`、`signal`、`teams`、`googlechat`、`slack`、`mattermost`、`rocketchat`、`webhook` 之一 |
 | `<实例ID>` | 由你自由命名，在规则配置中用于引用此实例 |
 
 ## 全局配置
@@ -50,6 +50,7 @@ uv run main.py convert data/config.yaml data/config.toml
 |---|---|---|---|
 | `proxy` | 否 | — | 全局代理 URL，适用于所有***支持代理配置***的驱动（例如：`http://proxy.example.com:8080`）。单个驱动的代理设置将覆盖此全局设置。 |
 | `strict_echo_match` | 否 | `false` | 控制 NextBridge 防止 echo (回声) 到同一个频道/实例的行为。当为 `false`（默认）时，如果目标实例 ID 或频道与源消息相同，则跳过；当为 `true` 时，只有当目标实例 ID 和频道都与源消息相同时才跳过。默认为 `false` 以最大程度防止回声。 |
+| `log` | 否 | — | 日志配置，用于控制日志输出和轮换。参见下方[日志配置](#日志配置)。 |
 | `database` | 否 | — | 数据库配置，用于存储消息和用户映射。参见下方[数据库配置](#数据库配置)。 |
 
 ```json
@@ -62,6 +63,68 @@ uv run main.py convert data/config.yaml data/config.toml
 
 ::: tip 使用环境变量中的代理
  如果未设置，程序会尝试从环境变量 `http_proxy`, `https_proxy`, `all_proxy` 中读取代理配置 (不分大小写)，此时你可以通过将 `proxy` 指定为特殊值 `disabled` 来阻止使用系统代理。
+:::
+
+## 日志配置
+
+NextBridge 使用 loguru 进行日志记录，支持灵活的日志输出和轮换。日志配置控制控制台输出和文件日志行为。
+
+### 配置选项
+
+| 键 | 是否必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `log.level` | 否 | `INFO` | 控制台日志级别。 |
+| `log.file_level` | 否 | `DEBUG` | 文件日志级别。默认为 DEBUG 以在故障排除时获取详细输出。 |
+| `log.dir` | 否 | `null` | 日志文件目录路径。如果为 `null` 或未指定，则禁用文件日志。日志文件将自动以时间戳命名创建在指定目录中。 |
+| `log.rotation_size` | 否 | `100 MB` | 单个日志文件的最大大小，超过此大小将自动轮换（例如：`"100 MB"`、`"500 MB"`）。 |
+| `log.retention_days` | 否 | `7` | 保留日志文件的天数。超过此天数的旧日志文件将被自动删除。设置为 `0` 可禁用自动删除。 |
+| `log.compression` | 否 | `zip` | 轮换后日志文件的压缩格式（例如：`"zip"`、`"gz"`、`"tar.gz"`）。设置为 `null` 可禁用压缩。 |
+
+### 配置示例
+
+**基础日志（仅控制台）：**
+```json
+{
+  "global": {
+    "log": {
+      "level": "INFO"
+    }
+  }
+}
+```
+
+**带轮换的文件日志：**
+```json
+{
+  "global": {
+    "log": {
+      "level": "INFO",
+      "dir": "logs",
+      "rotation_size": "100 MB",
+      "retention_days": 7,
+      "compression": "zip"
+    }
+  }
+}
+```
+
+**调试用的详细日志：**
+```json
+{
+  "global": {
+    "log": {
+      "level": "DEBUG",
+      "dir": "logs",
+      "rotation_size": "50 MB",
+      "retention_days": 3,
+      "compression": null
+    }
+  }
+}
+```
+
+::: tip 日志轮换
+  当设置了 `log.dir` 时，日志文件在超过 `log.rotation_size` 大小时会自动轮换。超过 `log.retention_days` 天数的旧日志文件会被自动删除。可以使用 `log.compression` 压缩轮换后的文件以节省磁盘空间。
 :::
 
 ## 数据库配置
@@ -77,7 +140,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 
 | 键 | 是否必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `database.url` | 否 | `sqlite:///data/messages.db` | SQLAlchemy 数据库 URL。不同数据库的示例请参见下方。 |
+| `database.url` | 否 | `sqlite:///messages.db` | SQLAlchemy 数据库 URL。SQLite 相对路径会按 `data/` 目录解析。 |
 | `database.echo` | 否 | `false` | 启用 SQLAlchemy 查询日志用于调试。 |
 | `database.pool_size` | 否 | — | 非 SQLite 数据库的连接池大小。未指定时使用 SQLAlchemy 默认值。 |
 | `database.max_overflow` | 否 | — | 非 SQLite 数据库的连接池最大溢出大小。未指定时使用 SQLAlchemy 默认值。 |
@@ -90,7 +153,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 {
   "global": {
     "database": {
-      "url": "sqlite:///data/messages.db"
+      "url": "sqlite:///messages.db"
     }
   }
 }
@@ -125,7 +188,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 ```
 
 ::: tip SQLite 路径处理
-  使用 SQLite 的相对路径（如 `sqlite:///data/messages.db`）时，路径将相对于数据目录解析。绝对路径（如 `sqlite:////var/lib/nextbridge/messages.db`）将按原样使用。
+  使用 SQLite 的相对路径（如 `sqlite:///messages.db`）时，路径将相对于数据目录（`data/`）解析。绝对路径（如 `sqlite:////var/lib/nextbridge/messages.db`）将按原样使用。
 :::
 
 ::: warning 连接池

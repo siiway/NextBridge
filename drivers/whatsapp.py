@@ -10,6 +10,12 @@
 # Setup:
 #   uv add neonize
 #   On first run a QR code is printed to the terminal — scan it with WhatsApp (Linked Devices).
+#
+# Platform-specific dependencies:
+#   - Linux (Ubuntu/Debian): sudo apt install libmagic1
+#   - Linux (Fedora/RHEL): sudo dnf install file-libs
+#   - macOS: brew install libmagic
+#   - Windows: python-magic-bin is installed automatically
 
 from __future__ import annotations
 

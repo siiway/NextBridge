@@ -10,7 +10,7 @@ The Teams driver bridges Microsoft Teams with the rest of your platforms using t
 2. On the bot resource, note the **Application (client) ID** and create a **client secret** under *Certificates & secrets*.
 3. Under *Channels*, add the **Microsoft Teams** channel.
 4. Set the bot's **Messaging endpoint** to `https://<your-host>:<listen_port><listen_path>`.
-   The endpoint must be publicly reachable over HTTPS (use a reverse proxy such as nginx or a tunnel like ngrok for development).
+   The endpoint must be publicly reachable over HTTPS (use a reverse proxy such as nginx or a tunnel like ngrok / Cloudflare Tunnel for development).
 
 ## Config keys
 
@@ -23,7 +23,7 @@ Add under `teams.<instance_id>` in `config.json`:
 | `listen_port` | No | `3978` | Port the driver listens on for incoming activities |
 | `listen_path` | No | `"/api/messages"` | HTTP path for the messaging endpoint |
 | `max_file_size` | No | `20971520` | Max attachment size in bytes (default 20 MB) |
-| `proxy` | No | — | Proxy URL for all Teams API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+| `proxy` | No | — | Proxy URL for all Teams API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
 {

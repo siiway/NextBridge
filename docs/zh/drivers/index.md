@@ -15,6 +15,15 @@
 | 钉钉 | [钉钉](/zh/drivers/dingtalk) | ✅ | ✅ | Webhook 接收；机器人 API 发送 |
 | 云湖 | [云湖](/zh/drivers/yunhu) | ✅ | ✅ | Webhook 接收；开放 API 发送 |
 | KOOK（开黑啦） | [KOOK](/zh/drivers/kook) | ✅ | ✅ | WebSocket 接收；机器人 API 发送；上传至 KOOK CDN |
+| VoceChat | [VoceChat](/zh/drivers/vocechat) | ✅ | ✅ | |
+| Matrix | [Matrix](/zh/drivers/matrix) | ✅ | ✅ | 客户端同步循环；启用 `enable_e2e` 时支持 E2E 加密 |
+| Signal | [Signal](/zh/drivers/signal) | ✅ | ✅ | 需要 signal-cli REST API |
+| Microsoft Teams | [Teams](/zh/drivers/teams) | ✅ | ✅ | Bot Framework 连接器 |
+| Google Chat | [Google Chat](/zh/drivers/googlechat) | ✅ | ✅ | 使用服务账号的 REST API |
+| Slack | [Slack](/zh/drivers/slack) | ✅ | ✅ | Socket Mode 或 Events API 接收；Bot 或 Webhook 发送 |
+| Mattermost | [Mattermost](/zh/drivers/mattermost) | ✅ | ✅ | WebSocket 接收；REST API 发送 |
+| Rocket.Chat | [Rocket.Chat](/zh/drivers/rocketchat) | ✅ | ✅ | Outgoing webhook 接收；REST API 或 incoming webhook 发送 |
+| Webhook | [Webhook](/zh/drivers/webhook) | ❌ | ✅ | 仅发送的通用 HTTP webhook |
 | WhatsApp | [WhatsApp](/zh/drivers/whatsapp) | ✅ | ✅ | 使用 neonize（go-whatsapp Python 绑定），无需 Node.js |
 
 ## 驱动器工作原理

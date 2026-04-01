@@ -22,10 +22,13 @@ Matrix 驱动器通过长轮询同步循环（使用 [mautrix-python](https://gi
 | `password` | 否* | — | 登录密码 |
 | `access_token` | 否* | — | 访问令牌（可替代 `password`） |
 | `max_file_size` | 否 | `52428800`（50 MB） | 发送附件时单个文件的最大字节数 |
-| `proxy` | 否 | — | 所有 Matrix API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。 |
+| `proxy` | 否 | — | 所有 Matrix API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
+| `enable_e2e` | 否 | `false` | 启用端到端加密支持。启用后，Bot 将自动加密发送到加密房间的消息，并解密接收到的消息。 |
+| `store_path` | 否 | `data/e2e` | 存储加密密钥的路径（当 `enable_e2e` 为 `true` 时必需）。如果该目录不存在，将会自动创建。 |
 
 > [!IMPORTANT]
 > \* `password` 和 `access_token` 至少需要提供一个。
+> \** 当 `enable_e2e` 为 `true` 时，`store_path` 为必填项。
 
 ```json
 {
@@ -62,4 +65,4 @@ Matrix 驱动器通过长轮询同步循环（使用 [mautrix-python](https://gi
 - 从 Matrix 接收到的媒体文件会通过已认证的客户端直接下载，下游平台无需 Matrix 凭据。
 - 发送媒体时，文件会先上传至 Homeserver 的媒体 API，再以原生 Matrix 媒体事件（`m.image`、`m.video`、`m.audio`、`m.file`）形式发出。
 - 启动时自动跳过 Bot 上线前的历史消息，不会重复处理。
-- 当前不支持端对端加密（E2E）。
+- 当 `enable_e2e` 设置为 `true` 时，支持端对端加密（E2E）。启用后，Bot 将自动加密发送到加密房间的消息，并解密接收到的消息。加密密钥存储在 `store_path` 指定的路径中。

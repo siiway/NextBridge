@@ -1,11 +1,11 @@
 import re
-import uuid
-from pathlib import Path
+import json
+import hashlib
 from typing import Callable
+import asyncio
 
-import services.util as u
 import services.logger as log
-import services.config_io as config_io
+import services.config as config
 from services.message import NormalizedMessage
 from services.db import msg_db
 
@@ -80,16 +80,38 @@ class Bridge:
     # ------------------------------------------------------------------
 
     def load_rules(self):
-        # Try to find rules file in supported formats
-        rules_path = config_io.find_rules(Path(u.get_data_path()))
+        # Load rules and normalize each rule with a stable id
+        rules, rules_path = config.load_rules_with_ids()
         if rules_path is None:
             logger.warning("No rules file found")
             self._rules = []
             return
 
-        data = config_io.load_config(rules_path)
-        self._rules = data.get("rules", [])
+        self._rules = rules
         logger.info(f"Loaded {len(self._rules)} bridge rule(s) from {rules_path.name}")
+
+    def _build_bridge_id(self, rule_id: str, msg: NormalizedMessage) -> str:
+        """Build a deterministic bridge id based on rule id and message fingerprint."""
+        if msg.message_id:
+            return f"{rule_id}:{msg.instance_id}:{msg.message_id}"
+
+        # Some drivers may not provide message_id; fallback to a stable fingerprint.
+        fingerprint_obj = {
+            "instance_id": msg.instance_id,
+            "channel": msg.channel,
+            "user_id": msg.user_id,
+            "text": msg.text,
+            "time": msg.time,
+        }
+        raw = json.dumps(
+            fingerprint_obj,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            default=str,
+        )
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return f"{rule_id}:{digest}"
 
     def _should_skip_echo(
         self, target_id: str, target_channel: dict, msg: NormalizedMessage
@@ -216,10 +238,11 @@ class Bridge:
     # ------------------------------------------------------------------
 
     async def on_message(self, msg: NormalizedMessage):
-        logger.debug(
-            f"on_message: platform={msg.platform} instance={msg.instance_id} "
-            f"channel={msg.channel} user={msg.user!r} text={msg.text!r}"
-        )
+        # logger.debug(
+        #     f"on_message: platform={msg.platform} instance={msg.instance_id} "
+        #     f"channel={msg.channel} user={msg.user!r} text={msg.text!r}"
+        # )
+        logger.debug(f"on_message: {str(msg)}")
         # Handle internal commands
         if msg.text.startswith("/bind"):
             await self._handle_bind_command(msg)
@@ -238,25 +261,36 @@ class Bridge:
         if msg.user_id:
             msg_db().save_user(msg.instance_id, msg.user_id, msg.user)
 
-        # Generate or resolve bridge_id for the incoming message
-        bridge_id = str(uuid.uuid4())
-        if msg.message_id:
-            msg_db().save_mapping(
-                bridge_id, msg.instance_id, str(msg.channel), msg.message_id
-            )
-
         reply_bridge_id = None
         if msg.reply_parent:
             reply_bridge_id = msg_db().get_bridge_id(msg.instance_id, msg.reply_parent)
+            if reply_bridge_id is None:
+                logger.debug(
+                    f"Reply parent mapping not found: instance={msg.instance_id} "
+                    f"parent={msg.reply_parent}"
+                )
 
         for rule in self._rules:
+            rule_id = str(rule.get("id", ""))
+            if not rule_id:
+                rule_id = config.stable_rule_hash(rule)
+
+            bridge_id = self._build_bridge_id(rule_id, msg)
             if rule.get("type") == "connect":
                 matched = self._matches_channel(msg, rule.get("channels", {}))
-                logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
+                # logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
                 if matched:
+                    if msg.message_id:
+                        msg_db().save_mapping(
+                            bridge_id, msg.instance_id, msg.channel, msg.message_id
+                        )
                     await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:
                 if self._matches_from(msg, rule.get("from", {})):
+                    if msg.message_id:
+                        msg_db().save_mapping(
+                            bridge_id, msg.instance_id, msg.channel, msg.message_id
+                        )
                     await self._dispatch(msg, rule, bridge_id, reply_bridge_id)
 
     def _matches_channel(self, msg: NormalizedMessage, channels: dict) -> bool:
@@ -273,13 +307,10 @@ class Bridge:
             if key in ("msg",):  # reserved — not a channel address field
                 continue
             if key not in msg.channel:
-                continue  # config-only field (webhook_url, msg_format, …) — skip
+                continue  # config-only field (webhook_url, msg_format, ...) — skip
             if str(msg.channel[key]) != str(expected):
-                logger.debug(
-                    f"Channel match fail for {msg.instance_id}: "
-                    f"{key}={msg.channel[key]!r} != expected {expected!r}"
-                )
                 return False
+        logger.debug(f"Channel match success for {msg.instance_id}: {key}={expected!r}")
         return True
 
     def _matches_from(self, msg: NormalizedMessage, from_cfg: dict) -> bool:
@@ -294,16 +325,24 @@ class Bridge:
         return True
 
     def _build_formatted(
-        self, msg: NormalizedMessage, msg_cfg: dict
+        self, msg: NormalizedMessage, msg_cfg: dict, is_webhook: bool = False
     ) -> tuple[str, dict]:
         """Return (formatted_text, extra_kwargs) for a given msg config block."""
-        fmt = msg_cfg.get("msg_format", "{msg}")
+        # Choose format based on send path
+        if is_webhook and "webhook_msg_format" in msg_cfg:
+            fmt = msg_cfg["webhook_msg_format"]
+        elif not is_webhook and "bot_msg_format" in msg_cfg:
+            fmt = msg_cfg["bot_msg_format"]
+        else:
+            fmt = msg_cfg.get(
+                "msg_format",
+                '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}',
+            )
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
             "from": msg.instance_id,
             "user": msg.user,
-            "username": msg.user,
             "user_id": msg.user_id,
             "user_avatar": msg.user_avatar,
             "msg": msg.text,
@@ -318,11 +357,18 @@ class Bridge:
         formatted, rich_header = _parse_richheader(formatted)
 
         extra: dict = {}
+        # Always pass the original message context to extra for drivers to use
+        extra.update(ctx)
+        # Pass source proxy for downloading attachments from source platform
+        extra["source_proxy"] = msg.source_proxy
         if rich_header is not None:
             rich_header["avatar"] = msg.user_avatar
             extra["rich_header"] = rich_header
         for k, v in msg_cfg.items():
-            if k == "msg_format":
+            # Skip msg_format and webhook/bot-specific format keys - they will be handled by the driver
+            if k in ("msg_format", "webhook_msg_format", "bot_msg_format"):
+                # Pass these format strings to extra without formatting - driver will handle them
+                extra[k] = v
                 continue
             try:
                 extra[k] = v.format(**ctx) if isinstance(v, str) else v
@@ -341,7 +387,11 @@ class Bridge:
         bridge_id: str,
         reply_bridge_id: str | None = None,
     ):
-        formatted, extra = self._build_formatted(msg, rule.get("msg", {}))
+        # Check if any target uses webhook
+        is_webhook = any("webhook_url" in ch for ch in rule.get("to", {}).values())
+        formatted, extra = self._build_formatted(
+            msg, rule.get("msg", {}), is_webhook=is_webhook
+        )
 
         for target_id, target_channel in rule.get("to", {}).items():
             # Skip echo based on strict_echo_match configuration
@@ -364,10 +414,19 @@ class Bridge:
             target_reply_id = None
             if reply_bridge_id:
                 target_reply_id = msg_db().get_platform_msg_id(
-                    reply_bridge_id, target_id, str(target_channel)
+                    reply_bridge_id, target_id, target_channel
                 )
                 if target_reply_id:
                     extra["reply_to_id"] = target_reply_id
+                    logger.debug(
+                        f"Reply mapping resolved for {target_id}: "
+                        f"bridge_id={reply_bridge_id} -> {target_reply_id}"
+                    )
+                else:
+                    logger.debug(
+                        f"Reply mapping missing for {target_id}: "
+                        f"bridge_id={reply_bridge_id}, channel={target_channel}"
+                    )
 
             # Resolve target mentions
             target_mentions = []
@@ -391,7 +450,7 @@ class Bridge:
                 )
                 if new_msg_id:
                     msg_db().save_mapping(
-                        bridge_id, target_id, str(target_channel), str(new_msg_id)
+                        bridge_id, target_id, target_channel, str(new_msg_id)
                     )
             except Exception as e:
                 logger.error(f"Failed to send to '{target_id}': {e}")
@@ -412,14 +471,22 @@ class Bridge:
 
             # Skip echo based on strict_echo_match configuration
             if self._should_skip_echo(target_id, target_channel, msg):
-                logger.debug(f"Skipping echo to {target_id}")
+                # logger.debug(f"Skipping echo to {target_id}")
                 continue
 
             logger.debug(f"Dispatching to {target_id} channel={target_channel}")
 
             # Per-target msg overrides the global msg (target wins on conflict)
             merged_msg_cfg = {**global_msg_cfg, **target_cfg.get("msg", {})}
-            formatted, extra = self._build_formatted(msg, merged_msg_cfg)
+
+            # Ensure webhook_url is passed to extra if present in target_cfg
+            is_webhook = "webhook_url" in target_cfg
+            if is_webhook:
+                merged_msg_cfg["webhook_url"] = target_cfg["webhook_url"]
+
+            formatted, extra = self._build_formatted(
+                msg, merged_msg_cfg, is_webhook=is_webhook
+            )
 
             if self._is_sensitive(formatted):
                 logger.warning(
@@ -437,10 +504,19 @@ class Bridge:
             target_reply_id = None
             if reply_bridge_id:
                 target_reply_id = msg_db().get_platform_msg_id(
-                    reply_bridge_id, target_id, str(target_channel)
+                    reply_bridge_id, target_id, target_channel
                 )
                 if target_reply_id:
                     extra["reply_to_id"] = target_reply_id
+                    logger.debug(
+                        f"Reply mapping resolved for {target_id}: "
+                        f"bridge_id={reply_bridge_id} -> {target_reply_id}"
+                    )
+                else:
+                    logger.debug(
+                        f"Reply mapping missing for {target_id}: "
+                        f"bridge_id={reply_bridge_id}, channel={target_channel}"
+                    )
 
             # Resolve target mentions
             target_mentions = []
@@ -464,10 +540,15 @@ class Bridge:
                 )
                 if new_msg_id:
                     msg_db().save_mapping(
-                        bridge_id, target_id, str(target_channel), str(new_msg_id)
+                        bridge_id, target_id, target_channel, str(new_msg_id)
                     )
-            except Exception as e:
-                logger.error(f"Failed to send to '{target_id}': {e}")
+            except asyncio.CancelledError:
+                logger.info(f"Message dispatch cancelled during send to {target_id}")
+                # Don't return - continue to process other targets
+                continue
+            except Exception:
+                logger.exception(f"Failed to send to '{target_id}")
+                return
 
 
 # Shared singleton used by all drivers

@@ -2,7 +2,7 @@
 #
 # Receive (two modes, controlled by use_long_connection):
 #
-#   HTTP webhook (default, use_long_connection = false):
+#   Long connection / WebSocket (default, use_long_connection = true):
 #     Feishu pushes events to an HTTP endpoint you expose.
 #     This driver starts an aiohttp server on a configurable port.
 #     Set that URL in the Feishu developer console under
@@ -19,7 +19,7 @@
 # Config keys (under feishu.<instance_id>):
 #   app_id               – Feishu app ID  (required)
 #   app_secret           – Feishu app secret  (required)
-#   use_long_connection  – true = WebSocket mode; false = HTTP webhook mode  (default: false)
+#   use_long_connection  – true = WebSocket mode; false = HTTP webhook mode  (default: true)
 #   verification_token   – Event verification token  (HTTP mode only)
 #   encrypt_key          – Event encryption key  (HTTP mode; leave "" to disable)
 #   listen_port          – HTTP port to listen on  (HTTP mode; default: 8080)
@@ -61,7 +61,7 @@ from drivers import BaseDriver
 class FeishuConfig(_DriverConfig):
     app_id: str
     app_secret: str
-    use_long_connection: bool = False
+    use_long_connection: bool = True
     verification_token: str = ""
     encrypt_key: str = ""
     listen_port: int = 8080
@@ -77,16 +77,20 @@ _WSS_URL_RE = re.compile(r"wss://\S+")
 class _LarkLogBridge(logging.Handler):
     """Forwards lark-oapi WS logs to the system logger, masking wss:// URLs."""
 
+    def __init__(self, instance_id: str):
+        self.instance_id = instance_id
+        super().__init__()
+
     def emit(self, record: logging.LogRecord) -> None:
         msg = _WSS_URL_RE.sub("wss://***", record.getMessage())
         if record.levelno >= logging.ERROR:
-            logger.error("Feishu WS: %s", msg)
+            logger.error(f"Feishu [{self.instance_id}] [WS] {msg}")
         elif record.levelno >= logging.WARNING:
-            logger.warning("Feishu WS: %s", msg)
+            logger.warning(f"Feishu [{self.instance_id}] [WS] {msg}")
         elif record.levelno >= logging.INFO:
-            logger.info("Feishu WS: %s", msg)
+            logger.info(f"Feishu [{self.instance_id}] [WS] {msg}")
         else:
-            logger.debug("Feishu WS: %s", msg)
+            logger.debug(f"Feishu [{self.instance_id}] [WS] {msg}")
 
 
 class FeishuDriver(BaseDriver[FeishuConfig]):
@@ -152,7 +156,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             # Redirect the lark-oapi "Lark" logger to the system logger.
             lark_logger = logging.getLogger("Lark")
             lark_logger.handlers.clear()
-            lark_logger.addHandler(_LarkLogBridge())
+            lark_logger.addHandler(_LarkLogBridge(self.instance_id))
             lark_logger.propagate = False
 
             ws_client = lark.ws.Client(

@@ -26,12 +26,30 @@ uv run main.py convert data/rules.yaml data/rules.toml
 ```jsonc
 {
   "rules": [
-    // ... 规则对象 ...
+    {
+      "id": "可选的稳定规则ID",
+      // ... 规则对象 ...
+    }
   ]
 }
 ```
 
 规则按顺序对每条收到的消息逐一匹配，一条消息可以命中多条规则。
+
+## 规则 ID
+
+每条规则支持可选字段 `id`。
+
+- 若配置了 `id`，NextBridge 直接使用该值。
+- 若未配置 `id`，NextBridge 会对规则对象（递归去掉所有 `msg` 块）计算稳定哈希并作为 id。
+
+该 `id` 会作为消息映射存储键的一部分，因此重启后映射关系可以保持稳定。
+
+说明：
+
+- 仅修改 `msg` 格式不会改变自动生成的规则 id。
+- 修改路由字段（如 `from` / `to` / `channels`）可能会改变自动生成的规则 id。
+- 若存在重复 id，NextBridge 会自动追加后缀，如 `#2`、`#3`。
 
 ---
 
@@ -180,7 +198,7 @@ uv run main.py convert data/rules.yaml data/rules.toml
     "my_tg": {
       "chat_id": "-100987654321",
       "msg": {
-        "msg_format": "<richheader title=\"{user}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
+        "msg_format": "<richheader title=\"{user}\" content=\"{user_id} @ {platform}\"/> {msg}"
       }
     }
   }
@@ -238,8 +256,7 @@ Alice (123456789): 大家好
 NextBridge 会自动扫描每条即将发出的消息文本，检查其中是否包含与 `config.json` 中凭据（Bot Token、Secret、Webhook URL、密码等）匹配的字符串。若匹配成功，该消息将被**拦截**，并在控制台输出警告：
 
 ```
-[WRN] Message to 'my_discord' blocked: text contains a sensitive value from config
-      (token/secret/webhook). Possible credential leak.
+[WRN] Message to 'my_discord' blocked: text contains a sensitive value from config (token/secret/webhook). Possible credential leak.
 ```
 
 此机制可防止凭据通过消息桥接意外泄露（例如：用户将复制的 Token 直接发送到聊天群中）。

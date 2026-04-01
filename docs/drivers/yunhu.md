@@ -21,8 +21,8 @@ Add under `yunhu.<instance_id>` in `config.json`:
 | `token` | Yes | — | Bot token from the Yunhu developer portal |
 | `webhook_port` | No | `8765` | Port for the incoming webhook HTTP server |
 | `webhook_path` | No | `"/yunhu-webhook"` | HTTP path for the webhook endpoint |
-| `proxy_host` | No | — | Base URL of the `cloudflare/yh-proxy.js` Worker. Enables two sub-features: avatar URLs are rewritten to `<host>/pfp?url=…` (adds required Referer); Discord CDN attachment URLs are rewritten to `<host>/media?url=…` so Yunhu's servers can fetch them from within China Mainland. |
-| `proxy` | No | — | Proxy URL for all Yunhu API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). |
+| `proxy_host` | No | `"https://yh-proxy.siiway.top"` | Base URL of the `cloudflare/yh-proxy.js` Worker. Enables two sub-features: avatar URLs are rewritten to `<host>/pfp?url=...` (adds required Referer); Discord CDN attachment URLs are rewritten to `<host>/media?url=...` so Yunhu's servers can fetch them from within China Mainland. |
+| `proxy` | No | — | Proxy URL for all Yunhu API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ::: tip Public endpoint available
 `https://yh-proxy.siiway.top` is a hosted instance of `cloudflare/yh-proxy.js` that you can use directly without deploying your own Worker.
@@ -80,6 +80,6 @@ The text portion (including any rich-header prefix) is sent first, then each att
 
 ## Notes
 
-- Yunhu must be able to reach the webhook URL from the internet. When running behind NAT, use a reverse proxy or a tunnel such as `ngrok`.
+- Yunhu must be able to reach the webhook URL from the internet. When running behind NAT, use a reverse proxy or a tunnel such as `ngrok / Cloudflare Tunnel`.
 - Each NextBridge instance binds a single port. If you have multiple Yunhu instances, give each a different `webhook_port`.
-- The bot token is sent as a query parameter (`?token=…`) on every outgoing request — keep it secret.
+- The bot token is sent as a query parameter (`?token=...`) on every outgoing request — keep it secret.

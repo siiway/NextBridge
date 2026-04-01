@@ -1,0 +1,44 @@
+name: Ruff Lint & Format & Auto Fix
+
+on:
+  push:
+    branches-ignore:
+      - "dependabot/**"
+      - "temp/**"
+      - "scratch/**"
+    paths-ignore:
+      - ".github/**"
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Ruff & Run Fix (lint issues)
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: "check --fix"
+
+      - name: Run Ruff format
+        run: ruff format .
+
+      - name: Auto commit fixes with Verified badge
+        uses: siiway/verified_bot_commit@v0
+        with:
+          message: "[skip ci] style: code auto-fix & format"
+          files: |
+            *.py
+            **/*.py
+          ref: ${{ github.head_ref || github.ref }}
+          if-no-commit: notice

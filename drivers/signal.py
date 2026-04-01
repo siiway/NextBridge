@@ -33,7 +33,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
-from services.config import get
+from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
 
@@ -41,7 +41,7 @@ class SignalConfig(_DriverConfig):
     api_url: str
     number: str
     max_file_size: int = 50 * 1024 * 1024
-    proxy: str = ""
+    proxy: str | None = UNSET
 
 
 logger = log.get_logger()
@@ -61,7 +61,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
     def __init__(self, instance_id: str, config: SignalConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
-        self._proxy: str | None = config.proxy or get("global.proxy", "") or None
+        self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -107,7 +107,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
                 except aiohttp.ClientError as e:
                     logger.error(f"Signal [{self.instance_id}] connection error: {e}")
 
-                logger.info(f"Signal [{self.instance_id}] reconnecting in 5 s…")
+                logger.info(f"Signal [{self.instance_id}] reconnecting in 5 s...")
                 await asyncio.sleep(5)
         finally:
             await self._session.close()
@@ -197,6 +197,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             user_avatar="",
             text=text,
             attachments=attachments,
+            source_proxy=self._proxy,
             mentions=mentions,
         )
         await self.bridge.on_message(normalized)
@@ -283,7 +284,9 @@ class SignalDriver(BaseDriver[SignalConfig]):
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, self._proxy
+            )
             if result:
                 data_bytes, mime = result
                 b64_atts.append(

@@ -194,8 +194,8 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
 
         try:
             token = await self._get_access_token()
-        except Exception as e:
-            logger.error(f"DingTalk [{self.instance_id}] access token error: {e}")
+        except Exception:
+            logger.exception(f"DingTalk [{self.instance_id}] access token error")
             return
 
         # Handle mentions
@@ -288,8 +288,10 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                     req, headers, util_models.RuntimeOptions()
                 ),
             )
-        except Exception as e:
-            logger.error(f"DingTalk [{self.instance_id}] send failed ({msg_key}): {e}")
+        except Exception:
+            logger.exception(
+                f"DingTalk [{self.instance_id}] send failed (msg {msg_key})"
+            )
 
     async def _upload_media(
         self,
@@ -319,8 +321,8 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                     f"DingTalk [{self.instance_id}] media upload failed "
                     f"HTTP {resp.status}: {body[:200]}"
                 )
-        except Exception as e:
-            logger.error(f"DingTalk [{self.instance_id}] media upload error: {e}")
+        except Exception:
+            logger.exception(f"DingTalk [{self.instance_id}] media upload error")
         return None
 
     # ------------------------------------------------------------------

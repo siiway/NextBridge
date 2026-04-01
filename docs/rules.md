@@ -26,12 +26,30 @@ The rules file has the following structure regardless of format:
 ```jsonc
 {
   "rules": [
-    // ... rule objects ...
+    {
+      "id": "optional-stable-rule-id",
+      // ... rule object ...
+    }
   ]
 }
 ```
 
 Rules are evaluated in order for every incoming message. A message can match multiple rules.
+
+## Rule id
+
+Each rule supports an optional `id` field.
+
+- If `id` is configured, NextBridge uses it directly.
+- If `id` is not configured, NextBridge generates a stable hash from the rule object after removing all `msg` blocks.
+
+This `id` is used as part of the message mapping key in storage, so mappings remain stable across restarts.
+
+Notes:
+
+- Changing only `msg` formatting does not change the auto-generated rule id.
+- Changing routing fields (for example `from` / `to` / `channels`) can change the auto-generated rule id.
+- If duplicate ids are detected, NextBridge auto-adjusts them with suffixes like `#2`, `#3`.
 
 ---
 
@@ -180,7 +198,7 @@ Both attributes support the same `{variable}` substitutions as `msg_format`.
     "my_tg": {
       "chat_id": "-100987654321",
       "msg": {
-        "msg_format": "<richheader title=\"{user}\" content=\"id: {user_id} platform: {platform}\"/> {msg}"
+        "msg_format": "<richheader title=\"{user}\" content=\"{user_id} @ {platform}\"/> {msg}"
       }
     }
   }
