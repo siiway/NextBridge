@@ -24,7 +24,7 @@ from pathlib import Path
 import websockets
 import websockets.exceptions
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import services.logger as log
 import services.media as media
