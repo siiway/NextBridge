@@ -1,6 +1,6 @@
 # NextBridge
 
-> The chat bridge that links up all the major chat platforms!
+> *The chat bridge that links up all the major chat platforms!*
 
 **Docs (English): <https://nextbridge.siiway.org>**
 
@@ -52,9 +52,3 @@
 ## License
 
 GNU General Public License v3.0. See [LICENSE](./LICENSE) for details.
-
-## Thanks
-
-### [neonize](https://github.com/krypton-byte/neonize)
-
-Licensed under Apache-2.0 license.
