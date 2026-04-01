@@ -899,6 +899,36 @@ wheels = [
 ]
 
 [[package]]
+name = "neonize"
+version = "0.3.15.post0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+dependencies = [
+    { name = "httpx" },
+    { name = "linkpreview" },
+    { name = "phonenumbers" },
+    { name = "pillow" },
+    { name = "protobuf" },
+    { name = "python-magic", marker = "sys_platform != 'win32'" },
+    { name = "python-magic-bin", marker = "sys_platform == 'win32'" },
+    { name = "requests" },
+    { name = "segno" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/9b/a0/5e06df362b952fe08381ff10709ab4826640ae2fd86cb3a0ef4bcb5dae03/neonize-0.3.15.post0.tar.gz", hash = "sha256:85495c2667b88ae1dd8c3e292c101e5dcdff0e14c9692a299a2b73eb21239e9c" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/09/0a/bc71332742dd7a03a1606b90e49ec8fcf8702cecef478a4447757aff9107/neonize-0.3.15.post0-py3-none-any.whl", hash = "sha256:81cc261d8385ca62abed153bca7259780919eec3201be26dc17511da444713ab" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/f2/3d/139f12a73a8877de4105cb433123eaa521067181ca82ccf2176ba45239f2/neonize-0.3.15.post0-py310-none-macosx_12_0_arm64.whl", hash = "sha256:01581bf87add59565e8e69461ba5b244f886ca41a122b68b245a5a146fce74f0" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/f9/0c/04d23b45547da915e3c320ee2fcf4b43f2821d209d24a7edd82d75c381e9/neonize-0.3.15.post0-py310-none-macosx_12_0_x86_64.whl", hash = "sha256:7936f3cc6f837390e70cb9fcdab9611a3c8ce4f38ac6cb6231c43559ae07d13a" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/a0/f3/290fdf4fd000175eee4ef542737d1e3683183dc262ad57dca009aea5e960/neonize-0.3.15.post0-py310-none-manylinux2014_aarch64.whl", hash = "sha256:bd4767dfb9656779e1a25d18e0e314b415812d0dec66436115b6b5740677d208" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/ab/6f/e4640ac0f0e7ca9348e83c976448eff13df49dd28783982e2788c790de34/neonize-0.3.15.post0-py310-none-manylinux2014_i686.whl", hash = "sha256:e75a83b5b518ac9029af990aaa7050b9a4f8188d597897640319e223747f3347" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/18/7b/26b5ae0e76ff8ce3de91d5a22d1eb638da51b50f8bb9bb94187e67f2ec62/neonize-0.3.15.post0-py310-none-manylinux2014_s390x.whl", hash = "sha256:f39402898d1f8fd393244813517f87dc9758b9f50ca53aae693a1ba21e1c5585" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/f3/b5/540dcee5ccb884b91b8c2ab023ad8e79ea33c300fcdfb7f1c3f506c2a03a/neonize-0.3.15.post0-py310-none-manylinux2014_x86_64.whl", hash = "sha256:26b40e8208e303fbf612c03d1ba0c31ae938da4f5e1821c06e3385f0d76a28e4" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/94/d5/4599a06d9060e05bdeadb2fee2790e392dac382c502546c2cbb52708bd0e/neonize-0.3.15.post0-py310-none-win32.whl", hash = "sha256:31fe45b2a58c2ed75584200abfa76987ffc9fa8350e860081e2789c774d8cef0" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/fd/0b/0fa999fae522fd8f36cf34dc22fc05dd88fc436f5be14d33179aab02e7c9/neonize-0.3.15.post0-py310-none-win_amd64.whl", hash = "sha256:67b5872bf31fe960346022b1c0ab45a818ec5cf842d246319c319dded2350963" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/e6/95/c88fe4eee07cae4fb95e62856eca30863183d3c54e5742e156930c206621/neonize-0.3.15.post0-py310-none-win_arm64.whl", hash = "sha256:6f5406c25de143d590d30f8fc3efb6dc9e94fb78cc26226d49e358c09df9bfd5" },
+]
+
+[[package]]
 name = "nextbridge"
 version = "0.2.0"
 source = { virtual = "." }
@@ -1416,6 +1446,15 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/37/e6/90b2b33419f59d0f2c4c8a48a4b74b460709a557e8e0064cf33ad894f983/ruff-0.15.8-py3-none-win32.whl", hash = "sha256:bc1f0a51254ba21767bfa9a8b5013ca8149dcf38092e6a9eb704d876de94dc34" },
     { url = "https://mirrors.aliyun.com/pypi/packages/1f/a2/ef467cb77099062317154c63f234b8a7baf7cb690b99af760c5b68b9ee7f/ruff-0.15.8-py3-none-win_amd64.whl", hash = "sha256:04f79eff02a72db209d47d665ba7ebcad609d8918a134f86cb13dd132159fc89" },
     { url = "https://mirrors.aliyun.com/pypi/packages/15/e2/77be4fff062fa78d9b2a4dea85d14785dac5f1d0c1fb58ed52331f0ebe28/ruff-0.15.8-py3-none-win_arm64.whl", hash = "sha256:cf891fa8e3bb430c0e7fac93851a5978fc99c8fa2c053b57b118972866f8e5f2" },
+]
+
+[[package]]
+name = "segno"
+version = "1.6.6"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/1c/2e/b396f750c53f570055bf5a9fc1ace09bed2dff013c73b7afec5702a581ba/segno-1.6.6.tar.gz", hash = "sha256:e60933afc4b52137d323a4434c8340e0ce1e58cec71439e46680d4db188f11b3" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/d6/02/12c73fd423eb9577b97fc1924966b929eff7074ae6b2e15dd3d30cb9e4ae/segno-1.6.6-py3-none-any.whl", hash = "sha256:28c7d081ed0cf935e0411293a465efd4d500704072cdb039778a2ab8736190c7" },
 ]
 
 [[package]]
