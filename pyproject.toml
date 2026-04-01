@@ -15,7 +15,7 @@ dependencies = [
     "yunhu>=0.0.11",
     "pyyaml>=6.0",
     "tomli-w>=1.0",
-    "mautrix[crypto]>=0.21.0",
+    "mautrix>=0.21.0",
     "vodozemac>=0.6.0",
     "unpaddedbase64>=2.1.0",
     "base58>=2.1.1",
@@ -31,8 +31,16 @@ dependencies = [
 ]
 
 [[tool.uv.index]]
-name = "aliyun"
-url = "https://mirrors.aliyun.com/pypi/simple/"
+name = "ustc"
+url = "https://mirrors.ustc.edu.cn/pypi/web/simple/"
+
+# Backup
+# [[tool.uv.index]]
+# name = "siiway-mirror"
+# url = "https://pypi-mirror.siiway.top/pypi/simple/"
+# [[tool.uv.index]]
+# name = "cernet"
+# url = "https://mirrors.cernet.edu.cn/pypi/web/simple"
 
 [tool.ruff]
 line-length = 88
