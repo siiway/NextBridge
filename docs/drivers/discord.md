@@ -23,6 +23,10 @@ Add under `discord.<instance_id>` in `config.json`:
 | `max_file_size` | No | `8388608` (8 MB) | Maximum bytes per attachment when sending |
 | `send_as_bot_when_using_cqface_emoji` | No | `false` | When `true`, messages containing `:cqface<id>:` tokens (emitted by the NapCat driver's `cqface_mode: "emoji"`) are sent via the bot instead of the webhook, even if `send_method` is `"webhook"`. Requires `bot_token`. |
 | `send_replies_as_bot` | No | `true` | When `true`, reply messages are sent via the bot (if connected) even when `send_method` is `"webhook"`, because Discord webhook mode does not support specifying a reply target message. Requires `bot_token` to take effect. |
+| `allow_mentions_everyone` | No | `false` | Controls whether outgoing messages can trigger `@everyone` / `@here` mentions on Discord. |
+| `allow_mentions_users` | No | `true` | Controls whether outgoing messages can mention users (`<@id>`). |
+| `allow_mentions_roles` | No | `false` | Controls whether outgoing messages can mention roles (`<@&id>`). |
+| `sanitize_mass_mentions` | No | `true` | When `true`, outgoing plain text `@everyone` / `@here` is neutralized to avoid mass pings. |
 | `proxy` | No | — | Proxy URL for all Discord API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). When set, SSL verification is disabled for the proxy connection. Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 \* For receiving messages, `bot_token` must be provided. For webhook-only sending, only `webhook_url` in rules is required.
@@ -34,6 +38,10 @@ Add under `discord.<instance_id>` in `config.json`:
       "bot_token": "your_bot_token",
       "send_method": "webhook",
       "max_file_size": 8388608,
+      "allow_mentions_everyone": false,
+      "allow_mentions_users": true,
+      "allow_mentions_roles": false,
+      "sanitize_mass_mentions": true,
       "proxy": "http://proxy.example.com:8080"
     }
   }

@@ -23,6 +23,10 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 | `max_file_size` | 否 | `8388608`（8 MB） | 发送附件时单个文件的最大字节数 |
 | `send_as_bot_when_using_cqface_emoji` | 否 | `false` | 为 `true` 时，包含 `:cqface<id>:` 标记的消息（由 NapCat 驱动器的 `cqface_mode: "emoji"` 生成）将通过 Bot 发送，即使 `send_method` 设置为 `"webhook"` 亦然。需配置 `bot_token`。 |
 | `send_replies_as_bot` | 否 | `true` | 为 `true` 时，回复消息在 Bot 已连接情况下会优先通过 Bot 发送，即使 `send_method` 为 `"webhook"`。原因是 Discord Webhook 模式不支持指定回复目标消息。需配置 `bot_token` 才会生效。 |
+| `allow_mentions_everyone` | 否 | `false` | 控制出站消息是否允许触发 Discord 的 `@everyone` / `@here` 提醒。 |
+| `allow_mentions_users` | 否 | `true` | 控制出站消息是否允许提及用户（`<@id>`）。 |
+| `allow_mentions_roles` | 否 | `false` | 控制出站消息是否允许提及身份组（`<@&id>`）。 |
+| `sanitize_mass_mentions` | 否 | `true` | 为 `true` 时，会对出站文本中的 `@everyone` / `@here` 做去活化，避免群体提醒。 |
 | `proxy` | 否 | — | 所有 Discord API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。设置后，代理连接将禁用 SSL 验证。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
 
 \* 接收消息时需要提供 `bot_token`。仅使用 webhook 发送时，只需在规则中提供 `webhook_url`。
@@ -34,6 +38,10 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
       "bot_token": "your_bot_token",
       "send_method": "webhook",
       "max_file_size": 8388608,
+      "allow_mentions_everyone": false,
+      "allow_mentions_users": true,
+      "allow_mentions_roles": false,
+      "sanitize_mass_mentions": true,
       "proxy": "http://proxy.example.com:8080"
     }
   }

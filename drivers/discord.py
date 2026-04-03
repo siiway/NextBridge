@@ -45,6 +45,10 @@ class DiscordConfig(_DriverConfig):
     max_file_size: int = 8 * 1024 * 1024
     send_as_bot_when_using_cqface_emoji: CoercedBool = False
     send_replies_as_bot: CoercedBool = True
+    allow_mentions_everyone: CoercedBool = False
+    allow_mentions_users: CoercedBool = True
+    allow_mentions_roles: CoercedBool = False
+    sanitize_mass_mentions: CoercedBool = True
     proxy: str | None = UNSET
 
 
@@ -53,6 +57,7 @@ logger = log.get_logger()
 _CQFACE_RE = re.compile(r":cqface(\d+):")
 _RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
 _ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+_MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 
 
 def _parse_richheader(text: str) -> tuple[str, dict | None]:
@@ -62,6 +67,12 @@ def _parse_richheader(text: str) -> tuple[str, dict | None]:
     attrs = dict(_ATTR_RE.findall(m.group(1)))
     clean = (text[: m.start()] + text[m.end() :]).strip()
     return clean, attrs or None
+
+
+def _sanitize_mass_mentions(text: str) -> tuple[str, bool]:
+    """Neutralize @everyone/@here so they cannot trigger mass pings."""
+    sanitized, count = _MASS_MENTION_RE.subn(lambda m: f"@ {m.group(1)}", text)
+    return sanitized, count > 0
 
 
 class DiscordDriver(BaseDriver[DiscordConfig]):
@@ -77,6 +88,16 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._emoji_cache: dict[str, str] = {}
         # name → emoji_id index built lazily from discord_emojis.json
         self._emoji_db: dict[str, str] | None = None
+
+    def _allowed_mentions_parse(self) -> list[str]:
+        parse: list[str] = []
+        if self.config.allow_mentions_everyone:
+            parse.append("everyone")
+        if self.config.allow_mentions_users:
+            parse.append("users")
+        if self.config.allow_mentions_roles:
+            parse.append("roles")
+        return parse
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -354,6 +375,13 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         for m in mentions:
             text = text.replace(f"@{m['name']}", f"<@{m['id']}>")
 
+        if self.config.sanitize_mass_mentions:
+            text, had_mass_mentions = _sanitize_mass_mentions(text)
+            if had_mass_mentions:
+                logger.warning(
+                    f"Discord [{self.instance_id}] blocked @everyone/@here mention in outgoing message"
+                )
+
         if is_webhook_send:
             assert webhook_url is not None  # Type narrowing for type checker
             if reply_to_id:
@@ -384,7 +412,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         if self._session is None or not webhook_url:
             return None
 
-        payload: dict = {"content": text}
+        payload: dict = {
+            "content": text,
+            "allowed_mentions": {"parse": self._allowed_mentions_parse()},
+        }
 
         # Format webhook_title and webhook_avatar if they are format strings
         ctx = {
@@ -553,6 +584,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 send_kwargs["files"] = discord_files
             if reference is not None:
                 send_kwargs["reference"] = reference
+            send_kwargs["allowed_mentions"] = discord.AllowedMentions(
+                everyone=self.config.allow_mentions_everyone,
+                users=self.config.allow_mentions_users,
+                roles=self.config.allow_mentions_roles,
+            )
 
             sent = await ch.send(**send_kwargs)
             return str(sent.id)
