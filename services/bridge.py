@@ -474,7 +474,10 @@ class Bridge:
 
             try:
                 new_msg_id = await sender(
-                    target_channel, formatted_out, attachments=msg.attachments, **extra_out
+                    target_channel,
+                    formatted_out,
+                    attachments=msg.attachments,
+                    **extra_out,
                 )
                 if new_msg_id:
                     msg_db().save_mapping(
@@ -569,7 +572,10 @@ class Bridge:
 
             try:
                 new_msg_id = await sender(
-                    target_channel, formatted_out, attachments=msg.attachments, **extra_out
+                    target_channel,
+                    formatted_out,
+                    attachments=msg.attachments,
+                    **extra_out,
                 )
                 if new_msg_id:
                     msg_db().save_mapping(
