@@ -73,7 +73,7 @@ class KookDriver(BaseDriver[KookConfig]):
 
                 return await original_request(method, route, **params)
 
-            requester.request = proxied_request  # type: ignore
+            requester.request = proxied_request
 
         # Register our handler alongside khl's internal command-manager handler.
         # khl's Client dispatches to all registered handlers for a given type.

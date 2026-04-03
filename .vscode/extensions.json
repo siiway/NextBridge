@@ -3,7 +3,7 @@
         "charliermarsh.ruff",
         "tamasfe.even-better-toml",
         "yzhang.markdown-all-in-one",
-        "astral-sh.ty",
+        // "astral-sh.ty",
         "ms-python.python",
         "redhat.vscode-yaml"
     ]

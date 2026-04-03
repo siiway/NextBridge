@@ -316,7 +316,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
 
                 # Create a new event with decrypted content
                 decrypted_msg_event = MessageEvent(
-                    content=decrypted_event,  # type: ignore
+                    content=decrypted_event,
                     type=EventType.ROOM_MESSAGE,
                     room_id=RoomID(event.room_id),
                     event_id=event.event_id,

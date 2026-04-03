@@ -1,11 +1,12 @@
 import re
 import json
 import hashlib
-from typing import Callable
+from typing import Any, Callable
 import asyncio
 
 import services.logger as log
 import services.config as config
+import services.cqface as cqface
 from services.message import NormalizedMessage
 from services.db import msg_db
 
@@ -71,7 +72,7 @@ class Bridge:
 
     def __init__(self):
         self._rules: list[dict] = []
-        self._senders: dict[str, Callable] = {}
+        self._senders: dict[str, tuple[str | None, Callable]] = {}
         self._sensitive: frozenset[str] = frozenset()
         self.strict_echo_match: bool = False
 
@@ -137,7 +138,14 @@ class Bridge:
         )
 
     def register_sender(self, instance_id: str, send_func: Callable):
-        self._senders[instance_id] = send_func
+        platform = None
+        owner = getattr(send_func, "__self__", None)
+        if owner is not None:
+            module = owner.__class__.__module__
+            if module.startswith("drivers."):
+                platform = module.split(".", 1)[1]
+
+        self._senders[instance_id] = (platform, send_func)
         logger.debug(f"Registered sender for instance: {instance_id}")
 
     async def _handle_bind_command(self, msg: NormalizedMessage):
@@ -147,8 +155,9 @@ class Bridge:
         code = f"{random.randint(100000, 999999)}"
         msg_db().create_binding_code(code, msg.instance_id, msg.user_id)
 
-        sender = self._senders.get(msg.instance_id)
-        if sender:
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, sender = sender_info
             try:
                 await sender(
                     msg.channel,
@@ -161,16 +170,18 @@ class Bridge:
         """Confirm a binding code from another platform."""
         parts = msg.text.split()
         if len(parts) < 2:
-            sender = self._senders.get(msg.instance_id)
-            if sender:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, sender = sender_info
                 await sender(msg.channel, "Usage: `/confirm <code>`")
             return
 
         code = parts[1]
         success = msg_db().consume_binding_code(code, msg.instance_id, msg.user_id)
 
-        sender = self._senders.get(msg.instance_id)
-        if sender:
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, sender = sender_info
             if success:
                 await sender(
                     msg.channel,
@@ -187,8 +198,9 @@ class Bridge:
         success = msg_db().remove_user_binding(
             msg.instance_id, msg.user_id, target_inst
         )
-        sender = self._senders.get(msg.instance_id)
-        if sender:
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, sender = sender_info
             if success:
                 if target_inst:
                     await sender(
@@ -213,8 +225,9 @@ class Bridge:
     async def _handle_list_command(self, msg: NormalizedMessage):
         """List all accounts linked to the user's global identity."""
         bindings = msg_db().get_all_bindings(msg.instance_id, msg.user_id)
-        sender = self._senders.get(msg.instance_id)
-        if sender:
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, sender = sender_info
             if not bindings:
                 await sender(
                     msg.channel, "❓ You don't have any active account bindings."
@@ -380,6 +393,16 @@ class Bridge:
     def _is_sensitive(self, text: str) -> bool:
         return bool(self._sensitive) and any(s in text for s in self._sensitive)
 
+    def _normalize_target_cqface(
+        self, target_platform: str | None, text: str, extra: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
+        if target_platform == "discord":
+            return text, dict(extra)
+
+        return cqface.replace_cqface_tokens(text), cqface.replace_cqface_tokens_in_obj(
+            extra
+        )
+
     async def _dispatch(
         self,
         msg: NormalizedMessage,
@@ -405,10 +428,15 @@ class Bridge:
                 )
                 continue
 
-            sender = self._senders.get(target_id)
-            if sender is None:
+            sender_info = self._senders.get(target_id)
+            if sender_info is None:
                 logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
+            target_platform, sender = sender_info
+
+            formatted_out, extra_out = self._normalize_target_cqface(
+                target_platform, formatted, extra
+            )
 
             # Resolve target reply ID
             target_reply_id = None
@@ -417,7 +445,7 @@ class Bridge:
                     reply_bridge_id, target_id, target_channel
                 )
                 if target_reply_id:
-                    extra["reply_to_id"] = target_reply_id
+                    extra_out["reply_to_id"] = target_reply_id
                     logger.debug(
                         f"Reply mapping resolved for {target_id}: "
                         f"bridge_id={reply_bridge_id} -> {target_reply_id}"
@@ -442,11 +470,11 @@ class Bridge:
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
             if target_mentions:
-                extra["mentions"] = target_mentions
+                extra_out["mentions"] = target_mentions
 
             try:
                 new_msg_id = await sender(
-                    target_channel, formatted, attachments=msg.attachments, **extra
+                    target_channel, formatted_out, attachments=msg.attachments, **extra_out
                 )
                 if new_msg_id:
                     msg_db().save_mapping(
@@ -495,10 +523,15 @@ class Bridge:
                 )
                 continue
 
-            sender = self._senders.get(target_id)
-            if sender is None:
+            sender_info = self._senders.get(target_id)
+            if sender_info is None:
                 logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
+            target_platform, sender = sender_info
+
+            formatted_out, extra_out = self._normalize_target_cqface(
+                target_platform, formatted, extra
+            )
 
             # Resolve target reply ID
             target_reply_id = None
@@ -507,7 +540,7 @@ class Bridge:
                     reply_bridge_id, target_id, target_channel
                 )
                 if target_reply_id:
-                    extra["reply_to_id"] = target_reply_id
+                    extra_out["reply_to_id"] = target_reply_id
                     logger.debug(
                         f"Reply mapping resolved for {target_id}: "
                         f"bridge_id={reply_bridge_id} -> {target_reply_id}"
@@ -532,11 +565,11 @@ class Bridge:
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
             if target_mentions:
-                extra["mentions"] = target_mentions
+                extra_out["mentions"] = target_mentions
 
             try:
                 new_msg_id = await sender(
-                    target_channel, formatted, attachments=msg.attachments, **extra
+                    target_channel, formatted_out, attachments=msg.attachments, **extra_out
                 )
                 if new_msg_id:
                     msg_db().save_mapping(

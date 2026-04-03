@@ -30,7 +30,10 @@ import aiohttp
 
 from typing import Literal
 
+from pydantic import field_validator
+
 import services.logger as log
+import services.cqface as cqface
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
@@ -43,13 +46,23 @@ class DiscordConfig(_DriverConfig):
     send_method: Literal["webhook", "bot"] = "webhook"
     bot_token: str = ""
     max_file_size: int = 8 * 1024 * 1024
-    send_as_bot_when_using_cqface_emoji: CoercedBool = False
+    cqface_webhook_fallback: Literal["bot", "unicode"] = "unicode"
     send_replies_as_bot: CoercedBool = True
     allow_mentions_everyone: CoercedBool = False
     allow_mentions_users: CoercedBool = True
     allow_mentions_roles: CoercedBool = False
     sanitize_mass_mentions: CoercedBool = True
     proxy: str | None = UNSET
+
+    @field_validator("cqface_webhook_fallback", mode="before")
+    def _normalize_cqface_webhook_fallback(cls, value):
+        if isinstance(value, bool):
+            return "bot" if value else "unicode"
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ("bot", "unicode"):
+                return normalized
+        return value
 
 
 logger = log.get_logger()
@@ -264,7 +277,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         2. ``data/discord_emojis.json`` indexed by emoji name ``cqface<id>``.
         3. Walk every guild the bot is connected to and search for a custom
            emoji whose name is ``cqface<id>``.
-        4. Fall back to the plain ``:cqface<id>:`` text token.
+                4. Fall back to the Unicode mapping in ``db/cqface-map.yaml``.
         """
         if face_id in self._emoji_cache:
             return self._emoji_cache[face_id]
@@ -287,7 +300,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     self._emoji_cache[face_id] = result
                     return result
 
-        return f":cqface{face_id}:"  # plain fallback
+        return cqface.resolve_cqface(face_id)
 
     def _expand_cqface_emojis(self, text: str) -> str:
         """Replace all ``:cqface<id>:`` tokens with Discord emoji strings."""
@@ -306,11 +319,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     ):
         has_cqface = bool(re.search(r":cqface\d+:", text))
         reply_to_id = kwargs.get("reply_to_id")
-        force_bot = (
-            has_cqface
-            and self.config.send_as_bot_when_using_cqface_emoji
-            and self._client is not None
-        )
+        force_bot = False
 
         # Discord webhook mode does not support specifying reply targets.
         # If bot client is available, prefer bot send for reply messages.
@@ -320,6 +329,17 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 f"Discord [{self.instance_id}] forcing bot send for reply "
                 f"reference={reply_to_id}"
             )
+
+        # If webhook fallback is set to bot, prefer bot send when cqface is present.
+        if has_cqface and self._send_method == "webhook":
+            if self.config.cqface_webhook_fallback == "bot":
+                if self._client is not None:
+                    force_bot = True
+                else:
+                    logger.warning(
+                        f"Discord [{self.instance_id}] cqface webhook fallback set to bot, "
+                        "but bot_token is unavailable; using unicode fallback"
+                    )
 
         # Get webhook_url from rule msg config (kwargs) or channel dict
         webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
@@ -361,8 +381,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         # The 'text' parameter passed here is already formatted
 
         # Expand :cqface<id>: tokens into proper Discord custom emoji strings
-        if has_cqface:
+        # when sending via bot; webhook fallback can stay Unicode.
+        if has_cqface and (self._send_method == "bot" or force_bot):
             text = self._expand_cqface_emojis(text)
+        elif has_cqface and self._send_method == "webhook":
+            text = cqface.replace_cqface_tokens(text)
 
         rich_header = kwargs.get("rich_header")
         if rich_header:

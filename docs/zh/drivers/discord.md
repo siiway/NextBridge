@@ -21,7 +21,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 | `bot_token` | 否* | — | Discord Bot Token，接收消息和 `bot` 发送模式均需此项 |
 | `send_method` | 否 | `webhook` | `"webhook"` 或 `"bot"` |
 | `max_file_size` | 否 | `8388608`（8 MB） | 发送附件时单个文件的最大字节数 |
-| `send_as_bot_when_using_cqface_emoji` | 否 | `false` | 为 `true` 时，包含 `:cqface<id>:` 标记的消息（由 NapCat 驱动器的 `cqface_mode: "emoji"` 生成）将通过 Bot 发送，即使 `send_method` 设置为 `"webhook"` 亦然。需配置 `bot_token`。 |
+| `cqface_webhook_fallback` | 否 | `unicode` | 控制消息中包含 `:cqface<id>:` 标记且使用 Webhook 发送时的回退方式。设为 `"bot"` 时会改用 Bot 发送；设为 `"unicode"` 时仍使用 Webhook，并按 `db/cqface-map.yaml` 中的 Unicode 映射替换标记。 |
 | `send_replies_as_bot` | 否 | `true` | 为 `true` 时，回复消息在 Bot 已连接情况下会优先通过 Bot 发送，即使 `send_method` 为 `"webhook"`。原因是 Discord Webhook 模式不支持指定回复目标消息。需配置 `bot_token` 才会生效。 |
 | `allow_mentions_everyone` | 否 | `false` | 控制出站消息是否允许触发 Discord 的 `@everyone` / `@here` 提醒。 |
 | `allow_mentions_users` | 否 | `true` | 控制出站消息是否允许提及用户（`<@id>`）。 |
@@ -38,6 +38,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
       "bot_token": "your_bot_token",
       "send_method": "webhook",
       "max_file_size": 8388608,
+      "cqface_webhook_fallback": "unicode",
       "allow_mentions_everyone": false,
       "allow_mentions_users": true,
       "allow_mentions_roles": false,
@@ -95,7 +96,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 | 键 | 说明 |
 |---|---|
 | `webhook_msg_format` | 通过 Webhook 发送时覆盖 `msg_format`，支持相同模板变量。 |
-| `bot_msg_format` | 通过 Bot 发送时覆盖 `msg_format`（包括 `send_as_bot_when_using_cqface_emoji` 或 `send_replies_as_bot` 触发的情形），支持相同模板变量。 |
+| `bot_msg_format` | 通过 Bot 发送时覆盖 `msg_format`（包括 `cqface_webhook_fallback: "bot"` 或 `send_replies_as_bot` 触发的情形），支持相同模板变量。 |
 | `webhook_title` | Webhook 消息上显示的用户名（仅 `send_method: "webhook"` 时生效） |
 | `webhook_avatar` | Webhook 消息上显示的头像 URL（仅 `send_method: "webhook"` 时生效） |
 
@@ -103,7 +104,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 
 ## CQ 表情 Emoji（discord_emojis.json）
 
-使用 NapCat 驱动器的 `cqface_mode: "emoji"` 时，Discord 驱动器会将 `:cqface<id>:` 标记解析为 Discord 自定义 Emoji（`<:cqface306:emoji_id>`），解析依赖本地 JSON 文件。配置步骤如下：
+使用 NapCat 驱动器的 `cqface_mode: "emoji"` 时，Discord 驱动器在 Bot 发送时会将 `:cqface<id>:` 标记解析为 Discord 自定义 Emoji（`<:cqface306:emoji_id>`）。如果找不到自定义 Emoji，或 Webhook 回退模式选择了 `unicode`，则会使用 `db/cqface-map.yaml` 里的 Unicode 映射。配置本地自定义 Emoji 的步骤如下：
 
 1. 在浏览器中访问 `https://discord.com/developers/applications/<your_app_id>/emojis`。
 2. 打开浏览器 **Network**（网络）面板（F12 → Network）。
@@ -111,7 +112,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 4. 找到请求 `emojis` 端点的记录（例如 `https://discord.com/api/v9/applications/1343923133370994750/emojis`）。
 5. 复制该请求的 JSON 响应体，保存为数据目录下的 `discord_emojis.json`（默认路径：`data/discord_emojis.json`）。
 
-若文件不存在或未找到对应 Emoji，将回退为纯文本 `:cqface<id>:`。
+若文件不存在或未找到对应 Emoji，将回退为 `db/cqface-map.yaml` 里的 Unicode 映射。
 
 ## 注意事项
 

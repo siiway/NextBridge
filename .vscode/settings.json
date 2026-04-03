@@ -1,5 +1,9 @@
 {
     "Codegeex.RepoIndex": true,
     "ty.diagnosticMode": "workspace",
-    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+    // "ty.configuration": {
+    //     "rules": {
+    //         "unresolved-import": "ignore"
+    //     }
+    // }
 }
