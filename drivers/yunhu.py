@@ -145,18 +145,19 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             return None
 
         # Determine the upload URL and field name based on upload_type
-        if upload_type == "image":
-            url = f"{_IMAGE_UPLOAD_URL}?token={self._token}"
-            field = "image"
-            key_name = "imageKey"
-        elif upload_type == "video":
-            url = f"{_VIDEO_UPLOAD_URL}?token={self._token}"
-            field = "video"
-            key_name = "videoKey"
-        else:
-            url = f"{_FILE_UPLOAD_URL}?token={self._token}"
-            field = "file"
-            key_name = "fileKey"
+        match upload_type:
+            case "image":
+                url = f"{_IMAGE_UPLOAD_URL}?token={self._token}"
+                field = "image"
+                key_name = "imageKey"
+            case "video":
+                url = f"{_VIDEO_UPLOAD_URL}?token={self._token}"
+                field = "video"
+                key_name = "videoKey"
+            case _:
+                url = f"{_FILE_UPLOAD_URL}?token={self._token}"
+                field = "file"
+                key_name = "fileKey"
 
         form = aiohttp.FormData()
         form.add_field(field, data_bytes, filename=filename, content_type=content_type)
@@ -216,23 +217,24 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         text = ""
         attachments: list[Attachment] = []
 
-        if content_type in ("text", "markdown"):
-            text = content.get("text", "")
-        elif content_type == "image":
-            url = self._proxy_pfp(content.get("imageUrl", ""))
-            name = content.get("imageName", "image.jpg")
-            if url:
-                attachments.append(Attachment(type="image", url=url, name=name))
-        elif content_type == "video":
-            url = self._proxy_pfp(content.get("videoUrl", ""))
-            name = content.get("videoName", "video.mp4")
-            if url:
-                attachments.append(Attachment(type="video", url=url, name=name))
-        elif content_type == "file":
-            url = self._proxy_pfp(content.get("fileUrl", ""))
-            name = content.get("fileName", "file")
-            if url:
-                attachments.append(Attachment(type="file", url=url, name=name))
+        match content_type:
+            case "text" | "markdown":
+                text = content.get("text", "")
+            case "image":
+                url = self._proxy_pfp(content.get("imageUrl", ""))
+                name = content.get("imageName", "image.jpg")
+                if url:
+                    attachments.append(Attachment(type="image", url=url, name=name))
+            case "video":
+                url = self._proxy_pfp(content.get("videoUrl", ""))
+                name = content.get("videoName", "video.mp4")
+                if url:
+                    attachments.append(Attachment(type="video", url=url, name=name))
+            case "file":
+                url = self._proxy_pfp(content.get("fileUrl", ""))
+                name = content.get("fileName", "file")
+                if url:
+                    attachments.append(Attachment(type="file", url=url, name=name))
 
         if not text.strip() and not attachments:
             return
@@ -360,33 +362,34 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                     )
                 continue
 
-            if att.type == "image":
-                payloads.append(
-                    _add_common(
-                        {
-                            "contentType": "image",
-                            "content": {"imageKey": key},
-                        }
+            match att.type:
+                case "image":
+                    payloads.append(
+                        _add_common(
+                            {
+                                "contentType": "image",
+                                "content": {"imageKey": key},
+                            }
+                        )
                     )
-                )
-            elif att.type == "video":
-                payloads.append(
-                    _add_common(
-                        {
-                            "contentType": "video",
-                            "content": {"videoKey": key},
-                        }
+                case "video":
+                    payloads.append(
+                        _add_common(
+                            {
+                                "contentType": "video",
+                                "content": {"videoKey": key},
+                            }
+                        )
                     )
-                )
-            else:  # voice / file / unknown
-                payloads.append(
-                    _add_common(
-                        {
-                            "contentType": "file",
-                            "content": {"fileKey": key},
-                        }
+                case _:  # voice / file / unknown
+                    payloads.append(
+                        _add_common(
+                            {
+                                "contentType": "file",
+                                "content": {"fileKey": key},
+                            }
+                        )
                     )
-                )
 
         if not payloads:
             return None

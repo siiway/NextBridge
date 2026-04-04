@@ -279,15 +279,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             seg_text = ""
             for seg in segment_list:
                 tag = seg.get("tag")
-                if tag == "text":
-                    seg_text += seg.get("text", "")
-                elif tag == "at":
-                    user_name = seg.get("user_name", "User")
-                    seg_text += f"@{user_name}"
-                elif tag == "a":
-                    href = seg.get("href", "")
-                    text = seg.get("text", "")
-                    seg_text += f"[{text}]({href})" if text else href
+                match tag:
+                    case "text":
+                        seg_text += seg.get("text", "")
+                    case "at":
+                        user_name = seg.get("user_name", "User")
+                        seg_text += f"@{user_name}"
+                    case "a":
+                        href = seg.get("href", "")
+                        text = seg.get("text", "")
+                        seg_text += f"[{text}]({href})" if text else href
             if seg_text:
                 lines.append(seg_text)
 
@@ -332,45 +333,49 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             attachments = []
             mentions = []
 
-            if mtype == "text":
-                text = content_json.get("text", "").strip()
-                # Replace mentions placeholders like @_user_1 with @DisplayName
-                if hasattr(msg, "mentions") and msg.mentions:
-                    for m in msg.mentions:
-                        if m.key and m.name:
-                            text = text.replace(m.key, f"@{m.name}")
-                            mentions.append({"id": m.id, "name": m.name})
-            elif mtype == "post":
-                text = self._parse_post(content_json)
-            elif mtype == "image":
-                image_key = content_json.get("image_key")
-                if image_key:
-                    data_bytes = self._download_resource(
-                        msg.message_id, image_key, "image"
-                    )
-                    if data_bytes:
-                        attachments.append(
-                            Attachment(
-                                type="image",
-                                url="",
-                                data=data_bytes,
-                                name=f"{image_key}.png",
-                            )
+            match mtype:
+                case "text":
+                    text = content_json.get("text", "").strip()
+                    # Replace mentions placeholders like @_user_1 with @DisplayName
+                    if hasattr(msg, "mentions") and msg.mentions:
+                        for m in msg.mentions:
+                            if m.key and m.name:
+                                text = text.replace(m.key, f"@{m.name}")
+                                mentions.append({"id": m.id, "name": m.name})
+                case "post":
+                    text = self._parse_post(content_json)
+                case "image":
+                    image_key = content_json.get("image_key")
+                    if image_key:
+                        data_bytes = self._download_resource(
+                            msg.message_id, image_key, "image"
                         )
-            elif mtype in ("file", "audio", "video", "sticker"):
-                file_key = content_json.get("file_key")
-                file_name = content_json.get("file_name", f"{mtype}_attachment")
-                if file_key:
-                    data_bytes = self._download_resource(
-                        msg.message_id, file_key, "file"
-                    )
-                    if data_bytes:
-                        att_type = "image" if mtype == "sticker" else mtype
-                        attachments.append(
-                            Attachment(
-                                type=att_type, url="", data=data_bytes, name=file_name
+                        if data_bytes:
+                            attachments.append(
+                                Attachment(
+                                    type="image",
+                                    url="",
+                                    data=data_bytes,
+                                    name=f"{image_key}.png",
+                                )
                             )
+                case "file" | "audio" | "video" | "sticker":
+                    file_key = content_json.get("file_key")
+                    file_name = content_json.get("file_name", f"{mtype}_attachment")
+                    if file_key:
+                        data_bytes = self._download_resource(
+                            msg.message_id, file_key, "file"
                         )
+                        if data_bytes:
+                            att_type = "image" if mtype == "sticker" else mtype
+                            attachments.append(
+                                Attachment(
+                                    type=att_type,
+                                    url="",
+                                    data=data_bytes,
+                                    name=file_name,
+                                )
+                            )
 
             if not text and not attachments:
                 return

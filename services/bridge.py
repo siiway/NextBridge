@@ -288,22 +288,23 @@ class Bridge:
                 return
 
             subcommand = args[0].lower() if args else ""
-            if subcommand == "setup":
-                await self._handle_bind_setup_command(msg)
-                return
-            if subcommand == "confirm":
-                await self._handle_bind_confirm_command(
-                    msg, args[1] if len(args) > 1 else None
-                )
-                return
-            if subcommand == "rm":
-                await self._handle_bind_rm_command(
-                    msg, args[1] if len(args) > 1 else None
-                )
-                return
-            if subcommand == "list":
-                await self._handle_bind_list_command(msg)
-                return
+            match subcommand:
+                case "setup":
+                    await self._handle_bind_setup_command(msg)
+                    return
+                case "confirm":
+                    await self._handle_bind_confirm_command(
+                        msg, args[1] if len(args) > 1 else None
+                    )
+                    return
+                case "rm":
+                    await self._handle_bind_rm_command(
+                        msg, args[1] if len(args) > 1 else None
+                    )
+                    return
+                case "list":
+                    await self._handle_bind_list_command(msg)
+                    return
 
             sender_info = self._senders.get(msg.instance_id)
             if sender_info:

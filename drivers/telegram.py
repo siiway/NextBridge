@@ -149,23 +149,24 @@ def _parse_padding_color(color: str | None, mode: str) -> tuple[int, ...]:
     try:
         if value.startswith("#"):
             hex_value = value[1:]
-            if len(hex_value) == 3:
-                r, g, b = (int(ch * 2, 16) for ch in hex_value)
-                rgb = (r, g, b)
-                rgba = (r, g, b, 255)
-            elif len(hex_value) == 6:
-                r = int(hex_value[0:2], 16)
-                g = int(hex_value[2:4], 16)
-                b = int(hex_value[4:6], 16)
-                rgb = (r, g, b)
-                rgba = (r, g, b, 255)
-            elif len(hex_value) == 8:
-                r = int(hex_value[0:2], 16)
-                g = int(hex_value[2:4], 16)
-                b = int(hex_value[4:6], 16)
-                a = int(hex_value[6:8], 16)
-                rgb = (r, g, b)
-                rgba = (r, g, b, a)
+            match len(hex_value):
+                case 3:
+                    r, g, b = (int(ch * 2, 16) for ch in hex_value)
+                    rgb = (r, g, b)
+                    rgba = (r, g, b, 255)
+                case 6:
+                    r = int(hex_value[0:2], 16)
+                    g = int(hex_value[2:4], 16)
+                    b = int(hex_value[4:6], 16)
+                    rgb = (r, g, b)
+                    rgba = (r, g, b, 255)
+                case 8:
+                    r = int(hex_value[0:2], 16)
+                    g = int(hex_value[2:4], 16)
+                    b = int(hex_value[4:6], 16)
+                    a = int(hex_value[6:8], 16)
+                    rgb = (r, g, b)
+                    rgba = (r, g, b, a)
         elif "," in value:
             parts = [int(p.strip()) for p in value.split(",")]
             if len(parts) >= 3:
@@ -175,8 +176,8 @@ def _parse_padding_color(color: str | None, mode: str) -> tuple[int, ...]:
                 a = min(255, max(0, parts[3])) if len(parts) >= 4 else 255
                 rgb = (r, g, b)
                 rgba = (r, g, b, a)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"Parse padding color {color} failed: {exc}")
 
     return rgba if mode == "RGBA" else rgb
 
@@ -293,22 +294,23 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         mentions = []
         entities = msg.entities or msg.caption_entities or []
         for ent in entities:
-            if ent.type == "mention":
-                # @username mention
-                # Extract username from text
-                offset = ent.offset
-                length = ent.length
-                username = text[offset : offset + length]  # includes @
-                # We don't have ID for @username mentions easily unless we resolve it
-                # But we can store it as name=username
-                mentions.append({"id": username, "name": username[1:]})
-            elif ent.type == "text_mention":
-                # Text link to user
-                user = ent.user
-                if user:
-                    uid = str(user.id)
-                    name = user.full_name or user.username or uid
-                    mentions.append({"id": uid, "name": name})
+            match ent.type:
+                case "mention":
+                    # @username mention
+                    # Extract username from text
+                    offset = ent.offset
+                    length = ent.length
+                    username = text[offset : offset + length]  # includes @
+                    # We don't have ID for @username mentions easily unless we resolve it
+                    # But we can store it as name=username
+                    mentions.append({"id": username, "name": username[1:]})
+                case "text_mention":
+                    # Text link to user
+                    user = ent.user
+                    if user:
+                        uid = str(user.id)
+                        name = user.full_name or user.username or uid
+                        mentions.append({"id": uid, "name": name})
 
         chat_id = str(msg.chat_id)
         from_user = msg.from_user
@@ -598,38 +600,39 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 caption = text if not caption_used else None
 
                 try:
-                    if att.type == "image":
-                        sent = await self._app.bot.send_photo(
-                            chat_id=cid,
-                            photo=bio,
-                            caption=caption,
-                            parse_mode=parse_mode,
-                            reply_parameters=reply_params,
-                        )
-                    elif att.type == "voice":
-                        sent = await self._app.bot.send_voice(
-                            chat_id=cid,
-                            voice=bio,
-                            caption=caption,
-                            parse_mode=parse_mode,
-                            reply_parameters=reply_params,
-                        )
-                    elif att.type == "video":
-                        sent = await self._app.bot.send_video(
-                            chat_id=cid,
-                            video=bio,
-                            caption=caption,
-                            parse_mode=parse_mode,
-                            reply_parameters=reply_params,
-                        )
-                    else:
-                        sent = await self._app.bot.send_document(
-                            chat_id=cid,
-                            document=bio,
-                            caption=caption,
-                            parse_mode=parse_mode,
-                            reply_parameters=reply_params,
-                        )
+                    match att.type:
+                        case "image":
+                            sent = await self._app.bot.send_photo(
+                                chat_id=cid,
+                                photo=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
+                        case "voice":
+                            sent = await self._app.bot.send_voice(
+                                chat_id=cid,
+                                voice=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
+                        case "video":
+                            sent = await self._app.bot.send_video(
+                                chat_id=cid,
+                                video=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
+                        case _:
+                            sent = await self._app.bot.send_document(
+                                chat_id=cid,
+                                document=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
 
                     if not first_msg_id:
                         first_msg_id = str(sent.message_id)

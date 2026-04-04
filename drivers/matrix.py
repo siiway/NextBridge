@@ -372,15 +372,15 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             )
 
         elif isinstance(content, MediaMessageEventContent):
-            msgtype = content.msgtype
-            if msgtype == MessageType.IMAGE:
-                att_type = "image"
-            elif msgtype == MessageType.VIDEO:
-                att_type = "video"
-            elif msgtype == MessageType.AUDIO:
-                att_type = "voice"
-            else:
-                att_type = "file"
+            match content.msgtype:
+                case MessageType.IMAGE:
+                    att_type = "image"
+                case MessageType.VIDEO:
+                    att_type = "video"
+                case MessageType.AUDIO:
+                    att_type = "voice"
+                case _:
+                    att_type = "file"
 
             # Honour declared size before downloading
             declared = getattr(content.info, "size", None) if content.info else None

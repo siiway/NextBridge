@@ -241,136 +241,145 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             t = seg.get("type", "")
             d = seg.get("data", {})
 
-            if t == "text":
-                text_parts.append(d.get("text", ""))
+            match t:
+                case "text":
+                    text_parts.append(d.get("text", ""))
 
-            elif t == "at":
-                qq = str(d.get("qq", ""))
-                name = d.get("name")
-                if not name and qq != "all":
-                    # Try to look up name in our DB
-                    name = msg_db().get_user_name(self.instance_id, qq)
-                if not name:
-                    name = qq
+                case "at":
+                    qq = str(d.get("qq", ""))
+                    name = d.get("name")
+                    if not name and qq != "all":
+                        # Try to look up name in our DB
+                        name = msg_db().get_user_name(self.instance_id, qq)
+                    if not name:
+                        name = qq
 
-                text_parts.append(f"@{name}")
-                if qq and qq != "all":
-                    mentions.append({"id": qq, "name": name})
+                    text_parts.append(f"@{name}")
+                    if qq and qq != "all":
+                        mentions.append({"id": qq, "name": name})
 
-            elif t == "image":
-                url = d.get("url") or d.get("file", "")
-                name = d.get("file", "image.jpg")
-                attachments.append(Attachment(type="image", url=url, name=name))
+                case "image":
+                    url = d.get("url") or d.get("file", "")
+                    name = d.get("file", "image.jpg")
+                    attachments.append(Attachment(type="image", url=url, name=name))
 
-            elif t == "record":  # voice message
-                url = d.get("url") or d.get("file", "")
-                name = d.get("file", "voice.amr")
-                attachments.append(Attachment(type="voice", url=url, name=name))
+                case "record":  # voice message
+                    url = d.get("url") or d.get("file", "")
+                    name = d.get("file", "voice.amr")
+                    attachments.append(Attachment(type="voice", url=url, name=name))
 
-            elif t == "video":
-                url = d.get("url") or d.get("file", "")
-                name = d.get("file", "video.mp4")
-                attachments.append(Attachment(type="video", url=url, name=name))
+                case "video":
+                    url = d.get("url") or d.get("file", "")
+                    name = d.get("file", "video.mp4")
+                    attachments.append(Attachment(type="video", url=url, name=name))
 
-            elif t == "file":
-                url = d.get("url") or d.get("path", "")
-                # NapCat puts the actual filename in "file"; "name" is not used
-                name = d.get("file") or d.get("name", "file")
-                try:
-                    size = int(d.get("file_size", d.get("size", -1)))
-                except (TypeError, ValueError):
-                    size = -1
-                attachments.append(
-                    Attachment(type="file", url=url, name=name, size=size)
-                )
-
-            elif t == "face":
-                face_id_raw = d.get("id", "")
-                if face_as_emoji:
+                case "file":
+                    url = d.get("url") or d.get("path", "")
+                    # NapCat puts the actual filename in "file"; "name" is not used
+                    name = d.get("file") or d.get("name", "file")
                     try:
-                        text_parts.append(f":cqface{int(face_id_raw)}:")
+                        size = int(d.get("file_size", d.get("size", -1)))
                     except (TypeError, ValueError):
-                        pass
-                else:
-                    gif_data = _load_face_gif(face_id_raw)
-                    if gif_data is not None:
-                        # face_id is validated integer at this point
-                        name = f"face_{int(face_id_raw)}.gif"
-                        attachments.append(
-                            Attachment(type="image", url="", name=name, data=gif_data)
-                        )
-
-            elif t == "json":
-                # Rich JSON message (contact card, news, mini-app, etc.)
-                # The `data` field is a JSON string; `prompt` is always a
-                # human-readable summary provided by the QQ client.
-                raw_json = d.get("data", "")
-                try:
-                    obj = (
-                        json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+                        size = -1
+                    attachments.append(
+                        Attachment(type="file", url=url, name=name, size=size)
                     )
-                    prompt = obj.get("prompt", "").strip()
-                    if prompt:
-                        text_parts.append(f"[{prompt}]")
+
+                case "face":
+                    face_id_raw = d.get("id", "")
+                    if face_as_emoji:
+                        try:
+                            text_parts.append(f":cqface{int(face_id_raw)}:")
+                        except (TypeError, ValueError):
+                            pass
                     else:
-                        # Try to build a summary from common fields
-                        meta = obj.get("meta", {})
-                        for key in ("news", "music", "contact", "detail_1"):
-                            sub = meta.get(key)
-                            if isinstance(sub, dict):
-                                title = sub.get("title") or sub.get("nickname") or ""
-                                desc = sub.get("desc") or sub.get("tag") or ""
-                                parts = [p for p in (title, desc) if p]
-                                if parts:
-                                    text_parts.append(f"[{': '.join(parts)}]")
-                                    break
+                        gif_data = _load_face_gif(face_id_raw)
+                        if gif_data is not None:
+                            # face_id is validated integer at this point
+                            name = f"face_{int(face_id_raw)}.gif"
+                            attachments.append(
+                                Attachment(
+                                    type="image", url="", name=name, data=gif_data
+                                )
+                            )
+
+                case "json":
+                    # Rich JSON message (contact card, news, mini-app, etc.)
+                    # The `data` field is a JSON string; `prompt` is always a
+                    # human-readable summary provided by the QQ client.
+                    raw_json = d.get("data", "")
+                    try:
+                        obj = (
+                            json.loads(raw_json)
+                            if isinstance(raw_json, str)
+                            else raw_json
+                        )
+                        prompt = obj.get("prompt", "").strip()
+                        if prompt:
+                            text_parts.append(f"[{prompt}]")
                         else:
-                            text_parts.append("[App message]")
-                except (json.JSONDecodeError, AttributeError):
-                    text_parts.append("[App message]")
+                            # Try to build a summary from common fields
+                            meta = obj.get("meta", {})
+                            for key in ("news", "music", "contact", "detail_1"):
+                                sub = meta.get(key)
+                                if isinstance(sub, dict):
+                                    title = (
+                                        sub.get("title") or sub.get("nickname") or ""
+                                    )
+                                    desc = sub.get("desc") or sub.get("tag") or ""
+                                    parts = [p for p in (title, desc) if p]
+                                    if parts:
+                                        text_parts.append(f"[{': '.join(parts)}]")
+                                        break
+                            else:
+                                text_parts.append("[App message]")
+                    except (json.JSONDecodeError, AttributeError):
+                        text_parts.append("[App message]")
 
-            elif t == "reply":
-                # Quote/reply — mention the replied-to message ID if available
-                reply_id = str(d.get("id", ""))
+                case "reply":
+                    # Quote/reply — mention the replied-to message ID if available
+                    reply_id = str(d.get("id", ""))
 
-            elif t == "forward":
-                # Merged forwarded message chain
-                text_parts.append("[Forwarded messages]")
+                case "forward":
+                    # Merged forwarded message chain
+                    text_parts.append("[Forwarded messages]")
 
-            elif t == "mface":
-                # Market/sticker face — use summary text if present
-                summary = d.get("summary", "").strip()
-                if summary:
-                    text_parts.append(summary)
+                case "mface":
+                    # Market/sticker face — use summary text if present
+                    summary = d.get("summary", "").strip()
+                    if summary:
+                        text_parts.append(summary)
 
-            elif t == "share":
-                # URL share card
-                title = d.get("title", "").strip()
-                url = d.get("url", "").strip()
-                if title and url:
-                    text_parts.append(f"[Share: {title}] {url}")
-                elif url:
-                    text_parts.append(f"[Share] {url}")
+                case "share":
+                    # URL share card
+                    title = d.get("title", "").strip()
+                    url = d.get("url", "").strip()
+                    if title and url:
+                        text_parts.append(f"[Share: {title}] {url}")
+                    elif url:
+                        text_parts.append(f"[Share] {url}")
 
-            elif t == "location":
-                name = d.get("name", "").strip()
-                address = d.get("address", "").strip()
-                parts = [p for p in (name, address) if p]
-                text_parts.append(
-                    f"[Location: {', '.join(parts)}]" if parts else "[Location]"
-                )
-
-            elif t == "music":
-                title = d.get("title", "").strip()
-                singer = d.get("singer", d.get("author", "")).strip()
-                if title:
+                case "location":
+                    name = d.get("name", "").strip()
+                    address = d.get("address", "").strip()
+                    parts = [p for p in (name, address) if p]
                     text_parts.append(
-                        f"[Music: {title}" + (f" — {singer}" if singer else "") + "]"
+                        f"[Location: {', '.join(parts)}]" if parts else "[Location]"
                     )
-                else:
-                    text_parts.append("[Music]")
 
-            # poke, basketball, dice, rps, etc. — silently skip
+                case "music":
+                    title = d.get("title", "").strip()
+                    singer = d.get("singer", d.get("author", "")).strip()
+                    if title:
+                        text_parts.append(
+                            f"[Music: {title}"
+                            + (f" — {singer}" if singer else "")
+                            + "]"
+                        )
+                    else:
+                        text_parts.append("[Music]")
+
+                # poke, basketball, dice, rps, etc. — silently skip
 
         text = "".join(text_parts)
         # If segments gave us nothing useful, fall back to raw_message string
@@ -587,122 +596,123 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             if not att.url and att.data is None:
                 continue
 
-            if att.type == "image":
-                result = await media.fetch_attachment(
-                    att, self.config.max_file_size, source_proxy
-                )
-                if result:
-                    data_bytes, _ = result
-                    b64 = base64.b64encode(data_bytes).decode()
-                    segments.append(
-                        {"type": "image", "data": {"file": f"base64://{b64}"}}
+            match att.type:
+                case "image":
+                    result = await media.fetch_attachment(
+                        att, self.config.max_file_size, source_proxy
                     )
-                else:
-                    segments.append(
-                        {
-                            "type": "text",
-                            "data": {"text": f"\n[图片] {att.url or att.name}"},
-                        }
-                    )
-
-            elif att.type == "voice":
-                result = await media.fetch_attachment(
-                    att, self.config.max_file_size, source_proxy
-                )
-                if result:
-                    data_bytes, _ = result
-                    b64 = base64.b64encode(data_bytes).decode()
-                    segments.append(
-                        {"type": "record", "data": {"file": f"base64://{b64}"}}
-                    )
-                else:
-                    segments.append(
-                        {
-                            "type": "text",
-                            "data": {"text": f"\n[语音] {att.url or att.name}"},
-                        }
-                    )
-
-            elif att.type == "video":
-                result = await media.fetch_attachment(
-                    att, self.config.max_file_size, source_proxy
-                )
-                if result:
-                    data_bytes, _ = result
-                    mode = self._resolve_send_mode(len(data_bytes))
-                    if mode == "base64":
+                    if result:
+                        data_bytes, _ = result
                         b64 = base64.b64encode(data_bytes).decode()
                         segments.append(
-                            {"type": "video", "data": {"file": f"base64://{b64}"}}
+                            {"type": "image", "data": {"file": f"base64://{b64}"}}
                         )
-                    else:  # stream
-                        file_path = await self._upload_file_stream(
-                            data_bytes, att.name or "video.mp4"
-                        )
-                        if file_path:
-                            segments.append(
-                                {"type": "video", "data": {"file": file_path}}
-                            )
-                        else:
-                            segments.append(
-                                {
-                                    "type": "text",
-                                    "data": {"text": f"\n[视频] {att.url or att.name}"},
-                                }
-                            )
-                else:
-                    segments.append(
-                        {
-                            "type": "text",
-                            "data": {"text": f"\n[视频] {att.url or att.name}"},
-                        }
-                    )
-
-            else:  # file
-                result = await media.fetch_attachment(
-                    att, self.config.max_file_size, source_proxy
-                )
-                if result:
-                    data_bytes, _ = result
-                    fname = att.name or "file"
-                    mode = self._resolve_send_mode(len(data_bytes))
-                    if mode == "base64":
-                        b64 = base64.b64encode(data_bytes).decode()
-                        await self._call(
-                            "upload_group_file",
+                    else:
+                        segments.append(
                             {
-                                "group_id": int(group_id),
-                                "file": f"base64://{b64}",
-                                "name": fname,
-                            },
+                                "type": "text",
+                                "data": {"text": f"\n[图片: {att.name}]"},
+                            }
                         )
-                    else:  # stream (default)
-                        file_path = await self._upload_file_stream(data_bytes, fname)
-                        if file_path:
+
+                case "voice":
+                    result = await media.fetch_attachment(
+                        att, self.config.max_file_size, source_proxy
+                    )
+                    if result:
+                        data_bytes, _ = result
+                        b64 = base64.b64encode(data_bytes).decode()
+                        segments.append(
+                            {"type": "record", "data": {"file": f"base64://{b64}"}}
+                        )
+                    else:
+                        segments.append(
+                            {
+                                "type": "text",
+                                "data": {"text": f"\n[语音: {att.name}]"},
+                            }
+                        )
+
+                case "video":
+                    result = await media.fetch_attachment(
+                        att, self.config.max_file_size, source_proxy
+                    )
+                    if result:
+                        data_bytes, _ = result
+                        mode = self._resolve_send_mode(len(data_bytes))
+                        if mode == "base64":
+                            b64 = base64.b64encode(data_bytes).decode()
+                            segments.append(
+                                {"type": "video", "data": {"file": f"base64://{b64}"}}
+                            )
+                        else:  # stream
+                            file_path = await self._upload_file_stream(
+                                data_bytes, att.name or "video.mp4"
+                            )
+                            if file_path:
+                                segments.append(
+                                    {"type": "video", "data": {"file": file_path}}
+                                )
+                            else:
+                                segments.append(
+                                    {
+                                        "type": "text",
+                                        "data": {"text": f"\n[视频: {att.name}]"},
+                                    }
+                                )
+                    else:
+                        segments.append(
+                            {
+                                "type": "text",
+                                "data": {"text": f"\n[视频: {att.name}]"},
+                            }
+                        )
+
+                case _:  # file
+                    result = await media.fetch_attachment(
+                        att, self.config.max_file_size, source_proxy
+                    )
+                    if result:
+                        data_bytes, _ = result
+                        fname = att.name or "file"
+                        mode = self._resolve_send_mode(len(data_bytes))
+                        if mode == "base64":
+                            b64 = base64.b64encode(data_bytes).decode()
                             await self._call(
                                 "upload_group_file",
                                 {
                                     "group_id": int(group_id),
-                                    "file": file_path,
+                                    "file": f"base64://{b64}",
                                     "name": fname,
                                 },
                             )
-                        else:
-                            label = att.url or att.name
-                            segments.append(
-                                {
-                                    "type": "text",
-                                    "data": {"text": f"\n[文件: {att.name}] {label}"},
-                                }
+                        else:  # stream (default)
+                            file_path = await self._upload_file_stream(
+                                data_bytes, fname
                             )
-                else:
-                    label = att.url or att.name
-                    segments.append(
-                        {
-                            "type": "text",
-                            "data": {"text": f"\n[文件: {att.name}] {label}"},
-                        }
-                    )
+                            if file_path:
+                                await self._call(
+                                    "upload_group_file",
+                                    {
+                                        "group_id": int(group_id),
+                                        "file": file_path,
+                                        "name": fname,
+                                    },
+                                )
+                            else:
+                                segments.append(
+                                    {
+                                        "type": "text",
+                                        "data": {"text": f"\n[文件: {att.name}]"},
+                                    }
+                                )
+                    else:
+                        segments.append(
+                            {
+                                "type": "text",
+                                "data": {"text": f"\n[文件: {att.name}]"},
+                            }
+                        )
 
         if not segments:
             return None
