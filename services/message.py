@@ -34,11 +34,11 @@ class NormalizedMessage:
         None  # proxy URL for downloading attachments from source platform
     )
     username: str = ""  # user's platform-specific name
-    
+
     @property
     def user(self) -> str:
         """Compatibility property for legacy code that uses user field."""
-        return self.nickname 
+        return self.nickname
 
     def __str__(self):
         l = []

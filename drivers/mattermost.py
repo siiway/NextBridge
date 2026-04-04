@@ -181,6 +181,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                 pass
 
         display_name, avatar_url = await self._get_user_info(user_id, server)
+        username = await self._get_username(user_id, server)
 
         attachments: list[Attachment] = []
         for file_id in file_ids:

@@ -399,7 +399,7 @@ class Bridge:
         # If username is empty, fallback to user_id
         if not username_value:
             username_value = msg.user_id
-        
+
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
