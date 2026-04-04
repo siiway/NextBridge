@@ -275,10 +275,6 @@ class Bridge:
     # ------------------------------------------------------------------
 
     async def on_message(self, msg: NormalizedMessage):
-        # logger.debug(
-        #     f"on_message: platform={msg.platform} instance={msg.instance_id} "
-        #     f"channel={msg.channel} user={msg.user!r} text={msg.text!r}"
-        # )
         logger.debug(f"on_message: {msg!s}")
         # Handle internal commands
         command = self._parse_internal_command(msg.text)

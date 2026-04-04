@@ -166,7 +166,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             platform="vocechat",
             instance_id=self.instance_id,
             channel=channel,
-            user=display_name,
+            nickname=display_name,
             user_id=str(from_uid),
             user_avatar=avatar,
             text=text,

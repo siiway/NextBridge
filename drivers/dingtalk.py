@@ -154,7 +154,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             platform="dingtalk",
             instance_id=self.instance_id,
             channel={"open_conversation_id": open_conv_id},
-            user=sender_nick or sender_id,
+            nickname=sender_nick or sender_id,
             user_id=sender_id,
             user_avatar="",
             text=text,

@@ -248,7 +248,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             platform="yunhu",
             instance_id=self.instance_id,
             channel={"chat_id": chat_id, "chat_type": chat_type},
-            user=username,
+            nickname=username,
             user_id=user_id,
             user_avatar=avatar,
             text=text,
