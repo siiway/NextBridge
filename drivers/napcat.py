@@ -188,7 +188,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         nickname = sender.get("card") or sender.get("nickname") or user_id
         time = event.get("time")
         # Get user's qid
-        qid = None # await self._get_qid(user_id, group_id)
+        qid = None  # await self._get_qid(user_id, group_id)
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
         text, attachments, reply_id, mentions = self._parse_message(
