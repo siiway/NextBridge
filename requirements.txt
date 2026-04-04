@@ -652,7 +652,9 @@ pillow==12.2.0 \
     --hash=sha256:f1c943e96e85df3d3478f7b691f229887e143f81fedab9b20205349ab04d73ed \
     --hash=sha256:f278f034eb75b4e8a13a54a876cc4a5ab39173d2cdd93a638e1b467fc545ac43 \
     --hash=sha256:fb043ee2f06b41473269765c2feae53fc2e2fbf96e5e22ca94fb5ad677856f06
-    # via neonize
+    # via
+    #   neonize
+    #   nextbridge
 propcache==0.4.1 \
     --hash=sha256:005f08e6a0529984491e37d8dbc3dd86f84bd78a8ceb5fa9a021f4c48d4984be \
     --hash=sha256:05674a162469f31358c30bcaa8883cb7829fa3110bf9c0991fe27d7896c42d85 \

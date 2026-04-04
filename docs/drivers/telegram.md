@@ -21,6 +21,7 @@ Add under `telegram.<instance_id>` in `config.json`:
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
 | `rich_header_host` | No | `"https://richheader.siiway.top"` | Base URL of your Cloudflare rich-header worker (see [Rich Header](#rich-header)) |
 | `avatar_proxy_host` | No | — | Base URL of your Cloudflare avatar proxy worker (see [Avatar Proxy](#avatar-proxy)) |
+| `photo_padding_color` | No | `"#000000"` | Padding color used when Telegram image dimensions are invalid (supports `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `r,g,b[,a]`). Set to `null` to disable padding; over-limit images are downgraded to text labels in the same `[Image: ...]` format. |
 | `proxy` | No | — | Proxy URL for all Telegram API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
@@ -30,7 +31,20 @@ Add under `telegram.<instance_id>` in `config.json`:
       "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
       "max_file_size": 52428800,
       "rich_header_host": "https://richheader.siiway.top",
-      "avatar_proxy_host": "https://tg-avatar-proxy.yourname.workers.dev"
+      "avatar_proxy_host": "https://tg-avatar-proxy.yourname.workers.dev",
+      "photo_padding_color": "#000000"
+    }
+  }
+}
+```
+
+To disable image padding and fallback to text for over-limit images:
+
+```json
+{
+  "telegram": {
+    "tg_main": {
+      "photo_padding_color": null
     }
   }
 }
@@ -73,6 +87,8 @@ Media messages may include a caption, which becomes the message text.
 | `file` | `send_document` |
 
 The message text is sent as the caption of the first attachment. If there are no attachments (or all fail), it is sent as a plain `send_message`. Text for subsequent attachments is omitted.
+
+If an attachment upload fails (for example, Telegram rejects an image), NextBridge falls back to a text label (such as `[Image: xxx]`) for that attachment and continues sending the remaining attachments instead of failing the whole message.
 
 ## Rich Header
 

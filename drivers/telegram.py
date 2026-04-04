@@ -18,6 +18,10 @@
 #                       to avoid exposing the bot token. The worker should be
 #                       deployed from cloudflare/tg-avatar-proxy.js with BOT_TOKEN
 #                       environment variable set. Falls back to none when absent.
+#   photo_padding_color – Padding color used when fixing extreme image aspect
+#                       ratios before send_photo (default "#000000").
+#                       Set to null to disable padding; over-limit photos are
+#                       sent as text labels instead of send_photo.
 #
 # Rule channel keys:
 #   chat_id – Telegram chat ID (negative for groups, e.g. "-100123456789")
@@ -40,16 +44,21 @@ from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
 from services.config import get_proxy, UNSET
 
+from PIL import Image, UnidentifiedImageError
+
 
 class TelegramConfig(_DriverConfig):
     bot_token: str
     max_file_size: int = 50 * 1024 * 1024
     rich_header_host: str = "https://richheader.siiway.top"
     avatar_proxy_host: str = ""  # Base URL for avatar proxy (e.g. "https://avatarproxy.yourname.workers.dev")
+    photo_padding_color: str | None = "#000000"
     proxy: str | None = UNSET
 
 
 logger = log.get_logger()
+_TG_PHOTO_MAX_SIDE = 10000
+_TG_PHOTO_MAX_RATIO = 20
 
 
 # Catch all non-command message types that may carry content
@@ -58,6 +67,127 @@ def _richheader_html(title: str, content: str) -> str:
     t = html.escape(title)
     c = html.escape(content)
     return f"<b>{t}</b>" + (f" · <i>{c}</i>" if c else "")
+
+
+def _prepare_photo_for_telegram(
+    data: bytes, filename: str, padding_color: str | None
+) -> tuple[bytes | None, str]:
+    """Adjust photo dimensions for Telegram bot API constraints."""
+    if Image is None:
+        return data, filename
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            mode = "RGBA" if "A" in img.getbands() else "RGB"
+            work = img.convert(mode)
+            width, height = work.size
+
+            over_side_limit = width > _TG_PHOTO_MAX_SIDE or height > _TG_PHOTO_MAX_SIDE
+            over_ratio_limit = (
+                width > height * _TG_PHOTO_MAX_RATIO
+                or height > width * _TG_PHOTO_MAX_RATIO
+            )
+            if (over_side_limit or over_ratio_limit) and padding_color is None:
+                return None, filename
+
+            changed = False
+
+            # Telegram rejects photos with side > 10000.
+            if width > _TG_PHOTO_MAX_SIDE or height > _TG_PHOTO_MAX_SIDE:
+                scale = min(_TG_PHOTO_MAX_SIDE / width, _TG_PHOTO_MAX_SIDE / height)
+                width = max(1, int(width * scale))
+                height = max(1, int(height * scale))
+                resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+                work = work.resize((width, height), resampling)
+                changed = True
+
+            target_w, target_h = width, height
+            if width > height * _TG_PHOTO_MAX_RATIO:
+                target_h = (width + _TG_PHOTO_MAX_RATIO - 1) // _TG_PHOTO_MAX_RATIO
+            elif height > width * _TG_PHOTO_MAX_RATIO:
+                target_w = (height + _TG_PHOTO_MAX_RATIO - 1) // _TG_PHOTO_MAX_RATIO
+
+            if target_w != width or target_h != height:
+                bg = _parse_padding_color(padding_color, mode)
+                canvas = Image.new(mode, (target_w, target_h), bg)
+                offset = ((target_w - width) // 2, (target_h - height) // 2)
+                if mode == "RGBA":
+                    canvas.paste(work, offset, work)
+                else:
+                    canvas.paste(work, offset)
+                work = canvas
+                changed = True
+
+            if not changed:
+                return data, filename
+
+            out = io.BytesIO()
+            base = filename.rsplit(".", 1)[0] if "." in filename else (filename or "photo")
+            if mode == "RGBA":
+                work.save(out, format="PNG")
+                out_name = f"{base}.png"
+            else:
+                work.save(out, format="JPEG", quality=95)
+                out_name = f"{base}.jpg"
+            return out.getvalue(), out_name
+    except UnidentifiedImageError:
+        return data, filename
+    except Exception as e:
+        logger.debug(
+            f"Telegram [{__name__}] image preprocess skipped for {filename}: {e}"
+        )
+        return data, filename
+
+
+def _parse_padding_color(color: str | None, mode: str) -> tuple[int, ...]:
+    """Parse padding color from config; supports #RGB/#RRGGBB/#RRGGBBAA and r,g,b[,a]."""
+    value = (color or "").strip()
+    rgb = (0, 0, 0)
+    rgba = (0, 0, 0, 255)
+
+    try:
+        if value.startswith("#"):
+            hex_value = value[1:]
+            if len(hex_value) == 3:
+                r, g, b = (int(ch * 2, 16) for ch in hex_value)
+                rgb = (r, g, b)
+                rgba = (r, g, b, 255)
+            elif len(hex_value) == 6:
+                r = int(hex_value[0:2], 16)
+                g = int(hex_value[2:4], 16)
+                b = int(hex_value[4:6], 16)
+                rgb = (r, g, b)
+                rgba = (r, g, b, 255)
+            elif len(hex_value) == 8:
+                r = int(hex_value[0:2], 16)
+                g = int(hex_value[2:4], 16)
+                b = int(hex_value[4:6], 16)
+                a = int(hex_value[6:8], 16)
+                rgb = (r, g, b)
+                rgba = (r, g, b, a)
+        elif "," in value:
+            parts = [int(p.strip()) for p in value.split(",")]
+            if len(parts) >= 3:
+                r = min(255, max(0, parts[0]))
+                g = min(255, max(0, parts[1]))
+                b = min(255, max(0, parts[2]))
+                a = min(255, max(0, parts[3])) if len(parts) >= 4 else 255
+                rgb = (r, g, b)
+                rgba = (r, g, b, a)
+    except Exception:
+        pass
+
+    return rgba if mode == "RGBA" else rgb
+
+
+def _attachment_fallback_label(
+    att_type: str, label: str, parse_mode: str | None
+) -> str:
+    """Format a degraded attachment label for text fallback."""
+    if parse_mode == "HTML":
+        label = html.escape(label)
+    display_type = "Image" if att_type == "image" else att_type.capitalize()
+    return f"\n[{display_type}: {label}]"
 
 
 _CONTENT_FILTER = (
@@ -436,69 +566,78 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 if not result:
                     # Oversized or failed — append as text (escape if in HTML mode)
                     label = att.name or att.url or ""
-                    if parse_mode == "HTML":
-                        label = html.escape(label)
-                    text += f"\n[{att.type.capitalize()}: {label}]"
+                    text += _attachment_fallback_label(att.type, label, parse_mode)
                     continue
 
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
 
+                if att.type == "image":
+                    data_bytes, fname = _prepare_photo_for_telegram(
+                        data_bytes,
+                        fname,
+                        self.config.photo_padding_color,
+                    )
+                    if data_bytes is None:
+                        label = att.name or att.url or fname
+                        text += _attachment_fallback_label("image", label, parse_mode)
+                        continue
+
                 # validate photo data
                 if not data_bytes or len(data_bytes) == 0:
                     logger.warning(f"Empty image data for {fname}, skipping")
                     label = att.name or att.url or ""
-                    if parse_mode == "HTML":
-                        label = html.escape(label)
-                    text += f"\n[{att.type.capitalize()}: {label}]"
+                    text += _attachment_fallback_label(att.type, label, parse_mode)
                     continue
 
                 bio = io.BytesIO(data_bytes)
                 bio.name = fname
                 caption = text if not caption_used else None
 
-                if att.type == "image":
-                    sent = await self._app.bot.send_photo(
-                        chat_id=cid,
-                        photo=bio,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        reply_parameters=reply_params,
-                    )
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
-                elif att.type == "voice":
-                    sent = await self._app.bot.send_voice(
-                        chat_id=cid,
-                        voice=bio,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        reply_parameters=reply_params,
-                    )
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
-                elif att.type == "video":
-                    sent = await self._app.bot.send_video(
-                        chat_id=cid,
-                        video=bio,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        reply_parameters=reply_params,
-                    )
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
-                else:
-                    sent = await self._app.bot.send_document(
-                        chat_id=cid,
-                        document=bio,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        reply_parameters=reply_params,
-                    )
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
+                try:
+                    if att.type == "image":
+                        sent = await self._app.bot.send_photo(
+                            chat_id=cid,
+                            photo=bio,
+                            caption=caption,
+                            parse_mode=parse_mode,
+                            reply_parameters=reply_params,
+                        )
+                    elif att.type == "voice":
+                        sent = await self._app.bot.send_voice(
+                            chat_id=cid,
+                            voice=bio,
+                            caption=caption,
+                            parse_mode=parse_mode,
+                            reply_parameters=reply_params,
+                        )
+                    elif att.type == "video":
+                        sent = await self._app.bot.send_video(
+                            chat_id=cid,
+                            video=bio,
+                            caption=caption,
+                            parse_mode=parse_mode,
+                            reply_parameters=reply_params,
+                        )
+                    else:
+                        sent = await self._app.bot.send_document(
+                            chat_id=cid,
+                            document=bio,
+                            caption=caption,
+                            parse_mode=parse_mode,
+                            reply_parameters=reply_params,
+                        )
 
-                caption_used = True
+                    if not first_msg_id:
+                        first_msg_id = str(sent.message_id)
+                    caption_used = True
+                except Exception as e:
+                    label = att.name or att.url or fname
+                    text += _attachment_fallback_label(att.type, label, parse_mode)
+                    logger.warning(
+                        f"Telegram [{self.instance_id}] attachment send failed ({att.type}): {e}"
+                    )
+                    continue
 
             # Send text-only if no attachments consumed it
             if text and not caption_used:
