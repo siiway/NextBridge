@@ -68,7 +68,9 @@ async def _convert_amr_to_ogg(data: bytes) -> tuple[bytes, str] | None:
         stdout, stderr = await asyncio.wait_for(proc.communicate(data), timeout=25)
         if proc.returncode != 0 or not stdout:
             err = stderr.decode(errors="ignore").strip()
-            logger.warning(f"media: ffmpeg AMR->OGG conversion failed: {err or proc.returncode}")
+            logger.warning(
+                f"media: ffmpeg AMR->OGG conversion failed: {err or proc.returncode}"
+            )
             return None
         return stdout, "audio/ogg"
     except TimeoutError:
