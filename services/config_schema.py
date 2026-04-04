@@ -100,6 +100,12 @@ class LoggingConfig(BaseModel):
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
+    command_prefix: str = "nb"
+    """Prefix used for built-in bridge commands, e.g. ``/nb bind setup``.
+
+    The value is written without the leading slash. The default is ``nb``.
+    """
+
     proxy: str | None = UNSET
     """Global proxy URL for all drivers that support proxy configuration.
     Individual driver proxy settings will override this global setting."""
@@ -117,6 +123,17 @@ class GlobalConfig(BaseModel):
 
     database: DatabaseConfig = DatabaseConfig()
     """Database configuration for message and user mappings."""
+
+    @field_validator("command_prefix", mode="before")
+    def normalize_command_prefix(cls, v):
+        if v is None:
+            return "nb"
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid command prefix: {v}")
+        prefix = v.strip().lstrip("/")
+        if not prefix:
+            raise ValueError("command_prefix cannot be empty")
+        return prefix
 
     @field_validator("proxy", mode="after")
     def get_proxy_from_env(cls, v: str):

@@ -249,6 +249,8 @@ See each driver's page for details.
 
 Media attachments (images, videos, voice, files) are automatically carried through the bridge. The bridge server downloads the file from the source and re-uploads it to the target platform — the target platform never fetches from the source URL directly. Each driver respects its configured `max_file_size`. If the file is too large or the download fails, a text fallback with the URL is appended to the message instead.
 
+For voice attachments: if AMR audio is detected (for example QQ-style `.amr` files), the bridge first tries to transcode it to `audio/ogg` (Opus) before sending, improving compatibility on targets such as Discord. If transcoding fails or `ffmpeg` is unavailable, it automatically falls back to forwarding the original audio.
+
 ---
 
 ## Security: sensitive value detection

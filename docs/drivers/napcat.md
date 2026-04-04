@@ -77,6 +77,12 @@ Incoming messages are parsed from OneBot 11 segment arrays:
 | `video` | Downloaded and sent via `file_send_mode` (stream or base64) |
 | `file` | Downloaded and sent via `file_send_mode` (stream or base64) |
 
+Voice compatibility: when forwarding to other platforms, if a QQ voice attachment is detected as AMR (for example `.amr`), NextBridge first tries to transcode it to `audio/ogg` (Opus) before sending, which improves compatibility on platforms like Discord. If transcoding fails, it automatically falls back to forwarding the original audio.
+
+::: tip ffmpeg requirement
+AMR transcoding requires the `ffmpeg` executable to be available on the host system. If ffmpeg is not installed, voice forwarding still works, but AMR→OGG conversion is skipped.
+:::
+
 The `file_send_mode` and `stream_threshold` config keys control how videos and files are uploaded. Stream mode (`upload_file_stream` → `upload_group_file`) is the default and handles large files more reliably. Use `"base64"` if stream upload is unsupported by your NapCat version, and set `stream_threshold` to automatically fall back to stream for files above a given size.
 
 ## Notes

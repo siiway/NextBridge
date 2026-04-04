@@ -48,6 +48,7 @@ The `global` section contains configuration options that apply to all drivers un
 
 | Key | Required | Default | Description |
 |---|---|---|---|
+| `command_prefix` | No | `nb` | Prefix used for built-in bridge commands. With the default prefix, built-in commands are written as `/nb bind setup`, `/nb bind confirm <code>`, `/nb bind rm`, and `/nb bind list`. |
 | `proxy` | No | — | Global proxy URL for all drivers that ***support proxy configuration*** (e.g., `http://proxy.example.com:8080`). Individual driver proxy settings will override this global setting. |
 | `strict_echo_match` | No | `false` | Controls how NextBridge prevents echoing messages back to the same channel/instance. When `false` (default), skips if target_id == msg.instance_id OR target_channel == msg.channel. When `true`, skips only if target_id == msg.instance_id AND target_channel == msg.channel. Default is `false` to maximize echo prevention. |
 | `log` | No | — | Logging configuration for controlling log output and rotation. See [Logging Configuration](#logging-configuration) below. |
@@ -56,6 +57,7 @@ The `global` section contains configuration options that apply to all drivers un
 ```json
 {
   "global": {
+    "command_prefix": "nb",
     "proxy": "http://proxy.example.com:8080"
   }
 }
