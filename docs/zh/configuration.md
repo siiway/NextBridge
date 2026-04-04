@@ -48,6 +48,7 @@ uv run main.py convert data/config.yaml data/config.toml
 
 | 键 | 是否必填 | 默认值 | 说明 |
 |---|---|---|---|
+| `command_prefix` | 否 | `nb` | 内置桥接命令的前缀。使用默认前缀时，命令写作 `/nb bind setup`、`/nb bind confirm <code>`、`/nb bind rm` 和 `/nb bind list`。 |
 | `proxy` | 否 | — | 全局代理 URL，适用于所有***支持代理配置***的驱动（例如：`http://proxy.example.com:8080`）。单个驱动的代理设置将覆盖此全局设置。 |
 | `strict_echo_match` | 否 | `false` | 控制 NextBridge 防止 echo (回声) 到同一个频道/实例的行为。当为 `false`（默认）时，如果目标实例 ID 或频道与源消息相同，则跳过；当为 `true` 时，只有当目标实例 ID 和频道都与源消息相同时才跳过。默认为 `false` 以最大程度防止回声。 |
 | `log` | 否 | — | 日志配置，用于控制日志输出和轮换。参见下方[日志配置](#日志配置)。 |
@@ -56,6 +57,7 @@ uv run main.py convert data/config.yaml data/config.toml
 ```json
 {
   "global": {
+    "command_prefix": "nb",
     "proxy": "http://proxy.example.com:8080"
   }
 }

@@ -75,6 +75,7 @@ class Bridge:
         self._senders: dict[str, tuple[str | None, Callable]] = {}
         self._sensitive: frozenset[str] = frozenset()
         self.strict_echo_match: bool = False
+        self.command_prefix: str = "nb"
 
     # ------------------------------------------------------------------
     # Setup
@@ -148,7 +149,29 @@ class Bridge:
         self._senders[instance_id] = (platform, send_func)
         logger.debug(f"Registered sender for instance: {instance_id}")
 
-    async def _handle_bind_command(self, msg: NormalizedMessage):
+    def _get_command_prefix(self) -> str:
+        prefix = (self.command_prefix or "nb").strip().lstrip("/")
+        return prefix or "nb"
+
+    def _get_command_help(self) -> str:
+        prefix = self._get_command_prefix()
+        return (
+            f"Usage: `/{prefix} bind setup`, `/{prefix} bind confirm <code>`, "
+            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`"
+        )
+
+    def _parse_internal_command(self, text: str) -> tuple[str, list[str]] | None:
+        parts = text.split()
+        if len(parts) < 2 or not parts[0].startswith("/"):
+            return None
+
+        root = parts[0][1:]
+        if root != self._get_command_prefix():
+            return None
+
+        return parts[1].lower(), parts[2:]
+
+    async def _handle_bind_setup_command(self, msg: NormalizedMessage):
         """Generate a 6-digit binding code for the user."""
         import random
 
@@ -159,24 +182,26 @@ class Bridge:
         if sender_info:
             _, sender = sender_info
             try:
+                prefix = self._get_command_prefix()
                 await sender(
                     msg.channel,
-                    f"Your binding code is: `{code}` (valid for 5 mins). Type `/confirm {code}` on the other platform to link accounts.",
+                    f"Your binding code is: `{code}` (valid for 5 mins). Type `/{prefix} bind confirm {code}` on the other platform to link accounts.",
                 )
             except Exception as e:
                 logger.error(f"Failed to send bind code back: {e}")
 
-    async def _handle_confirm_command(self, msg: NormalizedMessage):
+    async def _handle_bind_confirm_command(
+        self, msg: NormalizedMessage, code: str | None
+    ):
         """Confirm a binding code from another platform."""
-        parts = msg.text.split()
-        if len(parts) < 2:
+        if not code:
             sender_info = self._senders.get(msg.instance_id)
             if sender_info:
                 _, sender = sender_info
-                await sender(msg.channel, "Usage: `/confirm <code>`")
+                prefix = self._get_command_prefix()
+                await sender(msg.channel, f"Usage: `/{prefix} bind confirm <code>`")
             return
 
-        code = parts[1]
         success = msg_db().consume_binding_code(code, msg.instance_id, msg.user_id)
 
         sender_info = self._senders.get(msg.instance_id)
@@ -190,11 +215,8 @@ class Bridge:
             else:
                 await sender(msg.channel, "❌ Invalid or expired binding code.")
 
-    async def _handle_rm_command(self, msg: NormalizedMessage):
+    async def _handle_bind_rm_command(self, msg: NormalizedMessage, target_inst: str | None):
         """Remove account bindings for the user."""
-        parts = msg.text.split()
-        target_inst = parts[1] if len(parts) > 1 else None
-
         success = msg_db().remove_user_binding(
             msg.instance_id, msg.user_id, target_inst
         )
@@ -222,7 +244,7 @@ class Bridge:
                         msg.channel, "❓ You don't have any active account bindings."
                     )
 
-    async def _handle_list_command(self, msg: NormalizedMessage):
+    async def _handle_bind_list_command(self, msg: NormalizedMessage):
         """List all accounts linked to the user's global identity."""
         bindings = msg_db().get_all_bindings(msg.instance_id, msg.user_id)
         sender_info = self._senders.get(msg.instance_id)
@@ -257,17 +279,34 @@ class Bridge:
         # )
         logger.debug(f"on_message: {str(msg)}")
         # Handle internal commands
-        if msg.text.startswith("/bind"):
-            await self._handle_bind_command(msg)
-            return
-        if msg.text.startswith("/confirm"):
-            await self._handle_confirm_command(msg)
-            return
-        if msg.text.startswith("/rm"):
-            await self._handle_rm_command(msg)
-            return
-        if msg.text.startswith("/list"):
-            await self._handle_list_command(msg)
+        command = self._parse_internal_command(msg.text)
+        if command is not None:
+            action, args = command
+            if action != "bind":
+                return
+
+            subcommand = args[0].lower() if args else ""
+            if subcommand == "setup":
+                await self._handle_bind_setup_command(msg)
+                return
+            if subcommand == "confirm":
+                await self._handle_bind_confirm_command(
+                    msg, args[1] if len(args) > 1 else None
+                )
+                return
+            if subcommand == "rm":
+                await self._handle_bind_rm_command(
+                    msg, args[1] if len(args) > 1 else None
+                )
+                return
+            if subcommand == "list":
+                await self._handle_bind_list_command(msg)
+                return
+
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, sender = sender_info
+                await sender(msg.channel, self._get_command_help())
             return
 
         # Save sender's user mapping

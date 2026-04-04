@@ -100,6 +100,7 @@ async def main():
         compression=validated_global.log.compression,
         file_level=validated_global.log.file_level,
     )
+    bridge.command_prefix = validated_global.command_prefix
 
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()

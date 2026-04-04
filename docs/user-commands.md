@@ -8,13 +8,15 @@ NextBridge supports several built-in commands that users can type directly into 
 
 By default, NextBridge tries to map mentions across platforms by matching **display names**. However, this can be unreliable if users have different names on different platforms. 
 
+**Built-in commands use the global command prefix from config. The default prefix is `nb`, so the examples below use `/nb ...`.**
+
 **Account Binding** allows you to explicitly link your IDs across platforms so that mentions always target the correct account.
 
 ### How to bind accounts
 
-1.  **Generate a code**: On **Platform A** (e.g., Discord), type `/bind`.
+1.  **Generate a code**: On **Platform A** (e.g., Discord), type `/nb bind setup`.
     -   NextBridge will reply with a unique 6-digit code (e.g., `123456`).
-2.  **Confirm the link**: On **Platform B** (e.g., QQ), type `/confirm 123456`.
+2.  **Confirm the link**: On **Platform B** (e.g., QQ), type `/nb bind confirm 123456`.
 3.  **Success**: Your Discord and QQ accounts are now linked!
 
 Once linked, whenever someone mentions you on Discord, NextBridge will resolve your exact QQ User ID, triggering a native notification on the target platform.
@@ -23,11 +25,11 @@ Once linked, whenever someone mentions you on Discord, NextBridge will resolve y
 
 If you want to reset your identity or unlink your accounts, you can type:
 
--   `/rm`: Removes **all** links associated with your current global identity across all platforms.
--   `/rm <instance_id>`: Removes only the binding for a specific instance (e.g., `my_qq`).
+-   `/nb bind rm`: Removes **all** links associated with your current global identity across all platforms.
+-   `/nb bind rm <instance_id>`: Removes only the binding for a specific instance (e.g., `my_qq`).
 
 ### How to list bindings
 
 To see all accounts currently linked to your identity, type:
 
-`/list`
+`/nb bind list`
