@@ -122,7 +122,9 @@ def _prepare_photo_for_telegram(
                 return data, filename
 
             out = io.BytesIO()
-            base = filename.rsplit(".", 1)[0] if "." in filename else (filename or "photo")
+            base = (
+                filename.rsplit(".", 1)[0] if "." in filename else (filename or "photo")
+            )
             if mode == "RGBA":
                 work.save(out, format="PNG")
                 out_name = f"{base}.png"
