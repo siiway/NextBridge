@@ -196,13 +196,14 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             platform="teams",
             instance_id=self.instance_id,
             channel={"service_url": service_url, "conversation_id": conv_id},
-            user=from_name,
+            nickname=from_name,
             user_id=from_id,
             user_avatar="",
             text=text,
             attachments=attachments,
             mentions=mentions,
             source_proxy=self._proxy,
+            username=from_name,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return web.Response(status=200, text="ok")

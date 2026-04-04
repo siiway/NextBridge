@@ -192,13 +192,14 @@ class SignalDriver(BaseDriver[SignalConfig]):
             platform="signal",
             instance_id=self.instance_id,
             channel=channel,
-            user=sender,
+            nickname=sender,
             user_id=sender_id,
             user_avatar="",
             text=text,
             attachments=attachments,
             source_proxy=self._proxy,
             mentions=mentions,
+            username=sender,
         )
         await self.bridge.on_message(normalized)
 

@@ -1,14 +1,14 @@
-import re
-import json
-import hashlib
-from typing import Any, Callable
 import asyncio
+import hashlib
+import json
+import re
+from collections.abc import Callable
+from typing import Any
 
 import services.logger as log
-import services.config as config
-import services.cqface as cqface
-from services.message import NormalizedMessage
+from services import config, cqface
 from services.db import msg_db
+from services.message import NormalizedMessage
 
 logger = log.get_logger()
 
@@ -255,7 +255,7 @@ class Bridge:
         #     f"on_message: platform={msg.platform} instance={msg.instance_id} "
         #     f"channel={msg.channel} user={msg.user!r} text={msg.text!r}"
         # )
-        logger.debug(f"on_message: {str(msg)}")
+        logger.debug(f"on_message: {msg!s}")
         # Handle internal commands
         if msg.text.startswith("/bind"):
             await self._handle_bind_command(msg)
@@ -351,6 +351,14 @@ class Bridge:
                 "msg_format",
                 '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}',
             )
+        # Format username with @ prefix if it exists
+        username_value = getattr(msg, "username", "")
+        if username_value and not username_value.startswith("@"):
+            username_value = f"@{username_value}"
+        # If username is empty, fallback to user_id
+        if not username_value:
+            username_value = msg.user_id
+        
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
@@ -360,6 +368,8 @@ class Bridge:
             "user_avatar": msg.user_avatar,
             "msg": msg.text,
             "time": msg.time,
+            "username": username_value,
+            "nickname": getattr(msg, "nickname", ""),
         }
         try:
             formatted = fmt.format(**ctx)

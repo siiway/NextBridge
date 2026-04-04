@@ -208,7 +208,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             platform="discord",
             instance_id=self.instance_id,
             channel={"server_id": server_id, "channel_id": channel_id},
-            user=message.author.display_name,
+            nickname=message.author.display_name,
             user_id=str(message.author.id),
             user_avatar=avatar,
             text=text,
@@ -219,6 +219,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             else None,
             mentions=mentions,
             source_proxy=self._proxy,
+            username=message.author.name,
         )
         await self.bridge.on_message(msg)
 

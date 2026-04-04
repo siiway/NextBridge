@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
 from os import environ
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 
@@ -77,9 +77,10 @@ class LoggingConfig(BaseModel):
     """Number of days to keep log files. Older log files are automatically deleted.
     Set to 0 to disable automatic deletion."""
 
-    compression: Literal[
-        "gz", "bz2", "xz", "lzma", "tar", "tar.gz", "tar.bz2", "tar.xz", "zip", None
-    ] = "zip"
+    compression: (
+        Literal["gz", "bz2", "xz", "lzma", "tar", "tar.gz", "tar.bz2", "tar.xz", "zip"]
+        | None
+    ) = "zip"
     """Compression format for rotated log files (e.g., "zip", "gz", "tar.gz").
     Set to None to disable compression."""
 

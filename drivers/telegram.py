@@ -26,25 +26,24 @@
 # Rule channel keys:
 #   chat_id – Telegram chat ID (negative for groups, e.g. "-100123456789")
 
-from drivers.registry import register
 import asyncio
 import html
 import io
 from urllib.parse import urlencode
 
+from PIL import Image, UnidentifiedImageError
 from telegram import LinkPreviewOptions, ReplyParameters, Update
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from drivers import BaseDriver
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
+from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
-
-from PIL import Image, UnidentifiedImageError
+from services.message import Attachment, NormalizedMessage
 
 
 class TelegramConfig(_DriverConfig):
@@ -97,7 +96,7 @@ def _prepare_photo_for_telegram(
                 scale = min(_TG_PHOTO_MAX_SIDE / width, _TG_PHOTO_MAX_SIDE / height)
                 width = max(1, int(width * scale))
                 height = max(1, int(height * scale))
-                resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+                resampling = getattr(Image, "Resampling", Image).LANCZOS
                 work = work.resize((width, height), resampling)
                 changed = True
 
@@ -265,7 +264,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
     async def stop(self):
         if not self._app:
-            return None
+            return
         if self._app.updater and self._app.updater.running:
             await self._app.updater.stop()
         if self._app.running:
@@ -314,11 +313,12 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         chat_id = str(msg.chat_id)
         from_user = msg.from_user
         user_id = str(from_user.id) if from_user else ""
-        user_name = (
+        nickname = (
             (from_user.full_name or from_user.username or user_id)
             if from_user
             else user_id
         )
+        username = from_user.username if from_user else ""
 
         # Get user avatar
         user_avatar = ""
@@ -454,7 +454,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             platform="telegram",
             instance_id=self.instance_id,
             channel={"chat_id": chat_id},
-            user=user_name,
+            nickname=nickname,
             user_id=user_id,
             user_avatar=user_avatar,
             text=text,
@@ -466,6 +466,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             mentions=mentions,
             time=msg.date.isoformat() if msg.date else None,
             source_proxy=self._proxy,
+            username=username,
         )
         await self.bridge.on_message(normalized)
 

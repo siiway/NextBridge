@@ -125,13 +125,14 @@ class KookDriver(BaseDriver[KookConfig]):
             platform="kook",
             instance_id=self.instance_id,
             channel={"channel_id": channel_id},
-            user=username,
+            nickname=username,
             user_id=user_id,
             user_avatar=avatar,
             text=text,
             attachments=[],
             mentions=mentions,
             source_proxy=self._proxy,
+            username=username,
         )
         await self.bridge.on_message(normalized)
 

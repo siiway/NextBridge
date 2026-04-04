@@ -254,7 +254,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             platform="googlechat",
             instance_id=self.instance_id,
             channel={"space_name": space_name},
-            user=display_name,
+            nickname=display_name,
             user_id=user_id,
             user_avatar=avatar,
             text=text,

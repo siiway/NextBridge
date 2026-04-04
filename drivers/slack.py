@@ -262,7 +262,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             platform="slack",
             instance_id=self.instance_id,
             channel={"channel_id": channel_id},
-            user=display_name,
+            nickname=display_name,
             user_id=user_id,
             user_avatar=user_avatar,
             text=text,
@@ -272,6 +272,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             if event.get("thread_ts")
             else None,
             source_proxy=self._proxy,
+            username=display_name,
         )
         await self.bridge.on_message(normalized)
 

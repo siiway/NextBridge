@@ -12,27 +12,26 @@
 #   stream_threshold – If > 0, force stream mode when file exceeds this many bytes,
 #                      regardless of file_send_mode (default 0 = disabled)
 
-import datetime
-from drivers.registry import register
 import asyncio
 import base64
+import datetime
 import json
 import math
 import uuid
 from pathlib import Path
+from typing import Any, Literal
 
 import websockets
 import websockets.exceptions
 
-from typing import Any, Literal
-
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
-from services.db import msg_db
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.db import msg_db
+from services.message import Attachment, NormalizedMessage
 
 
 class NapCatConfig(_DriverConfig):
@@ -103,6 +102,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         # echo_id → Future; used to await responses for specific actions
         self._pending: dict[str, asyncio.Future] = {}
         self._proxy = get_proxy(config.proxy)
+        # Cache for user qid to avoid repeated API calls
+        self._qid_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -186,6 +187,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         # Prefer group card (nickname-in-group) over global nickname
         nickname = sender.get("card") or sender.get("nickname") or user_id
         time = event.get("time")
+        # Get user's qid
+        qid = await self._get_qid(user_id, group_id)
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
         text, attachments, reply_id, mentions = self._parse_message(
@@ -201,7 +204,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             platform="napcat",
             instance_id=self.instance_id,
             channel={"group_id": group_id},
-            user=nickname,
+            nickname=nickname,
             user_id=user_id,
             user_avatar=avatar_url,
             text=text,
@@ -211,6 +214,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             mentions=mentions,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
             source_proxy=self._proxy,
+            username=qid,
         )
         await self.bridge.on_message(msg)
 
@@ -401,7 +405,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         try:
             await self._ws.send(json.dumps(payload, ensure_ascii=False))
             return await asyncio.wait_for(fut, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"NapCat [{self.instance_id}] action '{action}' timed out")
             self._pending.pop(echo, None)
             return None
@@ -409,6 +413,38 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             logger.error(f"NapCat [{self.instance_id}] action '{action}' error: {e}")
             self._pending.pop(echo, None)
             return None
+
+    async def _get_qid(self, user_id: str, group_id: str | None = None) -> str:
+        """Get user's qid using NapCat API with caching."""
+        # Check cache first
+        if user_id in self._qid_cache:
+            return self._qid_cache[user_id]
+
+        try:
+            # Use get_stranger_info to get qid
+            result = await self._call(
+                "get_stranger_info", {"user_id": user_id}, timeout=30.0
+            )
+            logger.debug(
+                f"NapCat [{self.instance_id}] get_stranger_info result for {user_id}: {result}"
+            )
+            if result and result.get("status") == "ok" and result.get("data"):
+                data = result["data"]
+                qid = data.get("qid", "")
+                # Cache the result
+                if qid:
+                    self._qid_cache[user_id] = qid
+                logger.debug(f"NapCat [{self.instance_id}] qid for {user_id}: {qid}")
+                return qid
+            else:
+                logger.warning(
+                    f"NapCat [{self.instance_id}] get_stranger_info failed for {user_id}: {result}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
+            )
+        return ""
 
     async def _upload_file_stream(self, data_bytes: bytes, filename: str) -> str | None:
         """

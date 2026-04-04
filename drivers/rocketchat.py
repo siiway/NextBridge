@@ -185,13 +185,14 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             platform="rocketchat",
             instance_id=self.instance_id,
             channel={"room_id": room_id},
-            user=username,
+            nickname=username,
             user_id=sender_id,
             user_avatar=avatar,
             text=text,
             attachments=attachments,
             mentions=mentions,
             source_proxy=self._proxy,
+            username=username,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return web.json_response({})

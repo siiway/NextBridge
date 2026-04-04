@@ -16,13 +16,13 @@ class Attachment:
 class NormalizedMessage:
     """Platform-agnostic message passed through the bridge."""
 
-    platform: str  # e.g. "napcat", "discord", "telegram"
-    instance_id: str  # key as defined in config.json
-    channel: dict  # platform-specific channel info
-    user: str  # display name of sender
-    user_id: str  # platform user ID
-    user_avatar: str  # avatar URL (may be empty)
-    text: str  # message text content
+    platform: str = ""  # e.g. "napcat", "discord", "telegram"
+    instance_id: str = ""  # key as defined in config.json
+    channel: dict = field(default_factory=dict)  # platform-specific channel info
+    nickname: str = ""  # full display name of sender
+    user_id: str = ""  # platform user ID
+    user_avatar: str = ""  # avatar URL (may be empty)
+    text: str = ""  # message text content
     attachments: list[Attachment] = field(default_factory=list)
     message_id: str | None = None  # ID of this message on its platform
     reply_parent: str | None = None  # ID of the message being replied to (if any)
@@ -33,6 +33,12 @@ class NormalizedMessage:
     source_proxy: str | None = (
         None  # proxy URL for downloading attachments from source platform
     )
+    username: str = ""  # user's platform-specific name
+    
+    @property
+    def user(self) -> str:
+        """Compatibility property for legacy code that uses user field."""
+        return self.nickname 
 
     def __str__(self):
         l = []
@@ -40,7 +46,7 @@ class NormalizedMessage:
             "platform",
             "instance_id",
             "channel",
-            "user",
+            "nickname",
             "user_id",
             "user_avatar",
             "text",

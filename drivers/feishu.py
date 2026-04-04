@@ -386,7 +386,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 platform="feishu",
                 instance_id=self.instance_id,
                 channel={"chat_id": chat_id},
-                user=display_name,
+                nickname=display_name,
                 user_id=open_id,
                 user_avatar=avatar,
                 text=text,

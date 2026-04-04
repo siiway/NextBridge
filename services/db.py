@@ -1,8 +1,7 @@
+import json
 import time
 import uuid
-import json
 from pathlib import Path
-from typing import Optional
 
 from sqlalchemy import (
     Column,
@@ -16,9 +15,9 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session
 
-import services.util as u
 import services.logger as log
-import services.config as config
+import services.util as u
+from services import config
 
 logger = log.get_logger()
 
@@ -66,7 +65,7 @@ Index("idx_global_user", UserBinding.global_user_id)
 class MessageDB:
     """Handles mapping of message IDs between different platforms."""
 
-    def __init__(self, engine: Optional[Engine] = None):
+    def __init__(self, engine: Engine | None = None):
         """Initialize the database handler.
 
         Args:
@@ -419,7 +418,7 @@ class MessageDB:
 
 # Shared singleton
 
-_msg_db_instance: Optional[MessageDB] = None
+_msg_db_instance: MessageDB | None = None
 
 
 def msg_db() -> MessageDB:
@@ -437,7 +436,7 @@ def msg_db() -> MessageDB:
     return _msg_db_instance
 
 
-def init_db(engine: Optional[Engine] = None) -> None:
+def init_db(engine: Engine | None = None) -> None:
     """Initialize the database with an optional custom engine.
 
     This function allows explicit initialization of the database,

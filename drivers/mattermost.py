@@ -195,13 +195,14 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             platform="mattermost",
             instance_id=self.instance_id,
             channel={"channel_id": channel_id},
-            user=display_name,
+            nickname=display_name,
             user_id=user_id,
             user_avatar=avatar_url,
             text=text,
             attachments=attachments,
             mentions=mentions,
             source_proxy=self._proxy,
+            username=username,
         )
         await self.bridge.on_message(normalized)
 
