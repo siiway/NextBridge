@@ -77,6 +77,12 @@ NextBridge 目前只桥接**群消息**，不转发私聊消息。
 | `video` | 下载后按 `file_send_mode` 发送（stream 或 base64） |
 | `file` | 下载后按 `file_send_mode` 发送（stream 或 base64） |
 
+语音兼容性：当桥接到其他平台时，若检测到 QQ 语音为 AMR（例如 `.amr`），NextBridge 会优先尝试转码为 `audio/ogg`（Opus）后再发送，以提高 Discord 等平台的可识别性。若转码失败，则自动回退为原始音频继续转发。
+
+::: tip ffmpeg 依赖
+AMR 转码依赖系统中的 `ffmpeg` 可执行文件。若未安装 ffmpeg，语音仍会转发，但不会进行 AMR→OGG 转换。
+:::
+
 `file_send_mode` 和 `stream_threshold` 配置项控制视频和文件的上传方式。Stream 模式（`upload_file_stream` → `upload_group_file`）为默认值，对大文件更可靠。如果你的 NapCat 版本不支持流式上传，可改为 `"base64"`；配置 `stream_threshold` 可在文件超过指定大小时自动回退到 stream 模式。
 
 ## 注意事项
