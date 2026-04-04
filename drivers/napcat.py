@@ -188,7 +188,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         nickname = sender.get("card") or sender.get("nickname") or user_id
         time = event.get("time")
         # Get user's qid
-        qid = await self._get_qid(user_id, group_id)
+        qid = None # await self._get_qid(user_id, group_id)
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
         text, attachments, reply_id, mentions = self._parse_message(
@@ -214,7 +214,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             mentions=mentions,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
             source_proxy=self._proxy,
-            username=qid,
+            username=qid or user_id,
         )
         await self.bridge.on_message(msg)
 
@@ -423,37 +423,37 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             self._pending.pop(echo, None)
             return None
 
-    async def _get_qid(self, user_id: str, group_id: str | None = None) -> str:
-        """Get user's qid using NapCat API with caching."""
-        # Check cache first
-        if user_id in self._qid_cache:
-            return self._qid_cache[user_id]
+    # async def _get_qid(self, user_id: str, group_id: str | None = None) -> str:
+    #     """Get user's qid using NapCat API with caching."""
+    #     # Check cache first
+    #     if user_id in self._qid_cache:
+    #         return self._qid_cache[user_id]
 
-        try:
-            # Use get_stranger_info to get qid
-            result = await self._call(
-                "get_stranger_info", {"user_id": user_id}, timeout=30.0
-            )
-            logger.debug(
-                f"NapCat [{self.instance_id}] get_stranger_info result for {user_id}: {result}"
-            )
-            if result and result.get("status") == "ok" and result.get("data"):
-                data = result["data"]
-                qid = data.get("qid", "")
-                # Cache the result
-                if qid:
-                    self._qid_cache[user_id] = qid
-                logger.debug(f"NapCat [{self.instance_id}] qid for {user_id}: {qid}")
-                return qid
-            else:
-                logger.warning(
-                    f"NapCat [{self.instance_id}] get_stranger_info failed for {user_id}: {result}"
-                )
-        except Exception as e:
-            logger.warning(
-                f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
-            )
-        return ""
+    #     try:
+    #         # Use get_stranger_info to get qid
+    #         result = await self._call(
+    #             "get_stranger_info", {"user_id": user_id}, timeout=30.0
+    #         )
+    #         logger.debug(
+    #             f"NapCat [{self.instance_id}] get_stranger_info result for {user_id}: {result}"
+    #         )
+    #         if result and result.get("status") == "ok" and result.get("data"):
+    #             data = result["data"]
+    #             qid = data.get("qid", "")
+    #             # Cache the result
+    #             if qid:
+    #                 self._qid_cache[user_id] = qid
+    #             logger.debug(f"NapCat [{self.instance_id}] qid for {user_id}: {qid}")
+    #             return qid
+    #         else:
+    #             logger.warning(
+    #                 f"NapCat [{self.instance_id}] get_stranger_info failed for {user_id}: {result}"
+    #             )
+    #     except Exception as e:
+    #         logger.warning(
+    #             f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
+    #         )
+    #     return ""
 
     async def _upload_file_stream(self, data_bytes: bytes, filename: str) -> str | None:
         """
