@@ -215,7 +215,9 @@ class Bridge:
             else:
                 await sender(msg.channel, "❌ Invalid or expired binding code.")
 
-    async def _handle_bind_rm_command(self, msg: NormalizedMessage, target_inst: str | None):
+    async def _handle_bind_rm_command(
+        self, msg: NormalizedMessage, target_inst: str | None
+    ):
         """Remove account bindings for the user."""
         success = msg_db().remove_user_binding(
             msg.instance_id, msg.user_id, target_inst
