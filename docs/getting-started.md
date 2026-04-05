@@ -19,10 +19,10 @@ cd NextBridge
 **2. Install dependencies**
 
 ```bash
-uv sync
+uv sync --no-dev
 ```
 
-This installs all required packages (`discord-py`, `websockets`, `aiohttp`, `python-telegram-bot`, `lark-oapi`, `alibabacloud-dingtalk`) into an isolated virtual environment.
+This installs all required packages into an isolated virtual environment.
 
 ## Configure
 

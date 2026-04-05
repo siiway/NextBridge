@@ -8,7 +8,7 @@ The Yunhu driver receives messages via a webhook HTTP server and sends via the Y
 
 1. Go to the [Yunhu developer portal](https://www.yunhuim.com/) and create a bot.
 2. Copy the bot token.
-3. Set the bot's webhook URL to `http://<your-server>:<webhook_port><webhook_path>` (e.g. `http://1.2.3.4:8765/yunhu-webhook`).
+3. Set the bot's webhook URL to `http://<your-server>:<global.http.port><webhook_path>` (e.g. `http://1.2.3.4:8090/yunhu-webhook`).
 4. Add the bot to your group.
 5. Note the group's chat ID (visible in the group settings or in an incoming webhook event's `message.chatId` field).
 
@@ -19,7 +19,6 @@ Add under `yunhu.<instance_id>` in `config.json`:
 | Key | Required | Default | Description |
 |---|---|---|---|
 | `token` | Yes | — | Bot token from the Yunhu developer portal |
-| `webhook_port` | No | `8765` | Port for the incoming webhook HTTP server |
 | `webhook_path` | No | `"/yunhu-webhook"` | HTTP path for the webhook endpoint |
 | `proxy_host` | No | `"https://yh-proxy.siiway.top"` | Base URL of the `cloudflare/yh-proxy.js` Worker. Enables two sub-features: avatar URLs are rewritten to `<host>/pfp?url=...` (adds required Referer); Discord CDN attachment URLs are rewritten to `<host>/media?url=...` so Yunhu's servers can fetch them from within China Mainland. |
 | `proxy` | No | — | Proxy URL for all Yunhu API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
@@ -33,7 +32,6 @@ Add under `yunhu.<instance_id>` in `config.json`:
   "yunhu": {
     "yh_main": {
       "token": "your-yunhu-bot-token",
-      "webhook_port": 8765,
       "webhook_path": "/yunhu-webhook",
       "proxy_host": "https://yh-proxy.siiway.top"
     }
@@ -81,5 +79,5 @@ The text portion (including any rich-header prefix) is sent first, then each att
 ## Notes
 
 - Yunhu must be able to reach the webhook URL from the internet. When running behind NAT, use a reverse proxy or a tunnel such as `ngrok / Cloudflare Tunnel`.
-- Each NextBridge instance binds a single port. If you have multiple Yunhu instances, give each a different `webhook_port`.
+- Multiple Yunhu instances can share the same process and port. Use different `webhook_path` values per instance.
 - The bot token is sent as a query parameter (`?token=...`) on every outgoing request — keep it secret.

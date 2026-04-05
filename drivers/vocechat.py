@@ -14,7 +14,6 @@
 #   server_url    – Base URL of the VoceChat server (required),
 #                   e.g. "https://chat.example.com"
 #   api_key       – Bot API key shown in the bot settings page (required)
-#   listen_port   – HTTP port for the webhook endpoint (default: 8091)
 #   listen_path   – HTTP path for the webhook endpoint
 #                   (default: "/vocechat/webhook")
 #   max_file_size – Max bytes per attachment (default: 50 MB)
@@ -28,8 +27,9 @@ import asyncio
 import json
 
 import aiohttp
-from aiohttp import web
 from aiohttp_socks import ProxyConnector
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 
 import services.logger as log
 import services.media as media
@@ -42,7 +42,6 @@ from drivers import BaseDriver
 class VoceChatConfig(_DriverConfig):
     server_url: str
     api_key: str
-    listen_port: int = 8091
     listen_path: str = "/vocechat/webhook"
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
@@ -85,21 +84,21 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         )
         self.bridge.register_sender(self.instance_id, self.send)
 
-        app = web.Application()
-        app.router.add_get(self.config.listen_path, self._handle_health)
-        app.router.add_post(self.config.listen_path, self._handle_event)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", self.config.listen_port)
-        await site.start()
+        app = FastAPI()
+        app.add_api_route("/", self._handle_health, methods=["GET"])
+        app.add_api_route("/", self._handle_event, methods=["POST"])
+        if self.http_server is None:
+            logger.error(
+                f"VoceChat [{self.instance_id}] shared HTTP server unavailable"
+            )
+            return
+        self.http_server.mount(self.instance_id, self.config.listen_path, app)
         logger.info(
-            f"VoceChat [{self.instance_id}] webhook listening on "
-            f"0.0.0.0:{self.config.listen_port}{self.config.listen_path}"
+            f"VoceChat [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
         try:
             await asyncio.Event().wait()
         finally:
-            await runner.cleanup()
             await self._session.close()
             self._session = None
 
@@ -108,19 +107,19 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _handle_health(_: web.Request) -> web.Response:
+    async def _handle_health(_: Request) -> PlainTextResponse:
         """Health-check: VoceChat verifies the URL with a GET before saving it."""
-        return web.Response(status=200, text="ok")
+        return PlainTextResponse("ok", status_code=200)
 
-    async def _handle_event(self, request: web.Request) -> web.Response:
+    async def _handle_event(self, request: Request) -> PlainTextResponse:
         try:
             body = await request.read()
             event = json.loads(body)
         except Exception:
-            return web.Response(status=400, text="Bad JSON")
+            return PlainTextResponse("Bad JSON", status_code=400)
 
         asyncio.create_task(self._dispatch(event))
-        return web.Response(status=200, text="ok")
+        return PlainTextResponse("ok", status_code=200)
 
     async def _dispatch(self, event: dict) -> None:
         detail = event.get("detail", {})

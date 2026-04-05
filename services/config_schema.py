@@ -97,6 +97,56 @@ class LoggingConfig(BaseModel):
         return upper
 
 
+class HttpConfig(BaseModel):
+    """Shared HTTP server configuration for mounted driver webhooks."""
+
+    host: str = "0.0.0.0"
+    """Host/IP for the shared HTTP server."""
+
+    port: int = 8090
+    """Port for the shared HTTP server."""
+
+    root_path: str = ""
+    """Optional ASGI root_path, useful behind path-prefixed reverse proxies."""
+
+    log_level: Literal["critical", "error", "warning", "info", "debug"] = "info"
+    """Uvicorn log level used by the shared HTTP server."""
+
+    enable: Literal["unset", "true", "false"] = "unset"
+    """HTTP server startup mode.
+
+    - ``unset``: auto start only when at least one driver mounts a sub-app.
+    - ``true``: always start HTTP server.
+    - ``false``: never start HTTP server.
+    """
+
+    @field_validator("root_path", mode="before")
+    def normalize_root_path(cls, v):
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid http.root_path: {v}")
+        rp = v.strip()
+        if not rp or rp == "/":
+            return ""
+        if not rp.startswith("/"):
+            rp = f"/{rp}"
+        return rp.rstrip("/")
+
+    @field_validator("enable", mode="before")
+    def normalize_enable(cls, v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if v is None:
+            return "unset"
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid http.enable: {v}")
+        val = v.strip().lower()
+        if val not in {"unset", "true", "false"}:
+            raise ValueError("http.enable must be one of: unset, true, false")
+        return val
+
+
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
@@ -123,6 +173,9 @@ class GlobalConfig(BaseModel):
 
     database: DatabaseConfig = DatabaseConfig()
     """Database configuration for message and user mappings."""
+
+    http: HttpConfig = HttpConfig()
+    """Shared HTTP server configuration for mounted driver webhooks."""
 
     @field_validator("command_prefix", mode="before")
     def normalize_command_prefix(cls, v):

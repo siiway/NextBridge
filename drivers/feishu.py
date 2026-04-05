@@ -22,7 +22,6 @@
 #   use_long_connection  – true = WebSocket mode; false = HTTP webhook mode  (default: true)
 #   verification_token   – Event verification token  (HTTP mode only)
 #   encrypt_key          – Event encryption key  (HTTP mode; leave "" to disable)
-#   listen_port          – HTTP port to listen on  (HTTP mode; default: 8080)
 #   listen_path          – HTTP path for events    (HTTP mode; default: "/event")
 #
 # Rule channel keys:
@@ -36,7 +35,7 @@ import logging
 import re
 import threading
 
-from aiohttp import web
+from fastapi import FastAPI, Request, Response
 import lark_oapi as lark
 from lark_oapi.api.contact.v3 import GetUserRequest
 from lark_oapi.api.im.v1 import (
@@ -64,7 +63,6 @@ class FeishuConfig(_DriverConfig):
     use_long_connection: bool = True
     verification_token: str = ""
     encrypt_key: str = ""
-    listen_port: int = 8080
     listen_path: str = "/event"
     max_file_size: int = 50 * 1024 * 1024
 
@@ -188,26 +186,20 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
     # ------------------------------------------------------------------
 
     async def _start_http_server(self) -> None:
-        port = self.config.listen_port
         path = self.config.listen_path
 
-        web_app = web.Application()
-        web_app.router.add_post(path, self._handle_http)
+        app = FastAPI()
+        app.add_api_route("/", self._handle_http, methods=["POST"])
+        if self.http_server is None:
+            logger.error(f"Feishu [{self.instance_id}] shared HTTP server unavailable")
+            return
 
-        runner = web.AppRunner(web_app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", port)
-        await site.start()
-        logger.info(
-            f"Feishu [{self.instance_id}] HTTP server listening on 0.0.0.0:{port}{path}"
-        )
+        self.http_server.mount(self.instance_id, path, app)
+        logger.info(f"Feishu [{self.instance_id}] HTTP webhook mounted at {path}")
 
-        try:
-            await asyncio.Event().wait()
-        finally:
-            await runner.cleanup()
+        await asyncio.Event().wait()
 
-    async def _handle_http(self, request: web.Request) -> web.Response:
+    async def _handle_http(self, request: Request) -> Response:
         assert self._handler is not None  # Type narrowing - handler is set in start()
         handler = self._handler
         body = await request.read()
@@ -220,10 +212,10 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         # lark-oapi's do() is synchronous; run in thread pool to avoid blocking
         loop = asyncio.get_running_loop()
         resp = await loop.run_in_executor(None, lambda: handler.do(raw_req))
-        return web.Response(
+        return Response(
             body=resp.content,
-            status=resp.status_code or 200,
-            content_type=getattr(resp, "content_type", "application/json")
+            status_code=resp.status_code or 200,
+            media_type=getattr(resp, "content_type", "application/json")
             or "application/json",
         )
 

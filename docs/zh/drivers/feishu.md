@@ -45,7 +45,7 @@
 
 1. 前往[飞书开放平台](https://open.feishu.cn)（或 [Lark 开发者平台](https://open.larksuite.com)）。
 2. 创建一个**自建应用**，并在**权限管理**中开通上述权限范围。
-4. 在**事件订阅**中开启 **im.message.receive_v1** 事件，并将请求 URL 设为 `http://your-host:8080/event`（与 `listen_port` 和 `listen_path` 配置一致）。
+4. 在**事件订阅**中开启 **im.message.receive_v1** 事件，并将请求 URL 设为 `http://your-host:<global.http.port>/event`（与 `listen_path` 配置一致）。
 5. 复制 **App ID**、**App Secret**、**验证 Token** 和**加密 Key**（不需要加密可留空）。
 6. 发布应用版本，并将机器人添加到目标群聊。
 7. 在配置中设置 `use_long_connection: false`。
@@ -65,7 +65,6 @@
 | `use_long_connection` | 否 | `true` | `true` = WebSocket 长连接；`false` = HTTP Webhook |
 | `verification_token` | 否 | `""` | 事件验证 Token——仅 HTTP Webhook 模式使用 |
 | `encrypt_key` | 否 | `""` | 事件加密 Key——仅 HTTP Webhook 模式使用（留空表示不加密） |
-| `listen_port` | 否 | `8080` | 监听传入事件的 HTTP 端口——仅 HTTP Webhook 模式使用 |
 | `listen_path` | 否 | `"/event"` | 监听传入事件的 HTTP 路径——仅 HTTP Webhook 模式使用 |
 
 **长连接示例**
@@ -91,7 +90,6 @@
       "app_secret": "your_app_secret",
       "verification_token": "your_verification_token",
       "encrypt_key": "",
-      "listen_port": 8080,
       "listen_path": "/event",
       "use_long_connection": false
     }

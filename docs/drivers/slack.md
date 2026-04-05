@@ -9,7 +9,7 @@ The Slack driver supports two independent receive modes and two independent send
 | Mode | Requires | Description |
 |---|---|---|
 | **Socket Mode** | `app_token` | NextBridge opens a WebSocket to Slack. No public URL needed. |
-| **Events API** | `signing_secret` + `listen_port` | Slack POSTs events to your HTTP endpoint. Requires a public URL. |
+| **Events API** | `signing_secret` | Slack POSTs events to your HTTP endpoint. Requires a public URL. |
 
 If `app_token` is set, Socket Mode is used and Events API config is ignored.
 
@@ -78,7 +78,6 @@ Add under `slack.<instance_id>` in your config file:
 | `send_method` | No | `"bot"` | `"bot"` or `"webhook"` |
 | `incoming_webhook_url` | For webhook send | — | Slack Incoming Webhook URL |
 | `signing_secret` | For Events API receive | — | Slack signing secret for request verification |
-| `listen_port` | For Events API receive | — | HTTP port to listen on |
 | `listen_path` | No | `"/slack/events"` | HTTP path for the Events API endpoint |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
 | `proxy` | No | — | Proxy URL for all Slack API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
@@ -103,7 +102,6 @@ Add under `slack.<instance_id>` in your config file:
   "slack": {
     "sl_main": {
       "signing_secret": "abc123...",
-      "listen_port": 8090,
       "send_method": "webhook",
       "incoming_webhook_url": "https://hooks.slack.com/services/T.../B.../..."
     }
@@ -119,7 +117,7 @@ Add under `slack.<instance_id>` in your config file:
     "sl_main": {
       "bot_token": "xoxb-...",
       "signing_secret": "abc123...",
-      "listen_port": 8090
+      "listen_path": "/slack/events"
     }
   }
 }

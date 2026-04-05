@@ -14,6 +14,7 @@ import services.util as u
 import services.config_io as config_io
 from services.config_schema import GlobalConfig
 from services.bridge import bridge
+from services.http_server import HttpServerManager
 
 logger = log.get_logger()
 
@@ -102,6 +103,24 @@ async def main():
     )
     bridge.command_prefix = validated_global.command_prefix
 
+    try:
+        # get version info
+        with open("pyproject.toml", "rb") as f:
+            version: str = load_toml(f).get("project", {}).get("version", "UNKNOWN")
+            f.close()
+    except Exception:
+        logger.opt(exception=True).warning("Read version info failed")
+        version = "UNKNOWN"
+
+    http_server = HttpServerManager(
+        host=validated_global.http.host,
+        port=validated_global.http.port,
+        root_path=validated_global.http.root_path,
+        log_level=validated_global.http.log_level,
+        start_without_mounts=validated_global.http.enable == "true",
+        version=version,
+    )
+
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()
     validated: dict[str, dict[str, object]] = {}
@@ -129,45 +148,58 @@ async def main():
         if exc is not None:
             logger.opt(exception=exc).error(f"Driver '{task.get_name()}' crashed")
 
-    try:
-        # get version info
-        with open("pyproject.toml", "rb") as f:
-            version: str = load_toml(f).get("project", {}).get("version", "UNKNOWN")
-            f.close()
-    except Exception:
-        logger.opt(exception=True).warning("Read version info failed")
-        version = "UNKNOWN"
-
     logger.info(f"========== NextBridge v{version} Starting ==========")
 
     driver_tasks: list[asyncio.Task] = []
     for platform, (_, driver_cls) in registry.items():
         for inst_id, cfg in validated.get(platform, {}).items():
             drv = driver_cls(inst_id, cfg, bridge)
+            drv.attach_http_server(http_server)
             task = asyncio.create_task(drv.start(), name=f"{platform}/{inst_id}")
             task.add_done_callback(_on_task_done)
             driver_tasks.append(task)
             logger.info(f"Registered driver: {platform}/{inst_id}")
 
-    if not driver_tasks:
+    if not driver_tasks and validated_global.http.enable != "true":
         logger.error("No drivers configured — nothing to do, exiting.")
         return
+    if not driver_tasks and validated_global.http.enable == "true":
+        logger.warning("No drivers configured — starting HTTP server due to http.enable=true")
+
+    # Let drivers perform startup and register webhook sub-apps.
+    await asyncio.sleep(0)
+
+    all_tasks = list(driver_tasks)
+    http_enable = validated_global.http.enable
+    if http_enable == "false":
+        if http_server.has_mounts():
+            logger.warning(
+                "HTTP server is disabled by http.enable=false while drivers mounted "
+                "webhook sub-apps; inbound webhook features are unavailable"
+            )
+        logger.info("Shared HTTP server disabled by configuration (http.enable=false)")
+    elif http_server.should_start():
+        http_task = asyncio.create_task(http_server.run(), name="http/shared")
+        http_task.add_done_callback(_on_task_done)
+        all_tasks.append(http_task)
+    else:
+        logger.info("No HTTP sub-app mounted; shared HTTP server disabled")
 
     try:
-        results = await asyncio.gather(*driver_tasks, return_exceptions=True)
-        for task, result in zip(driver_tasks, results):
+        results = await asyncio.gather(*all_tasks, return_exceptions=True)
+        for task, result in zip(all_tasks, results):
             if isinstance(result, Exception):
                 logger.error(f"Driver '{task.get_name()}' exited with error: {result}")
     except asyncio.CancelledError:
         logger.info("NextBridge shutting down...")
 
         # stop all tasks explicitly
-        for task in driver_tasks:
+        for task in all_tasks:
             if not task.done():
                 task.cancel()
 
         # wait for all drivers to clean up
-        await asyncio.gather(*driver_tasks, return_exceptions=True)
+        await asyncio.gather(*all_tasks, return_exceptions=True)
 
         # close all sessions to avoid connection leaks
         from services.media import close_all_sessions

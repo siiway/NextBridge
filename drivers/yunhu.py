@@ -5,7 +5,6 @@
 #
 # Config keys (under yunhu.<instance_id>):
 #   token        – Bot token from the Yunhu developer portal (required)
-#   webhook_port – Port to listen on for incoming webhooks (default 8765)
 #   webhook_path – HTTP path for the webhook endpoint (default "/yunhu-webhook")
 #   proxy_host   – Cloudflare Worker base URL for the media proxy.
 #                  /pfp?url=  is used for Yunhu CDN avatars (adds Referer).
@@ -21,8 +20,9 @@ import asyncio
 from urllib.parse import quote, urlparse
 
 import aiohttp
-from aiohttp import web
 from aiohttp_socks import ProxyConnector
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 import services.logger as log
 import services.media as media
@@ -34,7 +34,6 @@ from drivers import BaseDriver
 
 class YunhuConfig(_DriverConfig):
     token: str = ""
-    webhook_port: int = 8765
     webhook_path: str = "/yunhu-webhook"
     proxy_host: str = "https://yh-proxy.siiway.top"
     max_file_size: int = 10 * 1024 * 1024
@@ -81,16 +80,15 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
 
         self._session = aiohttp.ClientSession(connector=connector)
 
-        port: int = self.config.webhook_port
         path: str = self.config.webhook_path
 
-        app = web.Application()
-        app.router.add_post(path, self._handle_webhook)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", port)
-        await site.start()
-        logger.info(f"Yunhu [{self.instance_id}] webhook listening on :{port}{path}")
+        app = FastAPI()
+        app.add_api_route("/", self._handle_webhook, methods=["POST"])
+        if self.http_server is None:
+            logger.error(f"Yunhu [{self.instance_id}] shared HTTP server unavailable")
+            return
+        self.http_server.mount(self.instance_id, path, app)
+        logger.info(f"Yunhu [{self.instance_id}] webhook mounted at {path}")
 
         await asyncio.Event().wait()  # run indefinitely
 
@@ -184,7 +182,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
     # Receive
     # ------------------------------------------------------------------
 
-    async def _handle_webhook(self, request: web.Request) -> web.Response:
+    async def _handle_webhook(self, request: Request) -> JSONResponse:
         try:
             data = await request.json()
             event_type: str = data.get("header", {}).get("eventType", "")
@@ -198,7 +196,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             )
 
         # Yunhu expects a 200 with code=0 to acknowledge receipt
-        return web.json_response({"code": 0})
+        return JSONResponse({"code": 0})
 
     async def _on_message(self, event: dict):
         sender: dict = event.get("sender", {})

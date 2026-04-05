@@ -47,7 +47,7 @@ Feishu pushes events to an HTTP endpoint you expose. The driver starts an aiohtt
 1. Go to the [Feishu Open Platform](https://open.feishu.cn) (or [Lark Developer](https://open.larksuite.com)).
 2. Create a **custom app** and grant the scopes listed above.
 3. Enable the **im.message.receive_v1** event under **Event Subscriptions**.
-4. Set the request URL to `http://your-host:8080/event` (matching your `listen_port` and `listen_path`).
+4. Set the request URL to `http://your-host:<global.http.port>/event` (matching `listen_path`).
 5. Copy the **App ID**, **App Secret**, **Verification Token**, and **Encrypt Key** (leave encrypt key blank to disable encryption).
 6. Publish the app version and add the bot to the target group chat.
 7. Set `use_long_connection: false` in your config.
@@ -67,7 +67,6 @@ Add under `feishu.<instance_id>` in `config.json`:
 | `use_long_connection` | No | `true` | `true` = WebSocket long connection; `false` = HTTP webhook |
 | `verification_token` | No | `""` | Event verification token — HTTP webhook mode only |
 | `encrypt_key` | No | `""` | Event encryption key — HTTP webhook mode only (leave empty to disable) |
-| `listen_port` | No | `8080` | HTTP port to listen on — HTTP webhook mode only |
 | `listen_path` | No | `"/event"` | HTTP path for incoming events — HTTP webhook mode only |
 
 **Long connection example**
@@ -93,7 +92,6 @@ Add under `feishu.<instance_id>` in `config.json`:
       "app_secret": "your_app_secret",
       "verification_token": "your_verification_token",
       "encrypt_key": "",
-      "listen_port": 8080,
       "listen_path": "/event",
       "use_long_connection": false
     }

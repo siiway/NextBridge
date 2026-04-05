@@ -34,7 +34,6 @@ VoceChat 驱动器将自托管的 [VoceChat](https://voce.chat/) 服务器与其
 |---|---|---|---|
 | `server_url` | 是 | — | VoceChat 服务器基础 URL，例如 `"https://chat.example.com"` |
 | `api_key` | 是 | — | 机器人设置页面中的 Bot API Key |
-| `listen_port` | 否 | `8091` | Webhook 监听的 HTTP 端口 |
 | `listen_path` | 否 | `"/vocechat/webhook"` | Webhook 端点的 HTTP 路径 |
 | `max_file_size` | 否 | `52428800`（50 MB）| 附件大小上限（字节） |
 | `proxy` | 否 | — | 所有 VoceChat API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
@@ -45,7 +44,7 @@ VoceChat 驱动器将自托管的 [VoceChat](https://voce.chat/) 服务器与其
     "vc_main": {
       "server_url": "https://chat.example.com",
       "api_key": "your-bot-api-key",
-      "listen_port": 8091
+      "listen_path": "/vocechat/webhook"
     }
   }
 }

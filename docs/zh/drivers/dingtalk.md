@@ -27,7 +27,6 @@
 | `app_secret` | 是 | — | 钉钉 App Secret |
 | `robot_code` | 是 | — | 机器人 Code，发送消息时必填 |
 | `signing_secret` | 否 | — | Webhook 签名密钥；不填则跳过签名验证 |
-| `listen_port` | 否 | `8082` | 监听传入事件的 HTTP 端口 |
 | `listen_path` | 否 | `"/dingtalk/event"` | 监听传入事件的 HTTP 路径 |
 
 ```json
@@ -38,7 +37,6 @@
       "app_secret": "your_app_secret",
       "robot_code": "your_robot_code",
       "signing_secret": "your_signing_secret",
-      "listen_port": 8082,
       "listen_path": "/dingtalk/event"
     }
   }

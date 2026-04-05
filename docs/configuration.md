@@ -51,6 +51,7 @@ The `global` section contains configuration options that apply to all drivers un
 | `command_prefix` | No | `nb` | Prefix used for built-in bridge commands. With the default prefix, built-in commands are written as `/nb bind setup`, `/nb bind confirm <code>`, `/nb bind rm`, and `/nb bind list`. |
 | `proxy` | No | — | Global proxy URL for all drivers that ***support proxy configuration*** (e.g., `http://proxy.example.com:8080`). Individual driver proxy settings will override this global setting. |
 | `strict_echo_match` | No | `false` | Controls how NextBridge prevents echoing messages back to the same channel/instance. When `false` (default), skips if target_id == msg.instance_id OR target_channel == msg.channel. When `true`, skips only if target_id == msg.instance_id AND target_channel == msg.channel. Default is `false` to maximize echo prevention. |
+| `http` | No | — | Shared HTTP server settings for all webhook-style drivers. See [HTTP Server Configuration](#http-server-configuration). |
 | `log` | No | — | Logging configuration for controlling log output and rotation. See [Logging Configuration](#logging-configuration) below. |
 | `database` | No | — | Database configuration for storing message and user mappings. See [Database Configuration](#database-configuration) below. |
 
@@ -66,6 +67,44 @@ The `global` section contains configuration options that apply to all drivers un
 ::: tip Using proxy from environment variables
  If not set, the program will attempt to read proxy configuration from environment variables `http_proxy`, `https_proxy`, and `all_proxy` (case-insensitive). You can disable the use of system proxy by setting `proxy` to the special value `disabled`.
 :::
+
+## HTTP Server Configuration
+
+NextBridge now runs a **single shared FastAPI/uvicorn HTTP server** for all drivers that need inbound webhooks. Drivers register their own sub-apps by path.
+
+- The shared HTTP server starts **only if at least one driver mounts a webhook sub-app**.
+- Webhook path config (`listen_path`, `webhook_path`, etc.) remains per driver.
+
+| Key | Required | Default | Description |
+|---|---|---|---|
+| `http.enable` | No | `unset` | Startup mode: `unset` (auto), `true` (force on), `false` (force off) |
+| `http.host` | No | `0.0.0.0` | Host/IP bound by the shared HTTP server |
+| `http.port` | No | `8090` | Port bound by the shared HTTP server |
+| `http.root_path` | No | `""` | ASGI `root_path` for reverse proxies using path prefix |
+| `http.log_level` | No | `info` | Uvicorn log level (`critical`/`error`/`warning`/`info`/`debug`) |
+
+```json
+{
+  "global": {
+    "http": {
+      "enable": "unset",
+      "host": "0.0.0.0",
+      "port": 8090,
+      "root_path": "",
+      "log_level": "info"
+    }
+  }
+}
+```
+
+`http.enable` behavior:
+- `unset`: start only when at least one driver mounts a webhook sub-app
+- `true`: always start HTTP server
+- `false`: never start HTTP server; if drivers mount webhooks, a warning is logged and inbound webhook features are unavailable
+
+Health endpoint: `/_nextbridge/health`
+- Always returns `status` and `version`
+- Returns `mounts` only when `http.log_level` is `debug`
 
 ## Logging Configuration
 
@@ -238,7 +277,6 @@ You can run **multiple instances of the same platform** by adding more keys unde
       "app_secret": "xxxx",
       "verification_token": "xxxx",
       "encrypt_key": "",
-      "listen_port": 8080,
       "listen_path": "/event"
     }
   },
@@ -248,7 +286,6 @@ You can run **multiple instances of the same platform** by adding more keys unde
       "app_secret": "xxxx",
       "robot_code": "xxxx",
       "signing_secret": "xxxx",
-      "listen_port": 8082,
       "listen_path": "/dingtalk/event"
     }
   },

@@ -12,7 +12,6 @@
 # Config keys (under googlechat.<instance_id>):
 #   service_account_file – Path to service account JSON key file (required*)
 #   service_account_json – Inline service account JSON string    (alternative)
-#   listen_port          – HTTP port  (default: 8090)
 #   listen_path          – HTTP path  (default: "/google-chat/events")
 #   endpoint_url         – Full public URL of this endpoint, e.g.
 #                          "https://example.com/google-chat/events".
@@ -32,8 +31,9 @@ import json
 from pathlib import Path
 
 import aiohttp
-from aiohttp import web
 from aiohttp_socks import ProxyConnector
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import model_validator
 import requests
 from requests.adapters import HTTPAdapter
@@ -53,7 +53,6 @@ from drivers import BaseDriver
 class GoogleChatConfig(_DriverConfig):
     service_account_file: str = ""
     service_account_json: str = ""
-    listen_port: int = 8090
     listen_path: str = "/google-chat/events"
     endpoint_url: str = ""
     max_file_size: int = 50 * 1024 * 1024
@@ -120,20 +119,20 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
-        app = web.Application()
-        app.router.add_post(self.config.listen_path, self._handle_event)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", self.config.listen_port)
-        await site.start()
+        app = FastAPI()
+        app.add_api_route("/", self._handle_event, methods=["POST"])
+        if self.http_server is None:
+            logger.error(
+                f"Google Chat [{self.instance_id}] shared HTTP server unavailable"
+            )
+            return
+        self.http_server.mount(self.instance_id, self.config.listen_path, app)
         logger.info(
-            f"Google Chat [{self.instance_id}] listening on "
-            f"0.0.0.0:{self.config.listen_port}{self.config.listen_path}"
+            f"Google Chat [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
         try:
             await asyncio.Event().wait()
         finally:
-            await runner.cleanup()
             await self._session.close()
             self._session = None
 
@@ -191,30 +190,30 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
     # Receive
     # ------------------------------------------------------------------
 
-    async def _handle_event(self, request: web.Request) -> web.Response:
+    async def _handle_event(self, request: Request) -> JSONResponse | PlainTextResponse:
         if self.config.endpoint_url:
             auth = request.headers.get("Authorization", "")
             if not auth.startswith("Bearer "):
-                return web.Response(status=403, text="Missing bearer token")
+                return PlainTextResponse("Missing bearer token", status_code=403)
             if not await self._verify_token(auth[7:]):
-                return web.Response(status=403, text="Invalid token")
+                return PlainTextResponse("Invalid token", status_code=403)
 
         try:
             body = await request.read()
             event = json.loads(body)
         except Exception:
-            return web.Response(status=400, text="Bad JSON")
+            return PlainTextResponse("Bad JSON", status_code=400)
 
         if event.get("type") != "MESSAGE":
             # Acknowledge other events (ADDED_TO_SPACE, REMOVED_FROM_SPACE...)
-            return web.json_response({"text": ""})
+            return JSONResponse({"text": ""})
 
         message = event.get("message", {})
         sender = message.get("sender", {})
         space = event.get("space", {})
 
         if sender.get("type") == "BOT":
-            return web.json_response({"text": ""})
+            return JSONResponse({"text": ""})
 
         # argumentText strips the @mention prefix; fall back to full text
         text: str = message.get("argumentText") or message.get("text") or ""
@@ -248,7 +247,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 attachments.append(att)
 
         if not text.strip() and not attachments:
-            return web.json_response({"text": ""})
+            return JSONResponse({"text": ""})
 
         normalized = NormalizedMessage(
             platform="googlechat",
@@ -263,7 +262,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             source_proxy=self._proxy,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
-        return web.json_response({"text": ""})
+        return JSONResponse({"text": ""})
 
     async def _verify_token(self, token: str) -> bool:
         import google.oauth2.id_token as _id_token

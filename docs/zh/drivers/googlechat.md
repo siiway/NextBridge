@@ -30,7 +30,6 @@ Google Chat 驱动器通过**服务账号**和 **Google Chat REST API** 将 Goog
 |---|---|---|---|
 | `service_account_file` | 是* | — | 服务账号 JSON 密钥文件路径 |
 | `service_account_json` | 是* | — | 内联服务账号 JSON 字符串（与文件路径二选一） |
-| `listen_port` | 否 | `8090` | 驱动器监听的 HTTP 端口 |
 | `listen_path` | 否 | `"/google-chat/events"` | 事件端点的 HTTP 路径 |
 | `endpoint_url` | 否 | — | 端点的完整公开 URL（设置后启用请求签名验证） |
 | `max_file_size` | 否 | `52428800`（50 MB）| 附件大小上限（字节） |
@@ -45,7 +44,6 @@ Google Chat 驱动器通过**服务账号**和 **Google Chat REST API** 将 Goog
   "googlechat": {
     "my_space": {
       "service_account_file": "/secrets/google-chat-sa.json",
-      "listen_port": 8090,
       "endpoint_url": "https://example.com/google-chat/events"
     }
   }

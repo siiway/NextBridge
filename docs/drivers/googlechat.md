@@ -30,7 +30,6 @@ Add under `googlechat.<instance_id>` in `config.json`:
 |---|---|---|---|
 | `service_account_file` | Yes* | — | Path to the service account JSON key file |
 | `service_account_json` | Yes* | — | Inline service account JSON string (alternative to file) |
-| `listen_port` | No | `8090` | HTTP port the driver listens on |
 | `listen_path` | No | `"/google-chat/events"` | HTTP path for the event endpoint |
 | `endpoint_url` | No | — | Full public URL of the endpoint (enables request signature verification) |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum attachment size in bytes |
@@ -46,7 +45,6 @@ Add under `googlechat.<instance_id>` in `config.json`:
   "googlechat": {
     "my_space": {
       "service_account_file": "/secrets/google-chat-sa.json",
-      "listen_port": 8090,
       "endpoint_url": "https://example.com/google-chat/events"
     }
   }

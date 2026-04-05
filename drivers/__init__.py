@@ -16,6 +16,10 @@ class BaseDriver(ABC, Generic[T]):
         self.instance_id = instance_id
         self.config: T = config
         self.bridge = bridge
+        self.http_server = None
+
+    def attach_http_server(self, http_server) -> None:
+        self.http_server = http_server
 
     @abstractmethod
     async def start(self):

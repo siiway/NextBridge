@@ -8,7 +8,7 @@ The DingTalk driver receives messages via an HTTP webhook (outgoing robot) and s
 
 1. In the [DingTalk Developer Console](https://open-dev.dingtalk.com), create an internal app.
 2. Under **Robot**, create a robot and configure **Message Receive Mode** → **HTTP Mode**.
-3. Set the message receive URL to `http://your-host:8082/dingtalk/event`.
+3. Set the message receive URL to `http://your-host:<global.http.port>/dingtalk/event`.
 4. Copy the **App Key**, **App Secret**, and **Robot Code**.
 5. Optionally enable webhook signing and copy the **Signing Secret**.
 6. Add the bot to the target group.
@@ -27,7 +27,6 @@ Add under `dingtalk.<instance_id>` in `config.json`:
 | `app_secret` | Yes | — | DingTalk app secret |
 | `robot_code` | Yes | — | Robot code, required for sending messages |
 | `signing_secret` | No | — | Webhook signing secret; skips signature verification if absent |
-| `listen_port` | No | `8082` | HTTP port to listen on for incoming events |
 | `listen_path` | No | `"/dingtalk/event"` | HTTP path for incoming events |
 
 ```json
@@ -38,7 +37,6 @@ Add under `dingtalk.<instance_id>` in `config.json`:
       "app_secret": "your_app_secret",
       "robot_code": "your_robot_code",
       "signing_secret": "your_signing_secret",
-      "listen_port": 8082,
       "listen_path": "/dingtalk/event"
     }
   }

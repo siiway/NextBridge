@@ -2,7 +2,7 @@
 #
 # Receive: two modes —
 #   Socket Mode (when app_token is set)              – WebSocket; no public URL needed.
-#   Events API  (when signing_secret + listen_port)  – HTTP webhook from Slack.
+#   Events API  (when signing_secret is set)         – HTTP webhook from Slack.
 #
 # Send: two modes controlled by "send_method" in config —
 #   "bot"     (default) – chat.postMessage + files.upload (requires bot_token).
@@ -16,7 +16,6 @@
 #   send_method          – "bot" (default) | "webhook"
 #   incoming_webhook_url – Incoming Webhook URL for send_method="webhook"
 #   signing_secret       – Slack signing secret for Events API signature verification
-#   listen_port          – HTTP port for Events API receive
 #   listen_path          – HTTP path for Events API (default: "/slack/events")
 #   max_file_size        – Max bytes per attachment when sending (default 50 MB)
 #
@@ -32,8 +31,9 @@ import json
 import time
 
 import aiohttp
-from aiohttp import web
 from aiohttp_socks import ProxyConnector
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
@@ -57,7 +57,6 @@ class SlackConfig(_DriverConfig):
     send_method: Literal["bot", "webhook"] = "bot"
     incoming_webhook_url: str = ""
     signing_secret: str = ""
-    listen_port: int = 0
     listen_path: str = "/slack/events"
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
@@ -118,7 +117,6 @@ class SlackDriver(BaseDriver[SlackConfig]):
         send_method = self.config.send_method
         webhook_url = self.config.incoming_webhook_url
         signing_secret = self.config.signing_secret
-        listen_port = self.config.listen_port
         listen_path = self.config.listen_path
 
         if self._proxy:
@@ -153,21 +151,19 @@ class SlackDriver(BaseDriver[SlackConfig]):
             return
 
         # ------ Events API webhook receive -----------------------------------
-        if signing_secret and listen_port:
-            web_app = web.Application()
-            web_app.router.add_post(listen_path, self._handle_events_api)
-            runner = web.AppRunner(web_app)
-            await runner.setup()
-            site = web.TCPSite(runner, "0.0.0.0", listen_port)
-            await site.start()
+        if signing_secret:
+            app = FastAPI()
+            app.add_api_route("/", self._handle_events_api, methods=["POST"])
+            if self.http_server is None:
+                logger.error(f"Slack [{self.instance_id}] shared HTTP server unavailable")
+                return
+            self.http_server.mount(self.instance_id, listen_path, app)
             logger.info(
-                f"Slack [{self.instance_id}] Events API listening on "
-                f"0.0.0.0:{listen_port}{listen_path}"
+                f"Slack [{self.instance_id}] Events API mounted at {listen_path}"
             )
             try:
                 await asyncio.Event().wait()
             finally:
-                await runner.cleanup()
                 await self._session.close()
             return
 
@@ -205,26 +201,26 @@ class SlackDriver(BaseDriver[SlackConfig]):
     # Receive — Events API (HTTP webhook)
     # ------------------------------------------------------------------
 
-    async def _handle_events_api(self, request: web.Request) -> web.Response:
+    async def _handle_events_api(self, request: Request) -> JSONResponse | PlainTextResponse:
         body = await request.read()
 
         if self.config.signing_secret and not _verify_slack_signature(
             self.config.signing_secret, request.headers, body
         ):
-            return web.Response(status=403, text="Invalid signature")
+            return PlainTextResponse("Invalid signature", status_code=403)
 
         try:
             payload = json.loads(body)
         except Exception:
-            return web.Response(status=400, text="Bad JSON")
+            return PlainTextResponse("Bad JSON", status_code=400)
 
         # URL verification challenge (sent by Slack when the endpoint is first saved)
         if payload.get("type") == "url_verification":
-            return web.json_response({"challenge": payload.get("challenge", "")})
+            return JSONResponse({"challenge": payload.get("challenge", "")})
 
         event = payload.get("event", {})
         asyncio.create_task(self._dispatch_event(event))
-        return web.Response(status=200, text="ok")
+        return PlainTextResponse("ok", status_code=200)
 
     # ------------------------------------------------------------------
     # Receive — shared event dispatch

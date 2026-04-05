@@ -51,6 +51,7 @@ uv run main.py convert data/config.yaml data/config.toml
 | `command_prefix` | 否 | `nb` | 内置桥接命令的前缀。使用默认前缀时，命令写作 `/nb bind setup`、`/nb bind confirm <code>`、`/nb bind rm` 和 `/nb bind list`。 |
 | `proxy` | 否 | — | 全局代理 URL，适用于所有***支持代理配置***的驱动（例如：`http://proxy.example.com:8080`）。单个驱动的代理设置将覆盖此全局设置。 |
 | `strict_echo_match` | 否 | `false` | 控制 NextBridge 防止 echo (回声) 到同一个频道/实例的行为。当为 `false`（默认）时，如果目标实例 ID 或频道与源消息相同，则跳过；当为 `true` 时，只有当目标实例 ID 和频道都与源消息相同时才跳过。默认为 `false` 以最大程度防止回声。 |
+| `http` | 否 | — | 所有 Webhook 驱动共用的 HTTP 服务配置。参见下方[HTTP 服务配置](#http-服务配置)。 |
 | `log` | 否 | — | 日志配置，用于控制日志输出和轮换。参见下方[日志配置](#日志配置)。 |
 | `database` | 否 | — | 数据库配置，用于存储消息和用户映射。参见下方[数据库配置](#数据库配置)。 |
 
@@ -66,6 +67,44 @@ uv run main.py convert data/config.yaml data/config.toml
 ::: tip 使用环境变量中的代理
  如果未设置，程序会尝试从环境变量 `http_proxy`, `https_proxy`, `all_proxy` 中读取代理配置 (不分大小写)，此时你可以通过将 `proxy` 指定为特殊值 `disabled` 来阻止使用系统代理。
 :::
+
+## HTTP 服务配置
+
+NextBridge 现在为所有需要入站 Webhook 的驱动提供**单一共享 FastAPI/uvicorn HTTP 服务**。各驱动通过路径挂载自己的子应用。
+
+- 只有在至少有一个驱动挂载子应用时，HTTP 服务才会启动。
+- 驱动侧的路径配置（如 `listen_path`、`webhook_path`）仍然保留并生效。
+
+| 键 | 是否必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `http.enable` | 否 | `unset` | 启动模式：`unset`（自动）、`true`（强制开）、`false`（强制关） |
+| `http.host` | 否 | `0.0.0.0` | 共享 HTTP 服务监听的主机/IP |
+| `http.port` | 否 | `8090` | 共享 HTTP 服务监听端口 |
+| `http.root_path` | 否 | `""` | 反向代理使用路径前缀时的 ASGI `root_path` |
+| `http.log_level` | 否 | `info` | Uvicorn 日志级别（`critical`/`error`/`warning`/`info`/`debug`） |
+
+```json
+{
+  "global": {
+    "http": {
+      "enable": "unset",
+      "host": "0.0.0.0",
+      "port": 8090,
+      "root_path": "",
+      "log_level": "info"
+    }
+  }
+}
+```
+
+`http.enable` 行为：
+- `unset`：仅当至少有一个驱动挂载 webhook 子应用时启动
+- `true`：始终启动 HTTP 服务
+- `false`：始终关闭 HTTP 服务；若驱动挂载了 webhook，会记录告警且入站 webhook 功能不可用
+
+健康检查端点：`/_nextbridge/health`
+- 始终返回 `status` 与 `version`
+- 仅当 `http.log_level` 为 `debug` 时返回 `mounts`
 
 ## 日志配置
 
@@ -238,7 +277,6 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
       "app_secret": "xxxx",
       "verification_token": "xxxx",
       "encrypt_key": "",
-      "listen_port": 8080,
       "listen_path": "/event"
     }
   },
@@ -248,7 +286,6 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
       "app_secret": "xxxx",
       "robot_code": "xxxx",
       "signing_secret": "xxxx",
-      "listen_port": 8082,
       "listen_path": "/dingtalk/event"
     }
   },

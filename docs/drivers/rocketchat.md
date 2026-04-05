@@ -20,8 +20,8 @@ The Rocket.Chat driver receives messages via a **Outgoing Webhook** and supports
    - **Event Trigger**: Message Sent
    - **Enabled**: Yes
    - **Channel**: leave blank to catch all channels, or enter `#channel-name` to limit scope
-   - **URLs**: `http(s)://<your-host>:<listen_port><listen_path>`
-     e.g. `https://bridge.example.com:8093/rocketchat/webhook`
+   - **URLs**: `http(s)://<your-host>:<global.http.port><listen_path>`
+     e.g. `https://bridge.example.com:8090/rocketchat/webhook`
    - **Token**: generate or type a secret — copy it to `webhook_token` in your config
 3. Save the integration.
 
@@ -46,7 +46,6 @@ Add under `rocketchat.<instance_id>` in your config file:
 | `auth_token` | Yes (api) | `""` | Personal access token for the bot account |
 | `user_id` | Yes (api) | `""` | Bot account user ID |
 | `webhook_url` | Yes (webhook) | `""` | Incoming Webhook URL for `send_method="webhook"` |
-| `listen_port` | No | `8093` | HTTP port for the outgoing webhook listener |
 | `listen_path` | No | `"/rocketchat/webhook"` | HTTP path for the outgoing webhook listener |
 | `webhook_token` | No | `""` | Token from the outgoing webhook — verifies requests are from RC |
 | `max_file_size` | No | `52428800` (50 MB) | Maximum attachment size in bytes |

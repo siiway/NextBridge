@@ -13,7 +13,6 @@
 #   app_secret     – DingTalk app secret (required)
 #   robot_code     – Bot robot code     (required for sending)
 #   signing_secret – Webhook signing secret (optional; skips verify if absent)
-#   listen_port    – HTTP port          (default: 8082)
 #   listen_path    – HTTP path          (default: "/dingtalk/event")
 #
 # Rule channel keys:
@@ -32,13 +31,14 @@ import time
 from typing import Any
 
 import aiohttp
-from aiohttp import web
 from alibabacloud_tea_openapi import models as open_api_models
 from alibabacloud_tea_util import models as util_models
 from alibabacloud_dingtalk.oauth2_1_0.client import Client as OAuthClient
 from alibabacloud_dingtalk.oauth2_1_0 import models as oauth_models
 from alibabacloud_dingtalk.robot_1_0.client import Client as RobotClient
 from alibabacloud_dingtalk.robot_1_0 import models as robot_models
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 import services.logger as log
 import services.media as media
@@ -55,7 +55,6 @@ class DingTalkConfig(_DriverConfig):
     app_secret: str
     robot_code: str
     signing_secret: str = ""
-    listen_port: int = 8082
     listen_path: str = "/dingtalk/event"
     max_file_size: int = 20 * 1024 * 1024
 
@@ -86,25 +85,19 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         self._robot_client = RobotClient(cfg)
         self._session = aiohttp.ClientSession()
 
-        port = self.config.listen_port
-        path = self.config.listen_path
-
-        web_app = web.Application()
-        web_app.router.add_post(path, self._handle_http)
-
-        runner = web.AppRunner(web_app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", port)
-        await site.start()
+        app = FastAPI()
+        app.add_api_route("/", self._handle_http, methods=["POST"])
+        if self.http_server is None:
+            logger.error(f"DingTalk [{self.instance_id}] shared HTTP server unavailable")
+            return
+        self.http_server.mount(self.instance_id, self.config.listen_path, app)
         logger.info(
-            f"DingTalk [{self.instance_id}] HTTP server listening on "
-            f"0.0.0.0:{port}{path}"
+            f"DingTalk [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
 
         try:
             await asyncio.Event().wait()
         finally:
-            await runner.cleanup()
             await self._session.close()
             self._session = None
 
@@ -112,11 +105,11 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
     # Receive
     # ------------------------------------------------------------------
 
-    async def _handle_http(self, request: web.Request) -> web.Response:
+    async def _handle_http(self, request: Request) -> JSONResponse:
         try:
-            body: dict = await request.json()
+            body: dict = json.loads(await request.body())
         except Exception:
-            return web.json_response({"message": "bad request"}, status=400)
+            return JSONResponse({"message": "bad request"}, status_code=400)
 
         if self.config.signing_secret:
             ts = request.headers.get("timestamp", "")
@@ -125,14 +118,14 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 logger.warning(
                     f"DingTalk [{self.instance_id}] webhook signature mismatch"
                 )
-                return web.json_response({"message": "forbidden"}, status=403)
+                return JSONResponse({"message": "forbidden"}, status_code=403)
 
         if body.get("msgtype") != "text":
-            return web.json_response({})
+            return JSONResponse({})
 
         text = body.get("text", {}).get("content", "").strip()
         if not text:
-            return web.json_response({})
+            return JSONResponse({})
 
         # "openConversationId" is the API-usable ID; fall back to "conversationId"
         open_conv_id = body.get("openConversationId") or body.get("conversationId", "")
@@ -161,7 +154,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             mentions=mentions,
         )
         await self.bridge.on_message(msg)
-        return web.json_response({})
+        return JSONResponse({})
 
     # ------------------------------------------------------------------
     # Send

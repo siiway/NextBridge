@@ -19,10 +19,10 @@ cd NextBridge
 **2. 安装依赖**
 
 ```bash
-uv sync
+uv sync --no-dev
 ```
 
-此命令会将所有依赖（`discord-py`、`websockets`、`aiohttp`、`python-telegram-bot`、`lark-oapi`、`alibabacloud-dingtalk`）安装到独立的虚拟环境中。
+此命令会将所有依赖安装到独立的虚拟环境中。
 
 ## 配置
 

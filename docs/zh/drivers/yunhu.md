@@ -8,7 +8,7 @@
 
 1. 前往[云湖开发者平台](https://www.yunhuim.com/)创建一个机器人。
 2. 复制机器人 Token。
-3. 将机器人的 Webhook 地址设置为 `http://<你的服务器>:<webhook_port><webhook_path>`（例如 `http://1.2.3.4:8765/yunhu-webhook`）。
+3. 将机器人的 Webhook 地址设置为 `http://<你的服务器>:<global.http.port><webhook_path>`（例如 `http://1.2.3.4:8090/yunhu-webhook`）。
 4. 将机器人添加到你的群组。
 5. 记录群组的 Chat ID（可在群组设置中查看，或从传入 Webhook 事件的 `message.chatId` 字段获取）。
 
@@ -19,7 +19,6 @@
 | 键 | 是否必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `token` | 是 | — | 来自云湖开发者平台的机器人 Token |
-| `webhook_port` | 否 | `8765` | 传入 Webhook HTTP 服务器的监听端口 |
 | `webhook_path` | 否 | `"/yunhu-webhook"` | Webhook 端点的 HTTP 路径 |
 | `proxy_host` | 否 | `"https://yh-proxy.siiway.top"` | `cloudflare/yh-proxy.js` Worker 的基础 URL。启用两项功能：头像 URL 改写为 `<host>/pfp?url=...`（注入必要的 Referer）；Discord CDN 附件 URL 改写为 `<host>/media?url=...`，使云湖服务器在中国大陆境内也能拉取。 |
 | `proxy` | 否 | — | 所有云湖 API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
@@ -33,7 +32,6 @@
   "yunhu": {
     "yh_main": {
       "token": "your-yunhu-bot-token",
-      "webhook_port": 8765,
       "webhook_path": "/yunhu-webhook",
       "proxy_host": "https://yh-proxy.siiway.top"
     }
@@ -81,5 +79,5 @@
 ## 注意事项
 
 - 云湖必须能够从外网访问 Webhook 地址。若运行在 NAT 环境后，请使用反向代理或 `ngrok / Cloudflare Tunnel` 等隧道工具。
-- 每个 NextBridge 实例绑定一个独立端口。如果配置了多个云湖实例，请为每个实例设置不同的 `webhook_port`。
+- 多个云湖实例可以共用同一个进程和端口。请为每个实例配置不同的 `webhook_path`。
 - 机器人 Token 以查询参数（`?token=...`）形式随每次发送请求发出，请妥善保管。
