@@ -21,7 +21,7 @@ The Rocket.Chat driver receives messages via a **Outgoing Webhook** and supports
    - **Enabled**: Yes
    - **Channel**: leave blank to catch all channels, or enter `#channel-name` to limit scope
    - **URLs**: `http(s)://<your-host>:<global.http.port><listen_path>`
-     e.g. `https://bridge.example.com:8090/rocketchat/webhook`
+     e.g. `https://bridge.example.com:9080/rocketchat/webhook`
    - **Token**: generate or type a secret — copy it to `webhook_token` in your config
 3. Save the integration.
 

@@ -19,7 +19,6 @@ _SENSITIVE_KEY_PATTERNS = (
     "secret",
     "password",
     "webhook_url",
-    "webhook_path",
     "access_token",
 )
 

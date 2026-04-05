@@ -467,7 +467,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             else None,
             mentions=mentions,
             time=msg.date.isoformat() if msg.date else None,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
             username=username,
         )
         await self.bridge.on_message(normalized)
@@ -559,7 +559,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     )
                     text = text.replace(f"@{html.escape(m['name'])}", link)
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         try:
             for att in attachments or []:
                 if not att.url and att.data is None:

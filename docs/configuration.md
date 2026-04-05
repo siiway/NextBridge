@@ -79,7 +79,7 @@ NextBridge now runs a **single shared FastAPI/uvicorn HTTP server** for all driv
 |---|---|---|---|
 | `http.enable` | No | `unset` | Startup mode: `unset` (auto), `true` (force on), `false` (force off) |
 | `http.host` | No | `0.0.0.0` | Host/IP bound by the shared HTTP server |
-| `http.port` | No | `8090` | Port bound by the shared HTTP server |
+| `http.port` | No | `9080` | Port bound by the shared HTTP server |
 | `http.root_path` | No | `""` | ASGI `root_path` for reverse proxies using path prefix |
 | `http.log_level` | No | `info` | Uvicorn log level (`critical`/`error`/`warning`/`info`/`debug`) |
 
@@ -89,7 +89,7 @@ NextBridge now runs a **single shared FastAPI/uvicorn HTTP server** for all driv
     "http": {
       "enable": "unset",
       "host": "0.0.0.0",
-      "port": 8090,
+      "port": 9080,
       "root_path": "",
       "log_level": "info"
     }

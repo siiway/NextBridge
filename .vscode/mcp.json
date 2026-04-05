@@ -1,0 +1,23 @@
+// {
+// 	"servers": {
+// 		"NapCat API docs": {
+// 			"command": "npx",
+// 			"args": [
+// 				"-y",
+// 				"apifox-mcp-server@0.0.17",
+// 				"--project-id=5348325"
+// 			],
+// 			"env": {
+// 				"APIFOX_ACCESS_TOKEN": "${input:access-token}"
+// 			},
+// 			"type": "stdio"
+// 		}
+// 	},
+// 	"inputs": [
+// 		{
+// 			"id": "access-token",
+// 			"type": "promptString",
+// 			"description": "Please enter your Apifox Access Token"
+// 		}
+// 	]
+// }

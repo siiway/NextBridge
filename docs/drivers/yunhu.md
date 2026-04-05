@@ -6,11 +6,12 @@ The Yunhu driver receives messages via a webhook HTTP server and sends via the Y
 
 ## Setup
 
-1. Go to the [Yunhu developer portal](https://www.yunhuim.com/) and create a bot.
+1. Go to the [Yunhu control console](https://www.yhchat.com/control) and create a bot.
 2. Copy the bot token.
-3. Set the bot's webhook URL to `http://<your-server>:<global.http.port><webhook_path>` (e.g. `http://1.2.3.4:8090/yunhu-webhook`).
-4. Add the bot to your group.
-5. Note the group's chat ID (visible in the group settings or in an incoming webhook event's `message.chatId` field).
+3. Set the bot's webhook URL to `http://<your-server>:<global.http.port><webhook_path>` (e.g. `http://1.2.3.4:9080/yunhu-webhook`).
+4. In Event Subscription, enable "Normal message event" (without it, webhook cannot receive regular chat messages).
+5. Add the bot to your group.
+6. Note the group's chat ID (visible in the group settings or in an incoming webhook event's `message.chatId` field).
 
 ## Config keys
 
@@ -18,7 +19,7 @@ Add under `yunhu.<instance_id>` in `config.json`:
 
 | Key | Required | Default | Description |
 |---|---|---|---|
-| `token` | Yes | — | Bot token from the Yunhu developer portal |
+| `token` | Yes | — | Bot token from the Yunhu control console |
 | `webhook_path` | No | `"/yunhu-webhook"` | HTTP path for the webhook endpoint |
 | `proxy_host` | No | `"https://yh-proxy.siiway.top"` | Base URL of the `cloudflare/yh-proxy.js` Worker. Enables two sub-features: avatar URLs are rewritten to `<host>/pfp?url=...` (adds required Referer); Discord CDN attachment URLs are rewritten to `<host>/media?url=...` so Yunhu's servers can fetch them from within China Mainland. |
 | `proxy` | No | — | Proxy URL for all Yunhu API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
@@ -61,7 +62,7 @@ Use under `channels` or `from`/`to` in `rules.json`:
 | `text` / `markdown` | — (plain text) |
 | `image` | `image` |
 | `video` | `video` |
-| `file` | `file` |
+| `file` | — (receive not supported) |
 
 ## Sending
 
@@ -75,6 +76,8 @@ Each outgoing message is split into one or more Yunhu API calls:
 | (no URL) | `text` | A `[Type: filename]` text fallback is appended to the text message |
 
 The text portion (including any rich-header prefix) is sent first, then each attachment as a separate message.
+
+> Note: here `Receive` means messages entering NextBridge; `Send` means NextBridge sending messages to Yunhu via the open API. Yunhu does not support file messages as received attachments, but it can send files normally.
 
 ## Notes
 

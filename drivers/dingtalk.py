@@ -207,6 +207,8 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 param["at"] = {"atUserIds": at_uids}
             await self._send_org_msg(open_conv_id, token, "sampleText", param)
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
@@ -219,7 +221,9 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 continue
 
             # All other attachments: download bytes and upload to DingTalk
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, source_proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 await self._send_org_msg(

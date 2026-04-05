@@ -443,10 +443,14 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             if not first_msg_id:
                 first_msg_id = mid
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, source_proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 mid = await self._send_feishu_msg(

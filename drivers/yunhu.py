@@ -4,7 +4,7 @@
 #           sync-only yunhu.Openapi helper class).
 #
 # Config keys (under yunhu.<instance_id>):
-#   token        – Bot token from the Yunhu developer portal (required)
+#   token        – Bot token from the Yunhu control console (required)
 #   webhook_path – HTTP path for the webhook endpoint (default "/yunhu-webhook")
 #   proxy_host   – Cloudflare Worker base URL for the media proxy.
 #                  /pfp?url=  is used for Yunhu CDN avatars (adds Referer).
@@ -229,10 +229,9 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 if url:
                     attachments.append(Attachment(type="video", url=url, name=name))
             case "file":
-                url = self._proxy_pfp(content.get("fileUrl", ""))
-                name = content.get("fileName", "file")
-                if url:
-                    attachments.append(Attachment(type="file", url=url, name=name))
+                logger.debug(
+                    f"Yunhu [{self.instance_id}] ignoring received file message: {message.get('msgId') or message.get('messageId') or ''}"
+                )
 
         if not text.strip() and not attachments:
             return
@@ -253,7 +252,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             attachments=attachments,
             message_id=str(mid) if mid else None,
             reply_parent=str(pid) if pid else None,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
         )
         await self.bridge.on_message(msg)
 
@@ -315,7 +314,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 )
             )
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue

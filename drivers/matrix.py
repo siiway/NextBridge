@@ -367,7 +367,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     user_avatar=avatar,
                     text=text,
                     mentions=mentions,
-                    source_proxy=self._proxy,
+                    source_proxy=self._media_proxy,
                 )
             )
 
@@ -425,7 +425,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                             type=att_type, url=att_url, name=fname, data=att_data
                         )
                     ],
-                    source_proxy=self._proxy,
+                    source_proxy=self._media_proxy,
                 )
             )
 
@@ -505,7 +505,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             except Exception as e:
                 logger.error(f"Matrix [{self.instance_id}] send text failed: {e}")
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue

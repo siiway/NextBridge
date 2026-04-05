@@ -131,7 +131,7 @@ class KookDriver(BaseDriver[KookConfig]):
             text=text,
             attachments=[],
             mentions=mentions,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
             username=username,
         )
         await self.bridge.on_message(normalized)
@@ -177,7 +177,7 @@ class KookDriver(BaseDriver[KookConfig]):
         has_image = False
         attachment_fragments: list[str] = []
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue

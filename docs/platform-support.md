@@ -2,6 +2,8 @@
 
 # Platform Support Status
 
+Note: `Receive` means messages can be ingested into NextBridge; `Send` means NextBridge can send messages to that platform.
+
 | Platform                    | Status | Receive | Send | Mentions | Replies | Media | Custom Proxy | Notes                                                                   |
 | :-------------------------- | :----- | :------ | :--- | :------- | :------ | :---- | :----------- | :---------------------------------------------------------------------- |
 | **Tencent QQ** (via NapCat) | ✅      | ✅       | ✅    | ✅        | ✅       | ✅     | ✅            | Uses unofficial NapCat WebSocket bridge                                 |
@@ -9,7 +11,7 @@
 | **Telegram**                | ✅      | ✅       | ✅    | ✅        | ✅       | ⚠️    | ✅            | Uses long polling                                                       |
 | **Feishu / Lark**           | ✅      | ✅       | ✅    | ⚠️       | ⚠️      | ❌     | ❌            | Webhook / WebSocket receive; IM API send; **SDK doesn't support proxy** |
 | **DingTalk**                | ✅      | ✅       | ✅    | ⚠️       | ⚠️      | ✅     | ❌            | Webhook receive; Robot API send; **SDK doesn't support proxy**          |
-| **Yunhu**                   | ✅      | ✅       | ✅    | ❌        | ⚠️      | ✅     | ✅            | Webhook receive; open API send; **native mentions not yet supported**   |
+| **Yunhu**                   | ✅      | ✅       | ✅    | ❌        | ⚠️      | ℹ️     | ✅            | Webhook receive; open API send; **file receive is unavailable, file send works**; **native mentions not yet supported** |
 | **KOOK**                    | ✅      | ✅       | ✅    | ⚠️       | ⚠️      | ✅     | ⚠️           | WebSocket receive; bot API send; uploads to KOOK CDN                    |
 | **VoceChat**                | ✅      | ✅       | ✅    | ⚠️       | ⚠️      | ✅     | ⚠️           |                                                                         |
 | **Matrix**                  | ✅      | ✅       | ✅    | ⚠️       | ⚠️      | ⚠️    | ⚠️           | E2E encryption supported when `enable_e2e` is enabled                   |

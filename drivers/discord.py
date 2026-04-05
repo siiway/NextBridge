@@ -218,7 +218,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             if message.reference
             else None,
             mentions=mentions,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
             username=message.author.name,
         )
         await self.bridge.on_message(msg)
@@ -475,7 +475,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         # Download each attachment; collect as (bytes, mime, filename) triples
         files: list[tuple[bytes, str, str]] = []
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
@@ -571,11 +571,12 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return None
 
         discord_files: list[discord.File] = []
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if result:
                 data_bytes, mime = result

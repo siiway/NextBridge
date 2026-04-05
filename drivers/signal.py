@@ -178,7 +178,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             result = await media.fetch_attachment(
                 Attachment(type="file", url=att_url, name=fname, size=size),
                 self.config.max_file_size,
-                proxy=self._proxy,
+                proxy=self._media_proxy,
             )
             if result:
                 att_data, _ = result
@@ -197,7 +197,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             user_avatar="",
             text=text,
             attachments=attachments,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
             mentions=mentions,
             username=sender,
         )
@@ -282,11 +282,12 @@ class SignalDriver(BaseDriver[SignalConfig]):
             payload["mentions"] = signal_mentions
 
         b64_atts: list[str] = []
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if result:
                 data_bytes, mime = result

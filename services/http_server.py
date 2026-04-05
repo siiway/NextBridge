@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,40 @@ import uvicorn
 import services.logger as log
 
 logger = log.get_logger()
+
+
+class _UvicornLogHandler(logging.Handler):
+    """Forward stdlib uvicorn logs to project logger with unified format."""
+
+    def __init__(self):
+        super().__init__()
+        self.bound_logger = logger.bind(name="uvicorn")
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            level = record.levelname.upper()
+            if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+                level = "INFO"
+            self.bound_logger.log(level, msg)
+        except Exception:
+            return
+
+
+def _configure_uvicorn_logging(level: str) -> None:
+    normalized = (level or "info").upper()
+    if normalized == "WARN":
+        normalized = "WARNING"
+
+    handler = _UvicornLogHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uv_logger = logging.getLogger(name)
+        uv_logger.handlers.clear()
+        uv_logger.propagate = False
+        uv_logger.setLevel(normalized)
+        uv_logger.addHandler(handler)
 
 
 @dataclass(slots=True)
@@ -26,7 +61,7 @@ class HttpServerManager:
     def __init__(
         self,
         host: str = "0.0.0.0",
-        port: int = 8090,
+        port: int = 9080,
         root_path: str = "",
         log_level: str = "info",
         start_without_mounts: bool = False,
@@ -111,6 +146,8 @@ class HttpServerManager:
             f"start_without_mounts={self.start_without_mounts})"
         )
 
+        _configure_uvicorn_logging(self.log_level)
+
         cfg = uvicorn.Config(
             app=root,
             host=self.host,
@@ -118,6 +155,7 @@ class HttpServerManager:
             log_level=self.log_level,
             root_path=self.root_path,
             access_log=False,
+            log_config=None,
         )
         server = uvicorn.Server(cfg)
         self._started = True

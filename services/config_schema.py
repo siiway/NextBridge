@@ -103,7 +103,7 @@ class HttpConfig(BaseModel):
     host: str = "0.0.0.0"
     """Host/IP for the shared HTTP server."""
 
-    port: int = 8090
+    port: int = 9080
     """Port for the shared HTTP server."""
 
     root_path: str = ""
@@ -223,3 +223,12 @@ class _DriverConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    proxy: str | None = UNSET
+    """Proxy URL used by driver API/gateway requests."""
+
+    media_proxy: str | None = UNSET
+    """Proxy URL used only when fetching media/attachments.
+
+    Defaults to following ``proxy`` when unset.
+    """

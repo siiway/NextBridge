@@ -199,7 +199,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             text=text,
             attachments=attachments,
             mentions=mentions,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
             username=from_name,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
@@ -277,12 +277,14 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
                 activity["entities"] = entities
             await self._post_activity(url, headers, activity)
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         # Send attachments
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 label = att.name or att.url or ""

@@ -190,7 +190,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             text=text,
             attachments=attachments,
             mentions=mentions,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
             username=username,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
@@ -334,11 +334,13 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                 server, room_id, text, alias, avatar, reply_to_id
             )
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 label = att.name or att.url or ""

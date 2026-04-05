@@ -213,7 +213,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             reply_parent=reply_id,
             mentions=mentions,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
             username=qid or user_id,
         )
         await self.bridge.on_message(msg)
@@ -591,7 +591,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             if last_idx < len(text):
                 segments.append({"type": "text", "data": {"text": text[last_idx:]}})
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue

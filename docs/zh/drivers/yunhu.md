@@ -6,11 +6,12 @@
 
 ## 准备工作
 
-1. 前往[云湖开发者平台](https://www.yunhuim.com/)创建一个机器人。
+1. 前往[云湖控制台](https://www.yhchat.com/control)创建一个机器人。
 2. 复制机器人 Token。
-3. 将机器人的 Webhook 地址设置为 `http://<你的服务器>:<global.http.port><webhook_path>`（例如 `http://1.2.3.4:8090/yunhu-webhook`）。
-4. 将机器人添加到你的群组。
-5. 记录群组的 Chat ID（可在群组设置中查看，或从传入 Webhook 事件的 `message.chatId` 字段获取）。
+3. 将机器人的 Webhook 地址设置为 `http://<你的服务器>:<global.http.port><webhook_path>`（例如 `http://1.2.3.4:9080/yunhu-webhook`）。
+4. 在事件订阅中开启“普通消息事件”（未开启时，Webhook 无法收到常规聊天消息）。
+5. 将机器人添加到你的群组。
+6. 记录群组的 Chat ID（可在群组设置中查看，或从传入 Webhook 事件的 `message.chatId` 字段获取）。
 
 ## 配置项
 
@@ -18,7 +19,7 @@
 
 | 键 | 是否必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `token` | 是 | — | 来自云湖开发者平台的机器人 Token |
+| `token` | 是 | — | 来自云湖控制台的机器人 Token |
 | `webhook_path` | 否 | `"/yunhu-webhook"` | Webhook 端点的 HTTP 路径 |
 | `proxy_host` | 否 | `"https://yh-proxy.siiway.top"` | `cloudflare/yh-proxy.js` Worker 的基础 URL。启用两项功能：头像 URL 改写为 `<host>/pfp?url=...`（注入必要的 Referer）；Discord CDN 附件 URL 改写为 `<host>/media?url=...`，使云湖服务器在中国大陆境内也能拉取。 |
 | `proxy` | 否 | — | 所有云湖 API 请求的代理 URL（例如：`http://proxy.example.com:8080` 或 `socks5://proxy.example.com:1080`）。如果未设置，将使用全局代理配置（如有）。设置为 `null` 可显式禁用此实例的代理（忽略全局代理设置）。 |
@@ -61,7 +62,7 @@
 | `text` / `markdown` | — （纯文本） |
 | `image` | `image` |
 | `video` | `video` |
-| `file` | `file` |
+| `file` | — （不支持接收） |
 
 ## 发送
 
@@ -75,6 +76,8 @@
 | （无 URL） | `text` | 将 `[类型: 文件名]` 文本回退追加到文字消息中 |
 
 文字部分（包含富头部前缀）优先发送，随后每个附件单独发送。
+
+> 说明：云湖这里的 `接收` 指消息进入 NextBridge；`发送` 指 NextBridge 通过云湖开放 API 发往云湖。云湖目前不支持文件消息作为接收附件，但可正常发送文件。
 
 ## 注意事项
 

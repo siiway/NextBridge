@@ -271,7 +271,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             reply_parent=str(event.get("thread_ts", ""))
             if event.get("thread_ts")
             else None,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
             username=display_name,
         )
         await self.bridge.on_message(normalized)
@@ -412,11 +412,13 @@ class SlackDriver(BaseDriver[SlackConfig]):
             except Exception as e:
                 logger.error(f"Slack [{self.instance_id}] chat_postMessage failed: {e}")
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 try:

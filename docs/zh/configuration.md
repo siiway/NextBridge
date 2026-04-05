@@ -79,7 +79,7 @@ NextBridge 现在为所有需要入站 Webhook 的驱动提供**单一共享 Fas
 |---|---|---|---|
 | `http.enable` | 否 | `unset` | 启动模式：`unset`（自动）、`true`（强制开）、`false`（强制关） |
 | `http.host` | 否 | `0.0.0.0` | 共享 HTTP 服务监听的主机/IP |
-| `http.port` | 否 | `8090` | 共享 HTTP 服务监听端口 |
+| `http.port` | 否 | `9080` | 共享 HTTP 服务监听端口 |
 | `http.root_path` | 否 | `""` | 反向代理使用路径前缀时的 ASGI `root_path` |
 | `http.log_level` | 否 | `info` | Uvicorn 日志级别（`critical`/`error`/`warning`/`info`/`debug`） |
 
@@ -89,7 +89,7 @@ NextBridge 现在为所有需要入站 Webhook 的驱动提供**单一共享 Fas
     "http": {
       "enable": "unset",
       "host": "0.0.0.0",
-      "port": 8090,
+      "port": 9080,
       "root_path": "",
       "log_level": "info"
     }

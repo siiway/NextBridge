@@ -259,7 +259,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             text=text,
             attachments=attachments,
             mentions=mentions,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return JSONResponse({"text": ""})
@@ -386,6 +386,8 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         if text.strip():
             await self._post_message(api_url, headers, {"text": text})
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
@@ -421,7 +423,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
 
             # All other attachments (or images with bytes only) → multipart upload
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 label = att.name or att.url or ""
