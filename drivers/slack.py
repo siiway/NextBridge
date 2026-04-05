@@ -155,7 +155,9 @@ class SlackDriver(BaseDriver[SlackConfig]):
             app = FastAPI()
             app.add_api_route("/", self._handle_events_api, methods=["POST"])
             if self.http_server is None:
-                logger.error(f"Slack [{self.instance_id}] shared HTTP server unavailable")
+                logger.error(
+                    f"Slack [{self.instance_id}] shared HTTP server unavailable"
+                )
                 return
             self.http_server.mount(self.instance_id, listen_path, app)
             logger.info(
@@ -201,7 +203,9 @@ class SlackDriver(BaseDriver[SlackConfig]):
     # Receive — Events API (HTTP webhook)
     # ------------------------------------------------------------------
 
-    async def _handle_events_api(self, request: Request) -> JSONResponse | PlainTextResponse:
+    async def _handle_events_api(
+        self, request: Request
+    ) -> JSONResponse | PlainTextResponse:
         body = await request.read()
 
         if self.config.signing_secret and not _verify_slack_signature(

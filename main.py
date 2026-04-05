@@ -164,7 +164,9 @@ async def main():
         logger.error("No drivers configured — nothing to do, exiting.")
         return
     if not driver_tasks and validated_global.http.enable == "true":
-        logger.warning("No drivers configured — starting HTTP server due to http.enable=true")
+        logger.warning(
+            "No drivers configured — starting HTTP server due to http.enable=true"
+        )
 
     # Let drivers perform startup and register webhook sub-apps.
     await asyncio.sleep(0)

@@ -88,7 +88,9 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         app = FastAPI()
         app.add_api_route("/", self._handle_http, methods=["POST"])
         if self.http_server is None:
-            logger.error(f"DingTalk [{self.instance_id}] shared HTTP server unavailable")
+            logger.error(
+                f"DingTalk [{self.instance_id}] shared HTTP server unavailable"
+            )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
         logger.info(

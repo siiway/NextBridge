@@ -66,7 +66,9 @@ class HttpServerManager:
             raise ValueError(f"Duplicate HTTP mount path: {normalized}")
 
         self._mounted_paths.add(normalized)
-        self._mounts.append(HttpMount(instance_id=instance_id, path=normalized, app=app))
+        self._mounts.append(
+            HttpMount(instance_id=instance_id, path=normalized, app=app)
+        )
         self._ready.set()
 
     def has_mounts(self) -> bool:
@@ -97,13 +99,12 @@ class HttpServerManager:
 
         for mount in self._mounts:
             root.mount(mount.path, mount.app)
-            logger.info(
-                f"HTTP mount registered: {mount.instance_id} -> {mount.path}"
-            )
+            logger.info(f"HTTP mount registered: {mount.instance_id} -> {mount.path}")
 
         logger.info(
-            f"Shared HTTP server starting on {self.host}:{self.port}" +
-            self.root_path if not self.root_path == "/" else ""
+            f"Shared HTTP server starting on {self.host}:{self.port}" + self.root_path
+            if not self.root_path == "/"
+            else ""
         )
         logger.debug(
             f"(root_path='{self.root_path or '/'}', mounts={len(self._mounts)}, "
