@@ -1112,16 +1112,16 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             reply_to_id = ""
             user_id_reliable = user_id not in unreliable_user_ids
 
-            if not user_id_reliable and user_id:
-                logger.debug(
-                    f"NapCat [{self.instance_id}] forward node user_id marked unreliable: {user_id}"
-                )
+            # if not user_id_reliable and user_id:
+            #     logger.debug(
+            #         f"NapCat [{self.instance_id}] forward node user_id marked unreliable: {user_id}"
+            #     )
 
-            logger.debug(
-                f"NapCat [{self.instance_id}] forward node sender resolved "
-                f"nickname={nickname!r} user_id={user_id!r} "
-                f"raw_sender={node.get('sender')!r}"
-            )
+            # logger.debug(
+            #     f"NapCat [{self.instance_id}] forward node sender resolved "
+            #     f"nickname={nickname!r} user_id={user_id!r} "
+            #     f"raw_sender={node.get('sender')!r}"
+            # )
 
             content = node.get("content")
             if content is None:
