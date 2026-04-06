@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "vitepress": "2.0.0-alpha.16"
+  },
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview",
+    "deploy": "vitepress build && cp -r ../db .vitepress/dist/db"
+  }
+}
