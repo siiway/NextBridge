@@ -181,7 +181,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 
 | 键 | 是否必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `database.url` | 否 | `sqlite:///messages.db` | SQLAlchemy 数据库 URL。SQLite 相对路径会按 `data/` 目录解析。 |
+| `database.url` | 否 | `sqlite:///data.db` | SQLAlchemy 数据库 URL。SQLite 相对路径会按 `data/` 目录解析。 |
 | `database.echo` | 否 | `false` | 启用 SQLAlchemy 查询日志用于调试。 |
 | `database.pool_size` | 否 | — | 非 SQLite 数据库的连接池大小。未指定时使用 SQLAlchemy 默认值。 |
 | `database.max_overflow` | 否 | — | 非 SQLite 数据库的连接池最大溢出大小。未指定时使用 SQLAlchemy 默认值。 |
@@ -194,7 +194,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 {
   "global": {
     "database": {
-      "url": "sqlite:///messages.db"
+      "url": "sqlite:///data.db"
     }
   }
 }
@@ -229,7 +229,11 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 ```
 
 ::: tip SQLite 路径处理
-  使用 SQLite 的相对路径（如 `sqlite:///messages.db`）时，路径将相对于数据目录（`data/`）解析。绝对路径（如 `sqlite:////var/lib/nextbridge/messages.db`）将按原样使用。
+  使用 SQLite 的相对路径（如 `sqlite:///data.db`）时，路径将相对于数据目录（`data/`）解析。绝对路径（如 `sqlite:////var/lib/nextbridge/data.db`）将按原样使用。
+:::
+
+::: tip 数据库版本文件
+  NextBridge 会在 `data/meta.yaml` 中记录数据库结构版本。当前版本为 `0.3`。如果该文件不存在，程序会把版本视为 `0.2`，并在启动时按版本差异自动执行 Python 迁移模块。
 :::
 
 ::: warning 连接池

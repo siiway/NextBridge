@@ -39,7 +39,7 @@ class DatabaseConfig(BaseModel):
         - PostgreSQL: postgresql://user:password@host:port/database
     """
 
-    url: str = "sqlite:///messages.db"
+    url: str = "sqlite:///data.db"
     """SQLAlchemy database URL. Relative SQLite paths are resolved under the data directory."""
 
     echo: bool = False

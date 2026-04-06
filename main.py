@@ -14,9 +14,31 @@ import services.util as u
 import services.config_io as config_io
 from services.config_schema import GlobalConfig
 from services.bridge import bridge
+from services.db import configure_db_schema_from_app_version, init_db
 from services.http_server import HttpServerManager
 
 logger = log.get_logger()
+
+
+def _load_project_version() -> str:
+    """Load project version from pyproject.toml.
+
+    Returns:
+        The version string from [project].version.
+
+    Raises:
+        RuntimeError: If pyproject.toml cannot be read or version is missing.
+    """
+    try:
+        with open("pyproject.toml", "rb") as f:
+            version = str(load_toml(f).get("project", {}).get("version", "")).strip()
+    except Exception as exc:
+        raise RuntimeError("Read version info failed") from exc
+
+    if not version:
+        raise RuntimeError("Missing [project].version in pyproject.toml")
+
+    return version
 
 
 def _load_all_drivers(enabled_platforms: list[str]) -> None:
@@ -60,6 +82,12 @@ def cmd_convert(src: str, dst: str) -> None:
 
 
 async def main():
+    try:
+        version = _load_project_version()
+    except Exception:
+        logger.opt(exception=True).critical("Startup aborted: failed to load version")
+        return
+
     config_path = config_io.find_config(Path(u.get_data_path()))
     if config_path is None:
         logger.critical(
@@ -104,13 +132,14 @@ async def main():
     bridge.command_prefix = validated_global.command_prefix
 
     try:
-        # get version info
-        with open("pyproject.toml", "rb") as f:
-            version: str = load_toml(f).get("project", {}).get("version", "UNKNOWN")
-            f.close()
+        schema_target = configure_db_schema_from_app_version(version)
+        init_db()
+        logger.info(
+            f"Database initialized at startup with schema target {schema_target[0]}.{schema_target[1]}"
+        )
     except Exception:
-        logger.opt(exception=True).warning("Read version info failed")
-        version = "UNKNOWN"
+        logger.opt(exception=True).critical("Startup aborted: database initialization failed")
+        return
 
     http_server = HttpServerManager(
         host=validated_global.http.host,

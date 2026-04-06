@@ -181,7 +181,7 @@ NextBridge uses SQLAlchemy for database operations, which supports multiple data
 
 | Key | Required | Default | Description |
 |---|---|---|---|
-| `database.url` | No | `sqlite:///messages.db` | SQLAlchemy database URL. Relative SQLite paths are resolved under the `data/` directory. |
+| `database.url` | No | `sqlite:///data.db` | SQLAlchemy database URL. Relative SQLite paths are resolved under the `data/` directory. |
 | `database.echo` | No | `false` | Enable SQLAlchemy query logging for debugging. |
 | `database.pool_size` | No | — | Connection pool size for non-SQLite databases. Uses SQLAlchemy default if not specified. |
 | `database.max_overflow` | No | — | Maximum overflow size of the pool for non-SQLite databases. Uses SQLAlchemy default if not specified. |
@@ -194,7 +194,7 @@ NextBridge uses SQLAlchemy for database operations, which supports multiple data
 {
   "global": {
     "database": {
-      "url": "sqlite:///messages.db"
+      "url": "sqlite:///data.db"
     }
   }
 }
@@ -229,7 +229,11 @@ NextBridge uses SQLAlchemy for database operations, which supports multiple data
 ```
 
 ::: tip SQLite Path Handling
-  When using SQLite with a relative path (e.g., `sqlite:///messages.db`), the path is resolved relative to the data directory (`data/`). Absolute paths (e.g., `sqlite:////var/lib/nextbridge/messages.db`) are used as-is.
+  When using SQLite with a relative path (e.g., `sqlite:///data.db`), the path is resolved relative to the data directory (`data/`). Absolute paths (e.g., `sqlite:////var/lib/nextbridge/data.db`) are used as-is.
+:::
+
+::: tip Database version file
+  NextBridge records the database schema version in `data/meta.yaml`. The current version is `0.3`. If the file is missing, the program treats the database as version `0.2` and runs the required Python migration modules at startup.
 :::
 
 ::: warning Connection Pooling

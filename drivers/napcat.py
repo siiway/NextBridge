@@ -18,10 +18,13 @@ import datetime
 import html
 import json
 import math
+import re
 import secrets
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+from string import Template
 from typing import Any, Literal
 
 import websockets
@@ -46,9 +49,10 @@ class NapCatConfig(_DriverConfig):
     file_send_mode: Literal["stream", "base64"] = "stream"
     cqface_mode: Literal["gif", "emoji"] = "gif"
     stream_threshold: int = 0
-    forward_render_enabled: bool = True
+    forward_render_enabled: bool = False
     forward_render_ttl_seconds: int = 86400
     forward_render_mount_path: str = "/napcat-forward"
+    forward_render_persist_enabled: bool = False
     forward_assets_base_url: str = ""
     # Merged-forward face rendering strategy:
     # - false: render by cqface mapping (unicode)
@@ -61,13 +65,38 @@ class NapCatConfig(_DriverConfig):
 logger = log.get_logger()
 
 _DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface-gif/"
+_FORWARD_TEMPLATE_PATH: Path = (
+    Path(__file__).resolve().parent.parent / "templates" / "napcat_forward_template.html"
+)
+_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
+_RICHHEADER_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+
+_FORWARD_PAGE_TEMPLATE = Template(
+    """<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>$title</title></head>
+<body><main><h1>$title</h1><div>$meta_primary</div><div>$meta_secondary</div>$body</main></body>
+</html>"""
+)
+
+
+@lru_cache(maxsize=1)
+def _get_forward_page_template() -> Template:
+    try:
+        text = _FORWARD_TEMPLATE_PATH.read_text(encoding="utf-8")
+        return Template(text)
+    except OSError as exc:
+        logger.warning(f"Failed to load forward template {_FORWARD_TEMPLATE_PATH}: {exc}")
+        return _FORWARD_PAGE_TEMPLATE
 
 
 @dataclass(slots=True)
 class _ForwardPage:
     token: str
     html_content: str
+    created_at: datetime.datetime
     expires_at: datetime.datetime
+    destroyed_at: datetime.datetime | None = None
 
 
 def _utc_now() -> datetime.datetime:
@@ -133,8 +162,10 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         # Cache for user qid to avoid repeated API calls
         self._qid_cache: dict[str, str] = {}
         self._forward_pages: dict[str, _ForwardPage] = {}
+        self._forward_file_url_cache: dict[str, str | None] = {}
         self._forward_gc_task: asyncio.Task | None = None
         self._forward_mount_registered = False
+        self._event_tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -227,15 +258,40 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             t: str = Query(default="", min_length=1),
         ) -> HTMLResponse:
             page = self._forward_pages.get(page_id)
+            if page is None and self.config.forward_render_persist_enabled:
+                stored = msg_db().get_forward_page(page_id)
+                if stored is not None and stored.get("token") == t:
+                    page = _ForwardPage(
+                        token=str(stored.get("token", "")),
+                        html_content=str(stored.get("html_content", "")),
+                        created_at=datetime.datetime.fromtimestamp(
+                            int(stored.get("created_at", 0)), datetime.UTC
+                        ),
+                        expires_at=datetime.datetime.fromtimestamp(
+                            int(stored.get("expires_at", 0)), datetime.UTC
+                        ),
+                        destroyed_at=(
+                            datetime.datetime.fromtimestamp(
+                                int(stored.get("destroyed_at", 0)), datetime.UTC
+                            )
+                            if stored.get("destroyed_at")
+                            else None
+                        ),
+                    )
+                    self._forward_pages[page_id] = page
+
             if page is None:
                 raise HTTPException(status_code=404, detail="Forward page not found")
 
-            if page.expires_at <= _utc_now():
-                self._forward_pages.pop(page_id, None)
-                raise HTTPException(status_code=410, detail="Forward page expired")
-
             if page.token != t:
                 raise HTTPException(status_code=404, detail="Forward page not found")
+
+            if page.expires_at <= _utc_now() and page.destroyed_at is None:
+                page.destroyed_at = _utc_now()
+                if self.config.forward_render_persist_enabled:
+                    msg_db().mark_forward_page_destroyed(
+                        page_id, int(page.destroyed_at.timestamp())
+                    )
 
             return HTMLResponse(content=page.html_content, status_code=200)
 
@@ -267,6 +323,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 if page.expires_at <= now
             ]
             for page_id in expired:
+                if self.config.forward_render_persist_enabled:
+                    msg_db().mark_forward_page_destroyed(page_id, int(now.timestamp()))
                 self._forward_pages.pop(page_id, None)
 
     # ------------------------------------------------------------------
@@ -285,11 +343,27 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     if not fut.done():
                         fut.set_result(data)
                     continue
-                await self._handle(data)
+                self._spawn_event_task(data)
             except json.JSONDecodeError:
                 logger.warning(f"NapCat [{self.instance_id}] invalid JSON received")
             except Exception as e:
                 logger.error(f"NapCat [{self.instance_id}] handler error: {e}")
+
+    def _spawn_event_task(self, data: dict) -> None:
+        task = asyncio.create_task(self._handle(data))
+        self._event_tasks.add(task)
+
+        def _on_done(done_task: asyncio.Task) -> None:
+            self._event_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            exc = done_task.exception()
+            if exc is not None:
+                logger.error(
+                    f"NapCat [{self.instance_id}] async handler error: {exc}"
+                )
+
+        task.add_done_callback(_on_done)
 
     async def _handle(self, data: dict):
         # Action responses carry an "echo" field — ignore them
@@ -310,18 +384,31 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         group_id = str(event.get("group_id", ""))
         user_id = str(event.get("user_id", ""))
+        message_id = str(event.get("message_id", ""))
+        message_seq = str(
+            event.get("message_seq", event.get("real_id", event.get("seq", "")))
+        )
         sender = event.get("sender", {})
         # Prefer group card (nickname-in-group) over global nickname
         nickname = sender.get("card") or sender.get("nickname") or user_id
+        logger.debug(
+            f"NapCat [{self.instance_id}] message from {nickname}({user_id}) "
+            f"group={group_id} message_id={message_id} seq={message_seq}"
+        )
         time = event.get("time")
         # Get user's qid
         qid = None  # await self._get_qid(user_id, group_id)
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
         text, attachments, reply_id, mentions = await self._parse_message(
-            event, face_as_emoji=face_as_emoji
+            event,
+            face_as_emoji=face_as_emoji,
+            source_group_id=group_id,
         )
         if not text.strip() and not attachments:
+            logger.debug(
+                f"NapCat [{self.instance_id}] ignoring empty message from {nickname}({user_id})"
+            )
             return
 
         # QQ avatar endpoint (public, no auth)
@@ -346,7 +433,11 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         await self.bridge.on_message(msg)
 
     async def _parse_message(
-        self, event: dict, *, face_as_emoji: bool = False
+        self,
+        event: dict,
+        *,
+        face_as_emoji: bool = False,
+        source_group_id: str = "",
     ) -> tuple[str, list[Attachment], str | None, list[dict]]:
         """
         Parse an OneBot 11 message event into plain text + attachments + reply_id + mentions.
@@ -469,7 +560,10 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
                 case "forward":
                     # Merged forwarded message chain
-                    forward_text = await self._render_forward_segment(d)
+                    forward_text = await self._render_forward_segment(
+                        d,
+                        source_group_id=source_group_id,
+                    )
                     text_parts.append(forward_text)
 
                 case "mface":
@@ -562,13 +656,464 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             f"alt='{html.escape(alt_text)}' title='cqface:{html.escape(face_id)}'/>"
         )
 
-    def _render_forward_nodes_html(self, nodes: list[dict]) -> str:
+    @staticmethod
+    def _segment_url(seg_data: dict) -> str:
+        url = (
+            seg_data.get("url")
+            or seg_data.get("src")
+            or seg_data.get("path")
+            or seg_data.get("file")
+            or ""
+        )
+        url = str(url).strip()
+        if url.startswith(("http://", "https://")):
+            return url
+        return ""
+
+    @staticmethod
+    def _segment_name(seg_data: dict, fallback: str) -> str:
+        return str(seg_data.get("name") or seg_data.get("file") or fallback)
+
+    def _render_forward_asset_html(
+        self,
+        seg_data: dict,
+        *,
+        kind_label: str,
+        kind_class: str,
+        fallback_name: str,
+    ) -> str:
+        name = html.escape(self._segment_name(seg_data, fallback_name))
+        url = self._segment_url(seg_data)
+        if not url:
+            return html.escape(f"[{kind_label}: {name}]")
+
+        safe_url = html.escape(url)
+        if kind_class == "voice":
+            return (
+                f"<div class='media-block media-voice'>"
+                f"<span class='chip'>{html.escape(kind_label)}</span>"
+                f"<audio class='media-player' controls preload='none' src='{safe_url}'></audio>"
+                f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+                f"{name}</a>"
+                f"</div>"
+            )
+        if kind_class == "video":
+            return (
+                f"<div class='media-block media-video'>"
+                f"<span class='chip'>{html.escape(kind_label)}</span>"
+                f"<video class='media-player' controls preload='metadata' src='{safe_url}'></video>"
+                f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+                f"{name}</a>"
+                f"</div>"
+            )
+        return (
+            f"<span class='chip'>{html.escape(kind_label)}</span>"
+            f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' "
+            "target='_blank' rel='noopener noreferrer'>"
+            f"{name}</a>"
+        )
+
+    async def _render_forward_voice_asset_html(self, seg_data: dict) -> str:
+        name = html.escape(self._segment_name(seg_data, "voice.amr"))
+        url = self._segment_url(seg_data)
+        if not url:
+            return html.escape(f"[语音: {name}]")
+
+        attachment = Attachment(type="voice", url=url, name=self._segment_name(seg_data, "voice.amr"))
+        result = await media.fetch_attachment(
+            attachment,
+            max_bytes=max(1, int(self.config.max_file_size or 10 * 1024 * 1024)),
+            proxy=self._media_proxy,
+        )
+        if not result:
+            safe_url = html.escape(url)
+            return (
+                f"<div class='media-block media-voice'>"
+                f"<span class='chip'>语音</span>"
+                f"<a class='asset voice' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+                f"{name}</a>"
+                f"</div>"
+            )
+
+        data, mime = result
+        data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+        safe_data_url = html.escape(data_url)
+        safe_url = html.escape(url)
+        return (
+            f"<div class='media-block media-voice'>"
+            f"<span class='chip'>语音</span>"
+            f"<audio class='media-player' controls preload='none' src='{safe_data_url}'></audio>"
+            f"<a class='asset voice' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+            f"{name}</a>"
+            f"</div>"
+        )
+
+    @staticmethod
+    def _parse_forward_file_size(seg_data: dict) -> int | None:
+        raw_size = seg_data.get("file_size", seg_data.get("size", ""))
+        try:
+            size = int(raw_size)
+            return size if size >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_size_human(size_bytes: int | None) -> str:
+        if size_bytes is None:
+            return "未知"
+        units = ["B", "KB", "MB", "GB", "TB"]
+        value = float(size_bytes)
+        unit = units[0]
+        for u in units:
+            unit = u
+            if value < 1024 or u == units[-1]:
+                break
+            value /= 1024.0
+        if unit == "B":
+            return f"{int(value)} {unit}"
+        return f"{value:.2f} {unit}"
+
+    async def _resolve_forward_file_download_url(
+        self,
+        *,
+        file_id: str,
+        source_group_id: str,
+    ) -> str:
+        if not file_id:
+            return ""
+
+        cache_key = f"{source_group_id}:{file_id}"
+        if cache_key in self._forward_file_url_cache:
+            return self._forward_file_url_cache[cache_key] or ""
+
+        action_candidates: list[tuple[str, dict]] = []
+        group_id_num: int | None = None
+        try:
+            if source_group_id:
+                group_id_num = int(source_group_id)
+        except ValueError:
+            group_id_num = None
+
+        if group_id_num is not None:
+            action_candidates.append(
+                ("get_group_file_url", {"group_id": group_id_num, "file_id": file_id})
+            )
+        if source_group_id:
+            action_candidates.append(
+                ("get_group_file_url", {"group_id": source_group_id, "file_id": file_id})
+            )
+        action_candidates.append(("get_file", {"file_id": file_id}))
+
+        for action, params in action_candidates:
+            response = await self._call(action, params, timeout=12.0)
+            if not response or response.get("status") != "ok":
+                continue
+
+            data = response.get("data") or {}
+            if not isinstance(data, dict):
+                continue
+
+            for key in ("url", "download_url", "file_url", "file"):
+                candidate = str(data.get(key, "")).strip()
+                if candidate.startswith(("http://", "https://")):
+                    self._forward_file_url_cache[cache_key] = candidate
+                    return candidate
+
+        logger.debug(
+            f"NapCat [{self.instance_id}] forward file download url unresolved for file_id={file_id}"
+        )
+        self._forward_file_url_cache[cache_key] = None
+        return ""
+
+    async def _render_forward_file_asset_html(
+        self,
+        seg_data: dict,
+        *,
+        source_group_id: str,
+    ) -> str:
+        raw_name = self._segment_name(seg_data, "file")
+        name = html.escape(raw_name)
+        file_id = str(seg_data.get("file_id", seg_data.get("id", ""))).strip()
+        size_bytes = self._parse_forward_file_size(seg_data)
+        size_text = html.escape(self._format_size_human(size_bytes))
+        file_id_text = html.escape(file_id or "未知")
+
+        url = self._segment_url(seg_data)
+        if not url and file_id:
+            url = await self._resolve_forward_file_download_url(
+                file_id=file_id,
+                source_group_id=source_group_id,
+            )
+
+        download_html = "<span class='asset file disabled'>暂无法下载</span>"
+        if url:
+            safe_url = html.escape(url)
+            download_html = (
+                f"<a class='asset file' href='{safe_url}' "
+                "target='_blank' rel='noopener noreferrer'>"
+                f"下载 {name}</a>"
+            )
+
+        return (
+            "<div class='file-block'>"
+            "<span class='chip'>文件</span>"
+            f"<div class='file-name'>{name}</div>"
+            f"<div class='file-meta'>大小: {size_text} · file_id: {file_id_text}</div>"
+            f"{download_html}"
+            "</div>"
+        )
+
+    @staticmethod
+    def _forward_segment_nodes(seg_data: dict) -> list[dict]:
+        for key in ("content", "messages", "message"):
+            nodes = seg_data.get(key)
+            if isinstance(nodes, list):
+                return nodes
+        return []
+
+    @staticmethod
+    def _extract_richheader(text: str) -> tuple[str, dict | None]:
+        match = _RICHHEADER_RE.search(text)
+        if not match:
+            return text, None
+
+        attrs = dict(_RICHHEADER_ATTR_RE.findall(match.group(1)))
+        clean = (text[: match.start()] + text[match.end() :]).strip()
+        return clean, attrs or None
+
+    @staticmethod
+    def _forward_node_sender_fields(node: dict) -> tuple[str, str]:
+        sender = node.get("sender") or {}
+
+        user_id_candidates = (
+            sender.get("user_id"),
+            sender.get("uin"),
+            sender.get("uid"),
+            sender.get("sender_id"),
+            sender.get("sender_uin"),
+            sender.get("senderUin"),
+            node.get("user_id"),
+            node.get("uin"),
+            node.get("uid"),
+            node.get("sender_id"),
+            node.get("sender_uin"),
+            node.get("senderUin"),
+        )
+
+        nickname_candidates = (
+            sender.get("nickname"),
+            sender.get("card"),
+            sender.get("name"),
+            sender.get("nick"),
+            node.get("nickname"),
+            node.get("name"),
+        )
+
+        user_id = ""
+        for candidate in user_id_candidates:
+            value = str(candidate or "").strip()
+            if value:
+                user_id = value
+                break
+
+        nickname = ""
+        for candidate in nickname_candidates:
+            value = str(candidate or "").strip()
+            if value:
+                nickname = value
+                break
+
+        return user_id, (nickname or "Unknown")
+
+    @staticmethod
+    def _forward_node_message_id(node: dict) -> str:
+        candidates = (
+            node.get("message_id"),
+            node.get("messageId"),
+            node.get("msg_id"),
+            node.get("msgId"),
+            node.get("id"),
+            node.get("seq"),
+            node.get("message_seq"),
+            node.get("real_id"),
+            node.get("real_seq"),
+        )
+
+        data = node.get("data")
+        if isinstance(data, dict):
+            candidates += (
+                data.get("message_id"),
+                data.get("messageId"),
+                data.get("msg_id"),
+                data.get("msgId"),
+                data.get("id"),
+                data.get("seq"),
+                data.get("message_seq"),
+                data.get("real_id"),
+                data.get("real_seq"),
+            )
+
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _forward_reply_target_id(seg_data: dict) -> str:
+        candidates = (
+            seg_data.get("id"),
+            seg_data.get("message_id"),
+            seg_data.get("messageId"),
+            seg_data.get("msg_id"),
+            seg_data.get("msgId"),
+            seg_data.get("seq"),
+            seg_data.get("message_seq"),
+            seg_data.get("real_id"),
+            seg_data.get("real_seq"),
+        )
+
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if value:
+                return value
+        return ""
+
+    def _resolve_forward_msg_format(self, source_group_id: str) -> str | None:
+        if not source_group_id:
+            return None
+
+        rules = getattr(self.bridge, "_rules", [])
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+
+            msg_cfg = rule.get("msg")
+            if not isinstance(msg_cfg, dict):
+                continue
+
+            fmt = msg_cfg.get("msg_format")
+            if not isinstance(fmt, str) or not fmt.strip():
+                continue
+
+            if rule.get("type") == "connect":
+                channels = rule.get("channels") or {}
+                src = channels.get(self.instance_id)
+                if isinstance(src, dict) and str(src.get("group_id", "")) == str(
+                    source_group_id
+                ):
+                    return fmt
+                continue
+
+            from_cfg = rule.get("from") or {}
+            src = from_cfg.get(self.instance_id)
+            if isinstance(src, dict) and str(src.get("group_id", "")) == str(
+                source_group_id
+            ):
+                return fmt
+
+        return None
+
+    def _apply_forward_msg_format_header(
+        self,
+        *,
+        msg_format: str | None,
+        nickname: str,
+        user_id: str,
+        msg_text: str,
+    ) -> dict | None:
+        if not msg_format:
+            return None
+
+        avatar = (
+            f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=160" if user_id else ""
+        )
+        ctx = {
+            "platform": "napcat",
+            "instance_id": self.instance_id,
+            "from": self.instance_id,
+            "user": nickname,
+            "user_id": user_id,
+            "user_avatar": avatar,
+            "msg": msg_text,
+            "time": "",
+            "username": user_id,
+            "nickname": nickname,
+        }
+
+        try:
+            formatted = msg_format.format(**ctx)
+        except KeyError as exc:
+            logger.debug(
+                f"NapCat [{self.instance_id}] forward header msg_format missing key: {exc}"
+            )
+            return None
+
+        _, richheader = self._extract_richheader(formatted)
+        return richheader
+
+    def _detect_unreliable_forward_user_ids(self, nodes: list[dict]) -> set[str]:
+        """Detect sender IDs that map to multiple nicknames in one forward batch.
+
+        Some NapCat versions may reuse a pseudo id for different forwarded senders.
+        In such cases, using that ID for avatar/QQ display is misleading.
+        """
+        mapping: dict[str, set[str]] = {}
+        for node in nodes:
+            uid, nick = self._forward_node_sender_fields(node)
+            if not uid:
+                continue
+            mapping.setdefault(uid, set()).add(nick or "Unknown")
+
+        return {uid for uid, nicks in mapping.items() if len(nicks) > 1}
+
+    @staticmethod
+    def _format_duration_cn(seconds: int) -> str:
+        seconds = max(0, int(seconds))
+        days, rem = divmod(seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, secs = divmod(rem, 60)
+
+        if days > 0:
+            return f"{days}天{hours}小时{minutes}分{secs}秒"
+        if hours > 0:
+            return f"{hours}小时{minutes}分{secs}秒"
+        if minutes > 0:
+            return f"{minutes}分{secs}秒"
+        return f"{secs}秒"
+
+    async def _render_forward_nodes_html(
+        self,
+        nodes: list[dict],
+        *,
+        source_group_id: str,
+        depth: int = 0,
+    ) -> str:
         rendered: list[str] = []
+        node_items: list[dict[str, str]] = []
+        node_index: dict[str, dict[str, str]] = {}
+        msg_format = self._resolve_forward_msg_format(source_group_id)
+        unreliable_user_ids = self._detect_unreliable_forward_user_ids(nodes)
+        max_depth = 4
 
         for node in nodes:
-            sender = node.get("sender") or {}
-            nickname = sender.get("nickname") or sender.get("card") or "Unknown"
-            user_id = str(sender.get("user_id", ""))
+            user_id, nickname = self._forward_node_sender_fields(node)
+            message_id = self._forward_node_message_id(node)
+            richheader: dict | None = None
+            reply_to_id = ""
+            user_id_reliable = user_id not in unreliable_user_ids
+
+            if not user_id_reliable and user_id:
+                logger.debug(
+                    f"NapCat [{self.instance_id}] forward node user_id marked unreliable: {user_id}"
+                )
+
+            logger.debug(
+                f"NapCat [{self.instance_id}] forward node sender resolved "
+                f"nickname={nickname!r} user_id={user_id!r} "
+                f"raw_sender={node.get('sender')!r}"
+            )
+
             content = node.get("content")
             if content is None:
                 content = node.get("message")
@@ -576,79 +1121,234 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 content = node["data"].get("content") or node["data"].get("message")
 
             content_parts: list[str] = []
+            plain_text_parts: list[str] = []
             for seg in content if isinstance(content, list) else []:
                 seg_type = seg.get("type", "")
                 seg_data = seg.get("data") or {}
 
                 if seg_type == "text":
-                    content_parts.append(html.escape(str(seg_data.get("text", ""))))
+                    raw_text = str(seg_data.get("text", ""))
+                    clean_text, parsed = self._extract_richheader(raw_text)
+                    if parsed and richheader is None:
+                        richheader = parsed
+                    if clean_text:
+                        plain_text_parts.append(clean_text)
+                        content_parts.append(html.escape(clean_text))
                 elif seg_type == "at":
                     qq = str(seg_data.get("qq", ""))
                     name = seg_data.get("name") or qq
+                    plain_text_parts.append(f"@{name}")
                     content_parts.append(html.escape(f"@{name}"))
                 elif seg_type == "image":
-                    content_parts.append(html.escape("[图片]"))
+                    image_url = self._segment_url(seg_data)
+                    if image_url:
+                        content_parts.append(
+                            f"<img class='fwd-image' src='{html.escape(image_url)}' "
+                            "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
+                        )
+                    else:
+                        content_parts.append(html.escape("[图片]"))
                 elif seg_type == "record":
-                    content_parts.append(html.escape("[语音]"))
+                    content_parts.append(
+                        await self._render_forward_voice_asset_html(seg_data)
+                    )
                 elif seg_type == "video":
-                    content_parts.append(html.escape("[视频]"))
+                    content_parts.append(
+                        self._render_forward_asset_html(
+                            seg_data,
+                            kind_label="视频",
+                            kind_class="video",
+                            fallback_name="video.mp4",
+                        )
+                    )
                 elif seg_type == "file":
-                    content_parts.append(html.escape("[文件]"))
+                    content_parts.append(
+                        await self._render_forward_file_asset_html(
+                            seg_data,
+                            source_group_id=source_group_id,
+                        )
+                    )
                 elif seg_type == "forward":
-                    content_parts.append(html.escape("[合并转发]"))
+                    nested_nodes = self._forward_segment_nodes(seg_data)
+                    if nested_nodes and depth < max_depth:
+                        content_parts.append(
+                            await self._render_forward_nested_html(
+                                nested_nodes,
+                                source_group_id=source_group_id,
+                                depth=depth + 1,
+                            )
+                        )
+                    else:
+                        plain_text_parts.append("[合并转发]")
+                        content_parts.append(html.escape("[合并转发]"))
+                elif seg_type == "reply":
+                    reply_to_id = self._forward_reply_target_id(seg_data)
                 elif seg_type == "face":
                     content_parts.append(
                         self._render_forward_face_segment_html(seg_data)
                     )
+                elif seg_type == "mface":
+                    image_url = self._segment_url(seg_data)
+                    if image_url:
+                        content_parts.append(
+                            f"<img class='fwd-image' src='{html.escape(image_url)}' "
+                            "loading='lazy' referrerpolicy='no-referrer' alt='表情'/>"
+                        )
+                    else:
+                        summary = str(seg_data.get("summary", "")).strip()
+                        if summary:
+                            plain_text_parts.append(summary)
+                            content_parts.append(html.escape(summary))
+                        else:
+                            plain_text_parts.append("[表情]")
+                            content_parts.append(html.escape("[表情]"))
+
+            if richheader is None:
+                msg_text = "".join(plain_text_parts).strip()
+                richheader = self._apply_forward_msg_format_header(
+                    msg_format=msg_format,
+                    nickname=nickname,
+                    user_id=user_id if user_id_reliable else "",
+                    msg_text=msg_text,
+                )
 
             message_html = "".join(content_parts).strip() or html.escape("[空消息]")
-            sender_display = html.escape(
-                f"{nickname}" + (f" ({user_id})" if user_id else "")
+            message_text = "".join(plain_text_parts).strip() or "[空消息]"
+            default_sender = f"{nickname}" + (
+                f" ({user_id})" if user_id and user_id_reliable else ""
             )
+            header_title = html.escape(
+                str(richheader.get("title", "")).strip() if richheader else ""
+            ) or html.escape(default_sender)
+            header_content = html.escape(
+                str(richheader.get("content", "")).strip() if richheader else ""
+            )
+
+            avatar_url = ""
+            if richheader:
+                avatar_url = str(richheader.get("avatar", "")).strip()
+            if not avatar_url and user_id and user_id_reliable:
+                avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=160"
+
+            avatar_html = ""
+            if avatar_url.startswith(("http://", "https://")):
+                avatar_html = (
+                    f"<img class='avatar' src='{html.escape(avatar_url)}' "
+                    "alt='avatar' referrerpolicy='no-referrer' loading='lazy'/>"
+                )
+
+            header_content_html = (
+                f"<div class='sender-sub'>{header_content}</div>" if header_content else ""
+            )
+            item = {
+                "message_id": message_id,
+                "reply_to_id": reply_to_id,
+                "default_sender": default_sender,
+                "header_title": header_title,
+                "message_text": message_text,
+                "avatar_html": avatar_html,
+                "header_content_html": header_content_html,
+                "message_html": message_html,
+            }
+            node_items.append(item)
+            if message_id and message_id not in node_index:
+                node_index[message_id] = item
+
+        for item in node_items:
+            reply_html = ""
+            reply_to_id = item.get("reply_to_id", "")
+            if reply_to_id:
+                reply_html = (
+                    "<blockquote class='reply-preview'>"
+                    "<div class='reply-preview-title'>回复消息</div>"
+                    "</blockquote>"
+                )
+
             rendered.append(
                 "<article class='msg'>"
-                f"<div class='sender'>{sender_display}</div>"
-                f"<div class='content'>{message_html}</div>"
+                "<div class='sender'>"
+                f"{item.get('avatar_html', '')}"
+                "<div class='sender-meta'>"
+                f"<div class='sender-main'>{item.get('header_title', '')}</div>"
+                f"{item.get('header_content_html', '')}"
+                "</div>"
+                "</div>"
+                f"{reply_html}"
+                f"<div class='content'>{item.get('message_html', '')}</div>"
                 "</article>"
             )
 
         return "\n".join(rendered)
 
-    def _render_forward_page_html(
-        self, title: str, body_html: str, expire_text: str
+    async def _render_forward_nested_html(
+        self,
+        nodes: list[dict],
+        *,
+        source_group_id: str,
+        depth: int,
     ) -> str:
-        title_html = html.escape(title)
-        expire_html = html.escape(expire_text)
+        nested_body = await self._render_forward_nodes_html(
+            nodes,
+            source_group_id=source_group_id,
+            depth=depth,
+        )
         return (
-            "<!doctype html>"
-            "<html lang='zh-CN'><head><meta charset='utf-8'/>"
-            "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
-            f"<title>{title_html}</title>"
-            "<style>"
-            ":root{--bg:#f7f6f3;--ink:#1f2629;--soft:#647177;--line:#dcd8cf;--card:#fffdf8;}"
-            "*{box-sizing:border-box}"
-            "body{margin:0;padding:24px;font-family:'Noto Sans CJK SC','PingFang SC','Microsoft YaHei',sans-serif;background:linear-gradient(180deg,#f7f6f3,#f0ede5);color:var(--ink)}"
-            ".wrap{max-width:860px;margin:0 auto}"
-            "h1{margin:0 0 10px;font-size:24px;line-height:1.2}"
-            ".meta{margin-bottom:18px;color:var(--soft);font-size:13px}"
-            ".msg{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:10px 0;box-shadow:0 1px 0 rgba(0,0,0,.02)}"
-            ".sender{font-weight:700;font-size:13px;margin-bottom:8px;color:#2f3d42}"
-            ".content{margin:0;white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;line-height:1.6}"
-            ".cqface{height:1.3em;width:1.3em;vertical-align:-0.22em;object-fit:contain}"
-            "</style></head><body><main class='wrap'>"
-            f"<h1>{title_html}</h1>"
-            f"<div class='meta'>{expire_html}</div>"
-            f"{body_html}"
-            "</main></body></html>"
+            "<details class='nested-forward'>"
+            "<summary class='nested-forward-title'>嵌套合并转发（点击展开）</summary>"
+            f"<div class='nested-forward-body'>{nested_body}</div>"
+            "</details>"
         )
 
-    async def _render_forward_segment(self, seg_data: dict) -> str:
+    def _render_forward_page_html(
+        self,
+        title: str,
+        body_html: str,
+        meta_primary_text: str,
+        meta_secondary_text: str,
+        *,
+        created_at: datetime.datetime,
+        expires_at: datetime.datetime,
+        destroyed_at: datetime.datetime | None = None,
+    ) -> str:
+        title_html = html.escape(title)
+        meta_primary_html = html.escape(meta_primary_text)
+        meta_secondary_html = html.escape(meta_secondary_text)
+        page_state = "destroyed" if destroyed_at is not None else "active"
+        page_state_text = "已销毁" if destroyed_at is not None else "有效"
+        page_state_banner = "已销毁" if destroyed_at is not None else "当前页面有效"
+        page_state_detail = (
+            "当前页面已超过有效期" if destroyed_at is not None else "页面将在到期后自动切换为已销毁"
+        )
+        return _get_forward_page_template().substitute(
+            title=title_html,
+            meta_primary=meta_primary_html,
+            meta_secondary=meta_secondary_html,
+            created_at_epoch=str(int(created_at.timestamp())),
+            expires_at_epoch=str(int(expires_at.timestamp())),
+            destroyed_at_epoch=str(int(destroyed_at.timestamp())) if destroyed_at else "",
+            page_state=page_state,
+            page_state_text=page_state_text,
+            page_state_banner=page_state_banner,
+            page_state_detail=page_state_detail,
+            body=body_html,
+        )
+
+    async def _render_forward_segment(
+        self,
+        seg_data: dict,
+        *,
+        source_group_id: str,
+    ) -> str:
         if not self.config.forward_render_enabled:
             return "[Forwarded messages]"
 
         forward_id = str(seg_data.get("id", "")).strip()
         if not forward_id:
             return "[Forwarded messages]"
+
+        logger.debug(
+            f"NapCat [{self.instance_id}] rendering forward segment id={forward_id}"
+        )
 
         response = await self._call("get_forward_msg", {"id": forward_id}, timeout=30.0)
         if not response or response.get("status") != "ok":
@@ -667,16 +1367,29 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             )
             return "[Forwarded messages]"
 
-        body_html = self._render_forward_nodes_html(nodes)
+        body_html = await self._render_forward_nodes_html(
+            nodes,
+            source_group_id=source_group_id,
+        )
+        created_at = _utc_now()
+        created_at_ts = int(created_at.timestamp())
         ttl = self._effective_forward_ttl()
-        expires_at = _utc_now() + datetime.timedelta(seconds=ttl)
-        expire_text = (
-            f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
+        expires_at = created_at + datetime.timedelta(seconds=ttl)
+        expires_at_ts = int(expires_at.timestamp())
+        meta_primary_text = (
+            f"生成于 {created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
+        )
+        meta_secondary_text = (
+            f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} · "
+            f"距离销毁约 {self._format_duration_cn(ttl)}"
         )
         page_html = self._render_forward_page_html(
             title="QQ 合并转发消息",
             body_html=body_html,
-            expire_text=expire_text,
+            meta_primary_text=meta_primary_text,
+            meta_secondary_text=meta_secondary_text,
+            created_at=created_at,
+            expires_at=expires_at,
         )
 
         page_id = uuid.uuid4().hex
@@ -684,11 +1397,21 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         self._forward_pages[page_id] = _ForwardPage(
             token=token,
             html_content=page_html,
+            created_at=created_at,
             expires_at=expires_at,
         )
+        if self.config.forward_render_persist_enabled:
+            msg_db().save_forward_page(
+                page_id=page_id,
+                instance_id=self.instance_id,
+                token=token,
+                html_content=page_html,
+                created_at=created_at_ts,
+                expires_at=expires_at_ts,
+            )
 
         link = self._build_forward_page_url(page_id, token)
-        return f"[QQ Combined Forward] {link}"
+        return f"[QQ Combined Forward / 合并转发] {link}"
 
     # ------------------------------------------------------------------
     # Action helpers
