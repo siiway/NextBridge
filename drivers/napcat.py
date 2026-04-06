@@ -66,7 +66,9 @@ logger = log.get_logger()
 
 _DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface-gif/"
 _FORWARD_TEMPLATE_PATH: Path = (
-    Path(__file__).resolve().parent.parent / "templates" / "napcat_forward_template.html"
+    Path(__file__).resolve().parent.parent
+    / "templates"
+    / "napcat_forward_template.html"
 )
 _RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
 _RICHHEADER_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
@@ -86,7 +88,9 @@ def _get_forward_page_template() -> Template:
         text = _FORWARD_TEMPLATE_PATH.read_text(encoding="utf-8")
         return Template(text)
     except OSError as exc:
-        logger.warning(f"Failed to load forward template {_FORWARD_TEMPLATE_PATH}: {exc}")
+        logger.warning(
+            f"Failed to load forward template {_FORWARD_TEMPLATE_PATH}: {exc}"
+        )
         return _FORWARD_PAGE_TEMPLATE
 
 
@@ -359,9 +363,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 return
             exc = done_task.exception()
             if exc is not None:
-                logger.error(
-                    f"NapCat [{self.instance_id}] async handler error: {exc}"
-                )
+                logger.error(f"NapCat [{self.instance_id}] async handler error: {exc}")
 
         task.add_done_callback(_on_done)
 
@@ -719,7 +721,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         if not url:
             return html.escape(f"[语音: {name}]")
 
-        attachment = Attachment(type="voice", url=url, name=self._segment_name(seg_data, "voice.amr"))
+        attachment = Attachment(
+            type="voice", url=url, name=self._segment_name(seg_data, "voice.amr")
+        )
         result = await media.fetch_attachment(
             attachment,
             max_bytes=max(1, int(self.config.max_file_size or 10 * 1024 * 1024)),
@@ -800,7 +804,10 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             )
         if source_group_id:
             action_candidates.append(
-                ("get_group_file_url", {"group_id": source_group_id, "file_id": file_id})
+                (
+                    "get_group_file_url",
+                    {"group_id": source_group_id, "file_id": file_id},
+                )
             )
         action_candidates.append(("get_file", {"file_id": file_id}))
 
@@ -1026,7 +1033,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             return None
 
         avatar = (
-            f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=160" if user_id else ""
+            f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=160"
+            if user_id
+            else ""
         )
         ctx = {
             "platform": "napcat",
@@ -1238,7 +1247,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 )
 
             header_content_html = (
-                f"<div class='sender-sub'>{header_content}</div>" if header_content else ""
+                f"<div class='sender-sub'>{header_content}</div>"
+                if header_content
+                else ""
             )
             item = {
                 "message_id": message_id,
@@ -1317,7 +1328,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         page_state_text = "已销毁" if destroyed_at is not None else "有效"
         page_state_banner = "已销毁" if destroyed_at is not None else "当前页面有效"
         page_state_detail = (
-            "当前页面已超过有效期" if destroyed_at is not None else "页面将在到期后自动切换为已销毁"
+            "当前页面已超过有效期"
+            if destroyed_at is not None
+            else "页面将在到期后自动切换为已销毁"
         )
         return _get_forward_page_template().substitute(
             title=title_html,
@@ -1325,7 +1338,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             meta_secondary=meta_secondary_html,
             created_at_epoch=str(int(created_at.timestamp())),
             expires_at_epoch=str(int(expires_at.timestamp())),
-            destroyed_at_epoch=str(int(destroyed_at.timestamp())) if destroyed_at else "",
+            destroyed_at_epoch=str(int(destroyed_at.timestamp()))
+            if destroyed_at
+            else "",
             page_state=page_state,
             page_state_text=page_state_text,
             page_state_banner=page_state_banner,

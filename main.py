@@ -138,7 +138,9 @@ async def main():
             f"Database initialized at startup with schema target {schema_target[0]}.{schema_target[1]}"
         )
     except Exception:
-        logger.opt(exception=True).critical("Startup aborted: database initialization failed")
+        logger.opt(exception=True).critical(
+            "Startup aborted: database initialization failed"
+        )
         return
 
     http_server = HttpServerManager(

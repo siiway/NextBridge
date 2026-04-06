@@ -90,7 +90,9 @@ class MessageDB:
     _SCHEMA_VERSION = (0, 3)
 
     @classmethod
-    def configure_schema_version_from_app_version(cls, app_version: str) -> tuple[int, int]:
+    def configure_schema_version_from_app_version(
+        cls, app_version: str
+    ) -> tuple[int, int]:
         """Set target schema version from application version text (major.minor.patch...)."""
         parsed = cls._schema_version_tuple(app_version)
         if parsed == (0, 0):
@@ -292,8 +294,8 @@ class MessageDB:
 
         if migration_flag:
             logger.info(
-            f"Database schema migration completed: schema={current_version_tuple[0]}.{current_version_tuple[1]}"
-        )
+                f"Database schema migration completed: schema={current_version_tuple[0]}.{current_version_tuple[1]}"
+            )
 
     def _session(self) -> Session:
         return Session(self._engine)
