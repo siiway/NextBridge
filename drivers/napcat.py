@@ -66,6 +66,7 @@ class _ForwardPage:
 def _utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
+
 # ---------------------------------------------------------------------------
 # CQ face GIF database
 # ---------------------------------------------------------------------------
@@ -563,7 +564,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         return "\n".join(rendered)
 
-    def _render_forward_page_html(self, title: str, body_html: str, expire_text: str) -> str:
+    def _render_forward_page_html(
+        self, title: str, body_html: str, expire_text: str
+    ) -> str:
         title_html = html.escape(title)
         expire_html = html.escape(expire_text)
         return (
@@ -616,7 +619,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         body_html = self._render_forward_nodes_html(nodes)
         ttl = self._effective_forward_ttl()
         expires_at = _utc_now() + datetime.timedelta(seconds=ttl)
-        expire_text = f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
+        expire_text = (
+            f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
+        )
         page_html = self._render_forward_page_html(
             title="QQ 合并转发消息",
             body_html=body_html,

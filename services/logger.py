@@ -50,17 +50,17 @@ def _masking_filter(record: "loguru.Record") -> bool:
     # Set default source field (file:line format)
     if "source" not in record.get("extra", {}):
         record["extra"]["source"] = f"{record['file'].name}:{record['line']}"
-    
+
     # Override source if a custom 'name' is bound (e.g., uvicorn logs)
     if record.get("extra", {}).get("name"):
         record["extra"]["source"] = record["extra"]["name"]
-    
+
     # Redact sensitive values
     if _sensitive:
         msg = record["message"]
         msg = replace_sensitive(msg)
         record["message"] = msg
-    
+
     return True
 
 
