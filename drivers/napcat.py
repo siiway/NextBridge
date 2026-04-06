@@ -15,14 +15,19 @@
 import asyncio
 import base64
 import datetime
+import html
 import json
 import math
+import secrets
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import websockets
 import websockets.exceptions
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 import services.logger as log
 from drivers import BaseDriver
@@ -41,10 +46,25 @@ class NapCatConfig(_DriverConfig):
     file_send_mode: Literal["stream", "base64"] = "stream"
     cqface_mode: Literal["gif", "emoji"] = "gif"
     stream_threshold: int = 0
+    forward_render_enabled: bool = True
+    forward_render_ttl_seconds: int = 86400
+    forward_render_mount_path: str = "/napcat-forward"
+    forward_render_public_base_url: str = ""
     proxy: str | None = UNSET
 
 
 logger = log.get_logger()
+
+
+@dataclass(slots=True)
+class _ForwardPage:
+    token: str
+    html_content: str
+    expires_at: datetime.datetime
+
+
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.UTC)
 
 # ---------------------------------------------------------------------------
 # CQ face GIF database
@@ -104,6 +124,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         self._proxy = get_proxy(config.proxy)
         # Cache for user qid to avoid repeated API calls
         self._qid_cache: dict[str, str] = {}
+        self._forward_pages: dict[str, _ForwardPage] = {}
+        self._forward_gc_task: asyncio.Task | None = None
+        self._forward_mount_registered = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -111,6 +134,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
+        self._ensure_forward_http_mount()
+        self._ensure_forward_gc_task()
 
         ws_url = self.config.ws_url
         if self.config.ws_token:
@@ -141,6 +166,100 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             logger.info(f"NapCat [{self.instance_id}] reconnecting in 5s...")
             await asyncio.sleep(5)
+
+    def _normalize_mount_path(self, path: str) -> str:
+        normalized = (path or "/napcat-forward").strip()
+        if not normalized.startswith("/"):
+            normalized = f"/{normalized}"
+        if len(normalized) > 1 and normalized.endswith("/"):
+            normalized = normalized[:-1]
+        return normalized
+
+    def _forward_mount_path(self) -> str:
+        configured = self._normalize_mount_path(self.config.forward_render_mount_path)
+        if configured == "/napcat-forward":
+            return f"/napcat-forward/{self.instance_id}"
+        return configured
+
+    def _effective_forward_ttl(self) -> int:
+        return max(60, int(self.config.forward_render_ttl_seconds or 0))
+
+    def _build_forward_page_url(self, page_id: str, token: str) -> str:
+        mount_path = self._forward_mount_path()
+        base = (self.config.forward_render_public_base_url or "").rstrip("/")
+
+        if not base and self.http_server is not None:
+            host = self.http_server.host or "127.0.0.1"
+            if host == "0.0.0.0":
+                host = "127.0.0.1"
+            root_path = (self.http_server.root_path or "").rstrip("/")
+            base = f"http://{host}:{self.http_server.port}{root_path}"
+
+        if not base:
+            base = "http://127.0.0.1:9080"
+
+        return f"{base}{mount_path}/{page_id}?t={token}"
+
+    def _ensure_forward_http_mount(self) -> None:
+        if not self.config.forward_render_enabled:
+            return
+        if self.http_server is None:
+            logger.warning(
+                f"NapCat [{self.instance_id}] forward renderer not mounted: shared HTTP server unavailable"
+            )
+            return
+        if self._forward_mount_registered:
+            return
+
+        app = FastAPI()
+
+        @app.get("/{page_id}", response_class=HTMLResponse)
+        async def _get_forward_page(
+            page_id: str,
+            t: str = Query(default="", min_length=1),
+        ) -> HTMLResponse:
+            page = self._forward_pages.get(page_id)
+            if page is None:
+                raise HTTPException(status_code=404, detail="Forward page not found")
+
+            if page.expires_at <= _utc_now():
+                self._forward_pages.pop(page_id, None)
+                raise HTTPException(status_code=410, detail="Forward page expired")
+
+            if page.token != t:
+                raise HTTPException(status_code=404, detail="Forward page not found")
+
+            return HTMLResponse(content=page.html_content, status_code=200)
+
+        mount_path = self._forward_mount_path()
+        self.http_server.mount(
+            instance_id=f"{self.instance_id}/forward",
+            path=mount_path,
+            app=app,
+        )
+        self._forward_mount_registered = True
+        logger.info(
+            f"NapCat [{self.instance_id}] forward renderer mounted at {mount_path}"
+        )
+
+    def _ensure_forward_gc_task(self) -> None:
+        if not self.config.forward_render_enabled:
+            return
+        if self._forward_gc_task and not self._forward_gc_task.done():
+            return
+        self._forward_gc_task = asyncio.create_task(self._forward_gc_loop())
+
+    async def _forward_gc_loop(self) -> None:
+        while True:
+            await asyncio.sleep(60)
+            now = _utc_now()
+            expired = [
+                page_id
+                for page_id, page in self._forward_pages.items()
+                if page.expires_at <= now
+            ]
+            for page_id in expired:
+                self._forward_pages.pop(page_id, None)
 
     # ------------------------------------------------------------------
     # Receive
@@ -191,7 +310,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         qid = None  # await self._get_qid(user_id, group_id)
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
-        text, attachments, reply_id, mentions = self._parse_message(
+        text, attachments, reply_id, mentions = await self._parse_message(
             event, face_as_emoji=face_as_emoji
         )
         if not text.strip() and not attachments:
@@ -218,7 +337,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         )
         await self.bridge.on_message(msg)
 
-    def _parse_message(
+    async def _parse_message(
         self, event: dict, *, face_as_emoji: bool = False
     ) -> tuple[str, list[Attachment], str | None, list[dict]]:
         """
@@ -342,7 +461,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
                 case "forward":
                     # Merged forwarded message chain
-                    text_parts.append("[Forwarded messages]")
+                    forward_text = await self._render_forward_segment(d)
+                    text_parts.append(forward_text)
 
                 case "mface":
                     # Market/sticker face — use summary text if present
@@ -387,6 +507,132 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             text = event.get("raw_message", "")
 
         return text, attachments, reply_id, mentions
+
+    def _token_short(self, length: int = 8) -> str:
+        alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
+    def _render_forward_nodes_html(self, nodes: list[dict]) -> str:
+        rendered: list[str] = []
+
+        for node in nodes:
+            sender = node.get("sender") or {}
+            nickname = sender.get("nickname") or sender.get("card") or "Unknown"
+            user_id = str(sender.get("user_id", ""))
+            content = node.get("content")
+            if content is None:
+                content = node.get("message")
+            if content is None and isinstance(node.get("data"), dict):
+                content = node["data"].get("content") or node["data"].get("message")
+
+            text_parts: list[str] = []
+            for seg in content if isinstance(content, list) else []:
+                seg_type = seg.get("type", "")
+                seg_data = seg.get("data") or {}
+
+                if seg_type == "text":
+                    text_parts.append(str(seg_data.get("text", "")))
+                elif seg_type == "at":
+                    qq = str(seg_data.get("qq", ""))
+                    name = seg_data.get("name") or qq
+                    text_parts.append(f"@{name}")
+                elif seg_type == "image":
+                    text_parts.append("[图片]")
+                elif seg_type == "record":
+                    text_parts.append("[语音]")
+                elif seg_type == "video":
+                    text_parts.append("[视频]")
+                elif seg_type == "file":
+                    text_parts.append("[文件]")
+                elif seg_type == "forward":
+                    text_parts.append("[合并转发]")
+                elif seg_type == "face":
+                    face_id = seg_data.get("id", "")
+                    text_parts.append(f"[表情:{face_id}]")
+
+            message_text = html.escape("".join(text_parts).strip() or "[空消息]")
+            sender_display = html.escape(
+                f"{nickname}" + (f" ({user_id})" if user_id else "")
+            )
+            rendered.append(
+                "<article class='msg'>"
+                f"<div class='sender'>{sender_display}</div>"
+                f"<pre class='content'>{message_text}</pre>"
+                "</article>"
+            )
+
+        return "\n".join(rendered)
+
+    def _render_forward_page_html(self, title: str, body_html: str, expire_text: str) -> str:
+        title_html = html.escape(title)
+        expire_html = html.escape(expire_text)
+        return (
+            "<!doctype html>"
+            "<html lang='zh-CN'><head><meta charset='utf-8'/>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
+            f"<title>{title_html}</title>"
+            "<style>"
+            ":root{--bg:#f7f6f3;--ink:#1f2629;--soft:#647177;--line:#dcd8cf;--card:#fffdf8;}"
+            "*{box-sizing:border-box}"
+            "body{margin:0;padding:24px;font-family:'Noto Sans CJK SC','PingFang SC','Microsoft YaHei',sans-serif;background:linear-gradient(180deg,#f7f6f3,#f0ede5);color:var(--ink)}"
+            ".wrap{max-width:860px;margin:0 auto}"
+            "h1{margin:0 0 10px;font-size:24px;line-height:1.2}"
+            ".meta{margin-bottom:18px;color:var(--soft);font-size:13px}"
+            ".msg{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:10px 0;box-shadow:0 1px 0 rgba(0,0,0,.02)}"
+            ".sender{font-weight:700;font-size:13px;margin-bottom:8px;color:#2f3d42}"
+            ".content{margin:0;white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;line-height:1.6}"
+            "</style></head><body><main class='wrap'>"
+            f"<h1>{title_html}</h1>"
+            f"<div class='meta'>{expire_html}</div>"
+            f"{body_html}"
+            "</main></body></html>"
+        )
+
+    async def _render_forward_segment(self, seg_data: dict) -> str:
+        if not self.config.forward_render_enabled:
+            return "[Forwarded messages]"
+
+        forward_id = str(seg_data.get("id", "")).strip()
+        if not forward_id:
+            return "[Forwarded messages]"
+
+        response = await self._call("get_forward_msg", {"id": forward_id}, timeout=30.0)
+        if not response or response.get("status") != "ok":
+            logger.warning(
+                f"NapCat [{self.instance_id}] get_forward_msg failed for id={forward_id}: {response}"
+            )
+            return "[Forwarded messages]"
+
+        payload = response.get("data") or {}
+        nodes = payload.get("messages")
+        if nodes is None:
+            nodes = payload.get("message")
+        if not isinstance(nodes, list):
+            logger.warning(
+                f"NapCat [{self.instance_id}] get_forward_msg no messages for id={forward_id}"
+            )
+            return "[Forwarded messages]"
+
+        body_html = self._render_forward_nodes_html(nodes)
+        ttl = self._effective_forward_ttl()
+        expires_at = _utc_now() + datetime.timedelta(seconds=ttl)
+        expire_text = f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
+        page_html = self._render_forward_page_html(
+            title="QQ 合并转发消息",
+            body_html=body_html,
+            expire_text=expire_text,
+        )
+
+        page_id = uuid.uuid4().hex
+        token = self._token_short()
+        self._forward_pages[page_id] = _ForwardPage(
+            token=token,
+            html_content=page_html,
+            expires_at=expires_at,
+        )
+
+        link = self._build_forward_page_url(page_id, token)
+        return f"[QQ 合并转发] {link}"
 
     # ------------------------------------------------------------------
     # Action helpers

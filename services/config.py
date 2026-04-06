@@ -152,7 +152,7 @@ def set(key: str, value):
 
 
 def get_proxy(
-    instance: str | None = UNSET, globally: str = get("global.proxy", UNSET)
+    instance: str | None = UNSET, globally: str | None = get("global.proxy", UNSET)
 ) -> str | None:
     if not instance == UNSET:
         return instance or None

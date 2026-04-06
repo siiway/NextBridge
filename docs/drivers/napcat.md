@@ -22,6 +22,10 @@ Add under `napcat.<instance_id>` in `config.json`:
 | `cqface_mode` | No | `"gif"` | How to represent QQ face/emoji segments. `"gif"` uploads the face as an animated GIF (from the local `db/cqface-gif/` database); `"emoji"` renders it as inline text, e.g. `:cqface306:`. |
 | `file_send_mode` | No | `"stream"` | How to upload files and videos to QQ. `"stream"` uses chunked `upload_file_stream` (recommended for large files); `"base64"` encodes the whole payload and passes it directly to `upload_group_file`. |
 | `stream_threshold` | No | `0` (disabled) | If greater than 0, automatically switches to `"stream"` mode when a file or video exceeds this many bytes, regardless of `file_send_mode`. |
+| `forward_render_enabled` | No | `true` | Enable merged-forward rendering. When enabled, QQ merged-forward content is rendered to a temporary HTML page and forwarded as a link. |
+| `forward_render_ttl_seconds` | No | `86400` | TTL in seconds for merged-forward HTML pages. Pages are invalidated and cleaned up automatically after expiry. Minimum is 60 seconds. |
+| `forward_render_mount_path` | No | `"/napcat-forward"` | Mount path (on the shared HTTP server) used to serve merged-forward pages. |
+| `forward_render_public_base_url` | No | `""` | Public base URL used when generating merged-forward links (for example, your reverse-proxy public URL). If empty, NextBridge derives one from `global.http`. |
 | `proxy` | No | — | Proxy URL for WebSocket connection and media downloading (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
@@ -66,7 +70,12 @@ Incoming messages are parsed from OneBot 11 segment arrays:
 | `record` | Forwarded as `voice` attachment |
 | `video` | Forwarded as `video` attachment |
 | `file` | Forwarded as `file` attachment |
-| Others (face, reply, forward...) | Silently skipped |
+| `forward` (merged forward) | Calls `get_forward_msg`, renders a temporary HTML page, and forwards the link |
+| Others (face, reply...) | Silently skipped |
+
+::: info Merged-forward access control
+Generated merged-forward links include a short token (`t` query parameter), and each page has its own TTL. Expired pages return an expired response and are automatically removed by a background cleanup task.
+:::
 
 ## Sending
 

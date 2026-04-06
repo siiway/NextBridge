@@ -310,8 +310,16 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                 )
                 return
             server = self.config.server_url.rstrip("/")
+            source_proxy = self._source_proxy_from_kwargs(kwargs)
             await self._send_api(
-                server, room_id, text, attachments, alias, avatar, reply_to_id
+                server,
+                room_id,
+                text,
+                attachments,
+                alias,
+                avatar,
+                source_proxy,
+                reply_to_id,
             )
 
     # ------------------------------------------------------------------
@@ -326,6 +334,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         attachments: list[Attachment] | None,
         alias: str,
         avatar: str,
+        source_proxy: str | None,
         reply_to_id: str | None = None,
     ) -> None:
 
@@ -333,8 +342,6 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             await self._api_post_message(
                 server, room_id, text, alias, avatar, reply_to_id
             )
-
-        source_proxy = self._source_proxy_from_kwargs(kwargs)
 
         for att in attachments or []:
             if not att.url and att.data is None:
