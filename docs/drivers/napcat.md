@@ -25,7 +25,8 @@ Add under `napcat.<instance_id>` in `config.json`:
 | `forward_render_enabled` | No | `true` | Enable merged-forward rendering. When enabled, QQ merged-forward content is rendered to a temporary HTML page and forwarded as a link. |
 | `forward_render_ttl_seconds` | No | `86400` | TTL in seconds for merged-forward HTML pages. Pages are invalidated and cleaned up automatically after expiry. Minimum is 60 seconds. |
 | `forward_render_mount_path` | No | `"/napcat-forward"` | Mount path (on the shared HTTP server) used to serve merged-forward pages. |
-| `forward_render_public_base_url` | No | `""` | Public base URL used when generating merged-forward links (for example, your reverse-proxy public URL). If empty, NextBridge derives one from `global.http`. |
+| `forward_assets_base_url` | No | `""` | Public base URL used when generating merged-forward links (for example, your reverse-proxy public URL). If empty, NextBridge derives one from `global.http`. |
+| `forward_render_cqface_gif` | No | `true` | Rendering strategy for QQ `face` segments inside merged-forward HTML: `false` uses `cqface` unicode mapping; `true`/unset uses built-in default GIF hosts; string uses a custom GIF host base URL. |
 | `proxy` | No | — | Proxy URL for WebSocket connection and media downloading (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
 ```json
@@ -75,6 +76,18 @@ Incoming messages are parsed from OneBot 11 segment arrays:
 
 ::: info Merged-forward access control
 Generated merged-forward links include a short token (`t` query parameter), and each page has its own TTL. Expired pages return an expired response and are automatically removed by a background cleanup task.
+:::
+
+::: info Merged-forward face GIF hosts
+When `forward_render_cqface_gif=true` (default), NextBridge uses the default GIF host:
+
+- `https://nextbridge.siiway.org/db/cqface-gif/`
+
+If you want to switch to the mainland-accelerated host manually, set `forward_render_cqface_gif` to a string such as:
+
+- `https://nb-res-cn.siiway.top/cqface-gif/`
+
+Both addresses are optional configuration values, and NextBridge does not auto-fallback between them.
 :::
 
 ## Sending

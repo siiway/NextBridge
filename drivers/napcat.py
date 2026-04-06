@@ -32,7 +32,7 @@ from fastapi.responses import HTMLResponse
 import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
-from services import media
+from services import cqface, media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.db import msg_db
@@ -49,11 +49,18 @@ class NapCatConfig(_DriverConfig):
     forward_render_enabled: bool = True
     forward_render_ttl_seconds: int = 86400
     forward_render_mount_path: str = "/napcat-forward"
-    forward_render_public_base_url: str = ""
+    forward_assets_base_url: str = ""
+    # Merged-forward face rendering strategy:
+    # - false: render by cqface mapping (unicode)
+    # - true/unset: render by default gif host
+    # - string: use custom gif host base URL
+    forward_render_cqface_gif: bool | str = True
     proxy: str | None = UNSET
 
 
 logger = log.get_logger()
+
+_DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface-gif/"
 
 
 @dataclass(slots=True)
@@ -187,7 +194,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
     def _build_forward_page_url(self, page_id: str, token: str) -> str:
         mount_path = self._forward_mount_path()
-        base = (self.config.forward_render_public_base_url or "").rstrip("/")
+        base = (self.config.forward_assets_base_url or "").rstrip("/")
 
         if not base and self.http_server is not None:
             host = self.http_server.host or "127.0.0.1"
@@ -513,6 +520,48 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
         return "".join(secrets.choice(alphabet) for _ in range(length))
 
+    def _normalize_cqface_gif_host(self, host: str) -> str:
+        normalized = (host or "").strip()
+        if not normalized:
+            return ""
+        if not normalized.startswith(("http://", "https://")):
+            normalized = f"https://{normalized.lstrip('/')}"
+        if not normalized.endswith("/"):
+            normalized = f"{normalized}/"
+        return normalized
+
+    def _forward_cqface_gif_host(self) -> str:
+        cfg = self.config.forward_render_cqface_gif
+
+        if cfg is False:
+            return ""
+        if cfg is True:
+            return _DEFAULT_FORWARD_CQFACE_GIF_HOST
+        if isinstance(cfg, str):
+            custom = self._normalize_cqface_gif_host(cfg)
+            if custom:
+                return custom
+            return _DEFAULT_FORWARD_CQFACE_GIF_HOST
+
+        return _DEFAULT_FORWARD_CQFACE_GIF_HOST
+
+    def _render_forward_face_segment_html(self, seg_data: dict) -> str:
+        face_id = str(seg_data.get("id", "")).strip()
+        if not face_id:
+            return html.escape("[表情]")
+
+        gif_host = self._forward_cqface_gif_host()
+        if not gif_host:
+            return html.escape(cqface.resolve_cqface(face_id))
+
+        main_url = f"{gif_host}{face_id}.gif"
+        alt_text = cqface.resolve_cqface(face_id)
+
+        return (
+            f"<img class='cqface' src='{html.escape(main_url)}' "
+            f"alt='{html.escape(alt_text)}' title='cqface:{html.escape(face_id)}'/>"
+        )
+
     def _render_forward_nodes_html(self, nodes: list[dict]) -> str:
         rendered: list[str] = []
 
@@ -526,39 +575,38 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             if content is None and isinstance(node.get("data"), dict):
                 content = node["data"].get("content") or node["data"].get("message")
 
-            text_parts: list[str] = []
+            content_parts: list[str] = []
             for seg in content if isinstance(content, list) else []:
                 seg_type = seg.get("type", "")
                 seg_data = seg.get("data") or {}
 
                 if seg_type == "text":
-                    text_parts.append(str(seg_data.get("text", "")))
+                    content_parts.append(html.escape(str(seg_data.get("text", ""))))
                 elif seg_type == "at":
                     qq = str(seg_data.get("qq", ""))
                     name = seg_data.get("name") or qq
-                    text_parts.append(f"@{name}")
+                    content_parts.append(html.escape(f"@{name}"))
                 elif seg_type == "image":
-                    text_parts.append("[图片]")
+                    content_parts.append(html.escape("[图片]"))
                 elif seg_type == "record":
-                    text_parts.append("[语音]")
+                    content_parts.append(html.escape("[语音]"))
                 elif seg_type == "video":
-                    text_parts.append("[视频]")
+                    content_parts.append(html.escape("[视频]"))
                 elif seg_type == "file":
-                    text_parts.append("[文件]")
+                    content_parts.append(html.escape("[文件]"))
                 elif seg_type == "forward":
-                    text_parts.append("[合并转发]")
+                    content_parts.append(html.escape("[合并转发]"))
                 elif seg_type == "face":
-                    face_id = seg_data.get("id", "")
-                    text_parts.append(f"[表情:{face_id}]")
+                    content_parts.append(self._render_forward_face_segment_html(seg_data))
 
-            message_text = html.escape("".join(text_parts).strip() or "[空消息]")
+            message_html = "".join(content_parts).strip() or html.escape("[空消息]")
             sender_display = html.escape(
                 f"{nickname}" + (f" ({user_id})" if user_id else "")
             )
             rendered.append(
                 "<article class='msg'>"
                 f"<div class='sender'>{sender_display}</div>"
-                f"<pre class='content'>{message_text}</pre>"
+                f"<div class='content'>{message_html}</div>"
                 "</article>"
             )
 
@@ -584,6 +632,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             ".msg{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:10px 0;box-shadow:0 1px 0 rgba(0,0,0,.02)}"
             ".sender{font-weight:700;font-size:13px;margin-bottom:8px;color:#2f3d42}"
             ".content{margin:0;white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;line-height:1.6}"
+            ".cqface{height:1.3em;width:1.3em;vertical-align:-0.22em;object-fit:contain}"
             "</style></head><body><main class='wrap'>"
             f"<h1>{title_html}</h1>"
             f"<div class='meta'>{expire_html}</div>"
@@ -637,7 +686,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         )
 
         link = self._build_forward_page_url(page_id, token)
-        return f"[QQ 合并转发] {link}"
+        return f"[QQ Combined Forward] {link}"
 
     # ------------------------------------------------------------------
     # Action helpers
