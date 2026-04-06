@@ -506,14 +506,9 @@ class Bridge:
             # Resolve target mentions
             target_mentions = []
             for m in msg.mentions:
-                # 1. Try explicit binding first
                 target_uid = msg_db().get_bound_user_id(
                     msg.instance_id, m["id"], target_id
                 )
-                # 2. Fall back to display name match
-                if not target_uid:
-                    target_uid = msg_db().get_user_id_by_name(target_id, m["name"])
-
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
             if target_mentions:
@@ -604,14 +599,9 @@ class Bridge:
             # Resolve target mentions
             target_mentions = []
             for m in msg.mentions:
-                # 1. Try explicit binding first
                 target_uid = msg_db().get_bound_user_id(
                     msg.instance_id, m["id"], target_id
                 )
-                # 2. Fall back to display name match
-                if not target_uid:
-                    target_uid = msg_db().get_user_id_by_name(target_id, m["name"])
-
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
             if target_mentions:

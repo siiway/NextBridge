@@ -6,7 +6,7 @@ NextBridge supports several built-in commands that users can type directly into 
 
 ## Account Binding
 
-By default, NextBridge tries to map mentions across platforms by matching **display names**. However, this can be unreliable if users have different names on different platforms. 
+NextBridge only renders cross-platform mentions as native pings after you create an **explicit binding (bind)**. It no longer falls back to matching **display names**, because that becomes ambiguous when multiple users share the same name.
 
 **Built-in commands use the global command prefix from config. The default prefix is `nb`, so the examples below use `/nb ...`.**
 

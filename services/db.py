@@ -336,12 +336,16 @@ class MessageDB:
     def get_user_id_by_name(self, instance_id: str, display_name: str) -> str | None:
         """Find a platform-specific user ID by their display name on that instance."""
         with self._session() as s:
-            return s.execute(
-                select(UserMapping.platform_user_id).where(
-                    UserMapping.instance_id == instance_id,
-                    UserMapping.display_name == display_name,
+            return (
+                s.execute(
+                    select(UserMapping.platform_user_id).where(
+                        UserMapping.instance_id == instance_id,
+                        UserMapping.display_name == display_name,
+                    )
                 )
-            ).scalar_one_or_none()
+                .scalars()
+                .first()
+            )
 
     def get_mapped_user_id(
         self, source_instance: str, source_user_id: str, target_instance: str
