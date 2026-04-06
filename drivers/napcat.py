@@ -597,7 +597,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 elif seg_type == "forward":
                     content_parts.append(html.escape("[合并转发]"))
                 elif seg_type == "face":
-                    content_parts.append(self._render_forward_face_segment_html(seg_data))
+                    content_parts.append(
+                        self._render_forward_face_segment_html(seg_data)
+                    )
 
             message_html = "".join(content_parts).strip() or html.escape("[空消息]")
             sender_display = html.escape(
