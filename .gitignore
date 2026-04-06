@@ -16,12 +16,9 @@ logs/
 # Configs
 data/
 
-# Document related
+# Docs
+docs/
 node_modules/
-dist/
-docs/.vitepress/dist/
-docs/.vitepress/cache/
-docs/.obsidian/
 
 # claude
 .claude/
