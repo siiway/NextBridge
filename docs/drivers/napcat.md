@@ -26,9 +26,14 @@ Add under `napcat.<instance_id>` in `config.json`:
 | `forward_render_ttl_seconds` | No | `86400` | TTL in seconds for merged-forward HTML pages. Pages stay on the same screen and switch to an expired state when the timer runs out. Minimum is 60 seconds. |
 | `forward_render_mount_path` | No | `"/napcat-forward"` | Mount path (on the shared HTTP server) used to serve merged-forward pages. |
 | `forward_render_persist_enabled` | No | `false` | Enable persistent storage for merged-forward chat records. When enabled, page content is also written to the database so links remain available after restarts. |
-| `forward_assets_base_url` | No | `""` | Public base URL used when generating merged-forward links (for example, your reverse-proxy public URL). If empty, NextBridge derives one from `global.http`. |
+| `forward_render_base_url` | No | `""` | Preferred public URL prefix for merged-forward links. When set, links are generated as `${forward_render_base_url}/{page_id}?t=...` and do **not** auto-append `forward_render_mount_path`. Useful for path-based reverse proxy setups. |
 | `forward_render_cqface_gif` | No | `true` | Rendering strategy for QQ `face` segments inside merged-forward HTML: `false` uses `cqface` unicode mapping; `true`/unset uses built-in default GIF hosts; string uses a custom GIF host base URL. |
 | `proxy` | No | — | Proxy URL for WebSocket connection and media downloading (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
+
+Forward link base URL priority:
+1. `forward_render_base_url` (no mount path auto-append)
+2. `global.base_url` (auto-appends mount path)
+3. derived from `global.http` host/port
 
 ```json
 {
@@ -68,11 +73,11 @@ Incoming messages are parsed from OneBot 11 segment arrays:
 |---|---|
 | `text` | Becomes message text |
 | `at` | Converted to `@name` text |
-| `image` | Forwarded as `image` attachment |
-| `record` | Forwarded as `voice` attachment |
-| `video` | Forwarded as `video` attachment |
-| `file` | Forwarded as `file` attachment |
-| `forward` (merged forward) | Calls `get_forward_msg`, renders a temporary HTML page, and forwards the link; nested forward nodes are rendered recursively; voice nodes are embedded as playable audio, with AMR transcoded to OGG when possible; file nodes show metadata (name/size/file_id) and try to resolve a downloadable URL |
+| `image` | Forwarded as `voice` attachment; in merged-forward: downloaded and embedded as data URI (unless oversized); if unavailable, displays a placeholder with a link to the original |
+| `record` | Forwarded as `voice` attachment; in merged-forward: embedded as playable audio, with AMR transcoded to OGG when possible |
+| `video` | Forwarded as `video` attachment; in merged-forward: embedded with `<video controls>` |
+| `file` | Forwarded as `file` attachment; in merged-forward: shows metadata (name/size/file_id) and attempts to resolve a downloadable URL |
+| `forward` (merged forward) | Calls `get_forward_msg`, renders a temporary HTML page, and forwards the link; nested forward nodes are rendered recursively; voice nodes are embedded as playable audio; image/mface nodes are downloaded and embedded; file nodes show metadata |
 | Others (face...) | Silently skipped; reply segments are shown as a generic reply marker |
 
 ::: info Merged-forward access control
@@ -84,7 +89,7 @@ When `forward_render_cqface_gif=true` (default), NextBridge uses the default GIF
 
 - `https://nextbridge.siiway.org/db/cqface-gif/`
 
-If you want to switch to the mainland-accelerated host manually, set `forward_render_cqface_gif` to a string such as:
+If you want to switch to the China Mainland-accelerated host manually, set `forward_render_cqface_gif` to a string such as:
 
 - `https://nb-res-cn.siiway.top/cqface-gif/`
 

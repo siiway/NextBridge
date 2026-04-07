@@ -36,7 +36,7 @@ import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import cqface, media
-from services.config import UNSET, get_proxy
+from services.config import UNSET, get as get_config, get_proxy
 from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
@@ -53,7 +53,10 @@ class NapCatConfig(_DriverConfig):
     forward_render_ttl_seconds: int = 86400
     forward_render_mount_path: str = "/napcat-forward"
     forward_render_persist_enabled: bool = False
-    forward_assets_base_url: str = ""
+    # Preferred public URL prefix for forward links. When set, forward links are
+    # generated as: {forward_render_base_url}/{page_id}?t={token}
+    # (mount path is NOT appended automatically).
+    forward_render_base_url: str = ""
     # Merged-forward face rendering strategy:
     # - false: render by cqface mapping (unicode)
     # - true/unset: render by default gif host
@@ -229,7 +232,11 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
     def _build_forward_page_url(self, page_id: str, token: str) -> str:
         mount_path = self._forward_mount_path()
-        base = (self.config.forward_assets_base_url or "").rstrip("/")
+        direct_base = (self.config.forward_render_base_url or "").strip().rstrip("/")
+        if direct_base:
+            return f"{direct_base}/{page_id}?t={token}"
+
+        base = str(get_config("global.base_url", "") or "").rstrip("/")
 
         if not base and self.http_server is not None:
             host = self.http_server.host or "127.0.0.1"
@@ -752,6 +759,46 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             f"</div>"
         )
 
+    async def _render_forward_image_asset_html(self, seg_data: dict) -> str:
+        """Download and embed image as data URI, or link if download fails/oversized."""
+        url = self._segment_url(seg_data)
+        if not url:
+            return html.escape("[图片]")
+
+        attachment = Attachment(
+            type="image", url=url, name=self._segment_name(seg_data, "image.jpg")
+        )
+        result = await media.fetch_attachment(
+            attachment,
+            max_bytes=max(1, int(self.config.max_file_size or 10 * 1024 * 1024)),
+            proxy=self._media_proxy,
+        )
+        if not result:
+            # Download failed or oversized; show link with alt text
+            safe_url = html.escape(url)
+            return (
+                f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+                f"<img class='fwd-image' alt='[图片过期/过大]' "
+                "src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 "
+                "width=%22100%22 height=%22100%22%3E%3Crect fill=%22%23ddd%22 width=%22100%22 "
+                "height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 fill=%22%23666%22 "
+                "dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2212%22%3E"
+                "[图片]%3C/text%3E%3C/svg%3E' "
+                "loading='lazy' referrerpolicy='no-referrer' />"
+                f"</a>"
+            )
+
+        data, mime = result
+        data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+        safe_data_url = html.escape(data_url)
+        safe_url = html.escape(url)
+        return (
+            f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+            f"<img class='fwd-image' src='{safe_data_url}' "
+            "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
+            f"</a>"
+        )
+
     @staticmethod
     def _parse_forward_file_size(seg_data: dict) -> int | None:
         raw_size = seg_data.get("file_size", seg_data.get("size", ""))
@@ -1149,14 +1196,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     plain_text_parts.append(f"@{name}")
                     content_parts.append(html.escape(f"@{name}"))
                 elif seg_type == "image":
-                    image_url = self._segment_url(seg_data)
-                    if image_url:
-                        content_parts.append(
-                            f"<img class='fwd-image' src='{html.escape(image_url)}' "
-                            "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
-                        )
-                    else:
-                        content_parts.append(html.escape("[图片]"))
+                    content_parts.append(
+                        await self._render_forward_image_asset_html(seg_data)
+                    )
                 elif seg_type == "record":
                     content_parts.append(
                         await self._render_forward_voice_asset_html(seg_data)
@@ -1197,20 +1239,18 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                         self._render_forward_face_segment_html(seg_data)
                     )
                 elif seg_type == "mface":
-                    image_url = self._segment_url(seg_data)
-                    if image_url:
-                        content_parts.append(
-                            f"<img class='fwd-image' src='{html.escape(image_url)}' "
-                            "loading='lazy' referrerpolicy='no-referrer' alt='表情'/>"
-                        )
+                    # Multimedia face (emoji): try to render as image first, fall back to summary text
+                    summary = str(seg_data.get("summary", "")).strip()
+                    image_html = await self._render_forward_image_asset_html(seg_data)
+                    # Check if image was successfully rendered (not the fallback placeholder)
+                    if "[图片]" not in image_html and "svg+xml" not in image_html:
+                        content_parts.append(image_html)
+                    elif summary:
+                        plain_text_parts.append(summary)
+                        content_parts.append(html.escape(summary))
                     else:
-                        summary = str(seg_data.get("summary", "")).strip()
-                        if summary:
-                            plain_text_parts.append(summary)
-                            content_parts.append(html.escape(summary))
-                        else:
-                            plain_text_parts.append("[表情]")
-                            content_parts.append(html.escape("[表情]"))
+                        plain_text_parts.append("[表情]")
+                        content_parts.append(html.escape("[表情]"))
 
             if richheader is None:
                 msg_text = "".join(plain_text_parts).strip()

@@ -160,6 +160,12 @@ class GlobalConfig(BaseModel):
     """Global proxy URL for all drivers that support proxy configuration.
     Individual driver proxy settings will override this global setting."""
 
+    base_url: str = ""
+    """Public base URL used when generating externally reachable links.
+
+    Example: ``https://bridge.example.com``
+    """
+
     strict_echo_match: CoercedBool = False
     """Controls how the bridge prevents echoing messages back to the same channel/instance.
 
@@ -208,6 +214,19 @@ class GlobalConfig(BaseModel):
 
         logger.debug("No global proxy configuration found")
         return None
+
+    @field_validator("base_url", mode="before")
+    def normalize_base_url(cls, v):
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid global.base_url: {v}")
+        base = v.strip()
+        if not base:
+            return ""
+        if not base.startswith(("http://", "https://")):
+            base = f"https://{base.lstrip('/')}"
+        return base.rstrip("/")
 
 
 # ---------------------------------------------------------------------------
