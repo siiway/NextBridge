@@ -24,10 +24,15 @@
     html, body {
       margin: 0;
       padding: 0;
-      background:
+      min-height: 100%;
+      background-color: var(--bg-1);
+      background-image:
         radial-gradient(1200px 500px at 20% -10%, rgba(78, 148, 255, .22), transparent 62%),
         radial-gradient(900px 440px at 100% 0%, rgba(125, 226, 255, .16), transparent 60%),
         linear-gradient(145deg, var(--bg-1) 0%, var(--bg-2) 100%);
+      background-repeat: no-repeat, no-repeat, no-repeat;
+      background-size: 1500px 700px, 1100px 560px, 100% 100%;
+      background-position: 16% -12%, 100% 0%, 0 0;
       color: var(--ink);
       font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
     }
@@ -136,6 +141,21 @@
       margin: 8px 0;
       background: #fff;
       object-fit: contain;
+    }
+    .fwd-image-placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 84px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px dashed rgba(159, 220, 241, .35);
+      margin: 8px 0;
+      background: rgba(255, 255, 255, .04);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      text-align: center;
     }
     .chip {
       display: inline-block;

@@ -30,7 +30,7 @@ from typing import Any, Literal
 import websockets
 import websockets.exceptions
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 import services.logger as log
 from drivers import BaseDriver
@@ -53,6 +53,7 @@ class NapCatConfig(_DriverConfig):
     forward_render_ttl_seconds: int = 86400
     forward_render_mount_path: str = "/napcat-forward"
     forward_render_persist_enabled: bool = False
+    forward_render_asset_ttl_seconds: int = 86400
     # Preferred public URL prefix for forward links. When set, forward links are
     # generated as: {forward_render_base_url}/{page_id}?t={token}
     # (mount path is NOT appended automatically).
@@ -230,12 +231,15 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
     def _effective_forward_ttl(self) -> int:
         return max(60, int(self.config.forward_render_ttl_seconds or 0))
 
-    def _build_forward_page_url(self, page_id: str, token: str) -> str:
-        mount_path = self._forward_mount_path()
+    def _effective_forward_asset_ttl(self) -> int:
+        return max(0, int(self.config.forward_render_asset_ttl_seconds or 0))
+
+    def _forward_public_prefix(self) -> str:
         direct_base = (self.config.forward_render_base_url or "").strip().rstrip("/")
         if direct_base:
-            return f"{direct_base}/{page_id}?t={token}"
+            return direct_base
 
+        mount_path = self._forward_mount_path()
         base = str(get_config("global.base_url", "") or "").rstrip("/")
 
         if not base and self.http_server is not None:
@@ -248,7 +252,13 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         if not base:
             base = "http://127.0.0.1:9080"
 
-        return f"{base}{mount_path}/{page_id}?t={token}"
+        return f"{base}{mount_path}"
+
+    def _build_forward_page_url(self, page_id: str, token: str) -> str:
+        return f"{self._forward_public_prefix()}/{page_id}?t={token}"
+
+    def _build_forward_asset_url(self, asset_id: str, token: str) -> str:
+        return f"{self._forward_public_prefix()}/asset/{asset_id}?t={token}"
 
     def _ensure_forward_http_mount(self) -> None:
         if not self.config.forward_render_enabled:
@@ -306,6 +316,34 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             return HTMLResponse(content=page.html_content, status_code=200)
 
+        @app.get("/asset/{asset_id}")
+        async def _get_forward_asset(
+            asset_id: str,
+            t: str = Query(default="", min_length=1),
+        ) -> Response:
+            asset = msg_db().get_forward_asset(asset_id)
+            if asset is None:
+                raise HTTPException(status_code=404, detail="Forward asset not found")
+
+            if asset.get("token") != t:
+                raise HTTPException(status_code=404, detail="Forward asset not found")
+
+            expires_at = asset.get("expires_at")
+            now = int(_utc_now().timestamp())
+            if expires_at is not None and int(expires_at) <= now:
+                raise HTTPException(status_code=404, detail="Forward asset expired")
+
+            data = asset.get("data") or b""
+            mime = str(asset.get("mime") or "application/octet-stream")
+            headers = {
+                "Cache-Control": (
+                    "public, max-age=31536000, immutable"
+                    if expires_at is None
+                    else f"public, max-age={max(0, int(expires_at) - now)}"
+                )
+            }
+            return Response(content=data, media_type=mime, headers=headers)
+
         mount_path = self._forward_mount_path()
         self.http_server.mount(
             instance_id=f"{self.instance_id}/forward",
@@ -337,6 +375,11 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 if self.config.forward_render_persist_enabled:
                     msg_db().mark_forward_page_destroyed(page_id, int(now.timestamp()))
                 self._forward_pages.pop(page_id, None)
+            deleted_assets = msg_db().purge_expired_forward_assets(int(now.timestamp()))
+            if deleted_assets:
+                logger.debug(
+                    f"NapCat [{self.instance_id}] purged {deleted_assets} expired forward asset(s)"
+                )
 
     # ------------------------------------------------------------------
     # Receive
@@ -759,8 +802,14 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             f"</div>"
         )
 
-    async def _render_forward_image_asset_html(self, seg_data: dict) -> str:
-        """Download and embed image as data URI, or link if download fails/oversized."""
+    async def _render_forward_image_asset_html(
+        self,
+        seg_data: dict,
+        *,
+        page_id: str,
+        token: str,
+    ) -> str:
+        """Download image bytes and serve them from the bridge's own HTTP endpoint."""
         url = self._segment_url(seg_data)
         if not url:
             return html.escape("[图片]")
@@ -778,23 +827,35 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             safe_url = html.escape(url)
             return (
                 f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
-                f"<img class='fwd-image' alt='[图片过期/过大]' "
-                "src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 "
-                "width=%22100%22 height=%22100%22%3E%3Crect fill=%22%23ddd%22 width=%22100%22 "
-                "height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 fill=%22%23666%22 "
-                "dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2212%22%3E"
-                "[图片]%3C/text%3E%3C/svg%3E' "
-                "loading='lazy' referrerpolicy='no-referrer' />"
+                "<div class='fwd-image-placeholder'>图片未缓存 / 已过期 / 超过大小限制</div>"
                 f"</a>"
             )
 
         data, mime = result
-        data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
-        safe_data_url = html.escape(data_url)
+        asset_id = uuid.uuid4().hex
+        expires_at: int | None
+        asset_ttl = self._effective_forward_asset_ttl()
+        if asset_ttl > 0:
+            expires_at = int(_utc_now().timestamp()) + asset_ttl
+        else:
+            expires_at = None
+
+        msg_db().save_forward_asset(
+            asset_id=asset_id,
+            page_id=page_id,
+            instance_id=self.instance_id,
+            token=token,
+            mime=mime,
+            data=data,
+            created_at=int(_utc_now().timestamp()),
+            expires_at=expires_at,
+        )
+
+        asset_url = html.escape(self._build_forward_asset_url(asset_id, token))
         safe_url = html.escape(url)
         return (
             f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
-            f"<img class='fwd-image' src='{safe_data_url}' "
+            f"<img class='fwd-image' src='{asset_url}' "
             "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
             f"</a>"
         )
@@ -1143,6 +1204,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         nodes: list[dict],
         *,
         source_group_id: str,
+        page_id: str,
+        token: str,
         depth: int = 0,
     ) -> str:
         rendered: list[str] = []
@@ -1197,7 +1260,11 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     content_parts.append(html.escape(f"@{name}"))
                 elif seg_type == "image":
                     content_parts.append(
-                        await self._render_forward_image_asset_html(seg_data)
+                        await self._render_forward_image_asset_html(
+                            seg_data,
+                            page_id=page_id,
+                            token=token,
+                        )
                     )
                 elif seg_type == "record":
                     content_parts.append(
@@ -1226,6 +1293,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                             await self._render_forward_nested_html(
                                 nested_nodes,
                                 source_group_id=source_group_id,
+                                page_id=page_id,
+                                token=token,
                                 depth=depth + 1,
                             )
                         )
@@ -1241,9 +1310,13 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 elif seg_type == "mface":
                     # Multimedia face (emoji): try to render as image first, fall back to summary text
                     summary = str(seg_data.get("summary", "")).strip()
-                    image_html = await self._render_forward_image_asset_html(seg_data)
+                    image_html = await self._render_forward_image_asset_html(
+                        seg_data,
+                        page_id=page_id,
+                        token=token,
+                    )
                     # Check if image was successfully rendered (not the fallback placeholder)
-                    if "[图片]" not in image_html and "svg+xml" not in image_html:
+                    if "/asset/" in image_html:
                         content_parts.append(image_html)
                     elif summary:
                         plain_text_parts.append(summary)
@@ -1336,11 +1409,15 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         nodes: list[dict],
         *,
         source_group_id: str,
+        page_id: str,
+        token: str,
         depth: int,
     ) -> str:
         nested_body = await self._render_forward_nodes_html(
             nodes,
             source_group_id=source_group_id,
+            page_id=page_id,
+            token=token,
             depth=depth,
         )
         return (
@@ -1422,9 +1499,13 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             )
             return "[Forwarded messages]"
 
+        page_id = uuid.uuid4().hex
+        token = self._token_short()
         body_html = await self._render_forward_nodes_html(
             nodes,
             source_group_id=source_group_id,
+            page_id=page_id,
+            token=token,
         )
         created_at = _utc_now()
         created_at_ts = int(created_at.timestamp())
@@ -1447,8 +1528,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             expires_at=expires_at,
         )
 
-        page_id = uuid.uuid4().hex
-        token = self._token_short()
         self._forward_pages[page_id] = _ForwardPage(
             token=token,
             html_content=page_html,

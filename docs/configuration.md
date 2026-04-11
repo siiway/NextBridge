@@ -235,7 +235,9 @@ NextBridge uses SQLAlchemy for database operations, which supports multiple data
 :::
 
 ::: tip Database version file
-  NextBridge records the database schema version in `data/meta.yaml`. The current version is `0.3`. If the file is missing, the program treats the database as version `0.2` and runs the required Python migration modules at startup.
+  NextBridge records database migration state in `data/meta.yaml` using integer `db_version`.
+  If the file is missing, or `db_version` is missing/invalid, the program treats it as `0`.
+  The first migration starts from `1`, and startup applies Python migration modules until the latest target version.
 :::
 
 ::: warning Connection Pooling

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Introduced in v0.3: initial DB migration framework.
+# Changes: create `forward_pages` table and related indices.
+
 from sqlalchemy import Column, Index, Integer, MetaData, String, Table, Text
 
 

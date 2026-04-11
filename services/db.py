@@ -1,14 +1,17 @@
 import json
 import importlib
+import importlib.util
 import time
 import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import (
     Column,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     create_engine,
@@ -84,23 +87,31 @@ Index("idx_forward_pages_instance_id", ForwardPage.instance_id)
 Index("idx_forward_pages_expires_at", ForwardPage.expires_at)
 
 
+class ForwardAsset(_Base):
+    __tablename__ = "forward_assets"
+
+    asset_id = Column(String, primary_key=True)
+    page_id = Column(String, nullable=False)
+    instance_id = Column(String, nullable=False)
+    token = Column(String, nullable=False)
+    mime = Column(String, nullable=False)
+    data = Column(LargeBinary, nullable=False)
+    created_at = Column(Integer, nullable=False)
+    expires_at = Column(Integer, nullable=True)
+
+
+Index("idx_forward_assets_page_id", ForwardAsset.page_id)
+Index("idx_forward_assets_expires_at", ForwardAsset.expires_at)
+
+
 class MessageDB:
     """Handles mapping of message IDs between different platforms."""
 
-    _SCHEMA_VERSION = (0, 3)
+    _SCHEMA_VERSION = max((step.to_version for step in db_migrations.MIGRATIONS), default=0)
 
     @classmethod
-    def configure_schema_version_from_app_version(
-        cls, app_version: str
-    ) -> tuple[int, int]:
-        """Set target schema version from application version text (major.minor.patch...)."""
-        parsed = cls._schema_version_tuple(app_version)
-        if parsed == (0, 0):
-            raise ValueError(
-                f"Invalid application version for schema target: {app_version!r}"
-            )
-        cls._SCHEMA_VERSION = parsed
-        return parsed
+    def target_db_version(cls) -> int:
+        return int(cls._SCHEMA_VERSION)
 
     def __init__(self, engine: Engine | None = None):
         """Initialize the database handler.
@@ -179,22 +190,18 @@ class MessageDB:
         return Path(u.get_data_path()) / "meta.yaml"
 
     @staticmethod
-    def _schema_version_tuple(version: str) -> tuple[int, int]:
-        parts: list[int] = []
-        for piece in str(version).strip().split(".")[:2]:
-            try:
-                parts.append(int(piece))
-            except ValueError:
-                parts.append(0)
-        while len(parts) < 2:
-            parts.append(0)
-        return parts[0], parts[1]
+    def _coerce_db_version(raw: Any) -> int:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return 0
+        return value if value >= 0 else 0
 
     @classmethod
-    def _read_schema_version(cls) -> str:
+    def _read_schema_version(cls) -> int:
         path = cls._schema_version_path()
         if not path.is_file():
-            return "0.2"
+            return 0
 
         try:
             import yaml
@@ -203,21 +210,19 @@ class MessageDB:
                 data = yaml.safe_load(f) or {}
         except Exception as exc:
             logger.warning(f"Failed to read schema meta {path}: {exc}")
-            return "0.2"
+            return 0
 
-        version = data.get("version", "0.2")
-        version_str = str(version).strip()
-        return version_str or "0.2"
+        return cls._coerce_db_version(data.get("db_version", 0))
 
     @classmethod
-    def _write_schema_version(cls, version: str) -> None:
+    def _write_schema_version(cls, version: int) -> None:
         path = cls._schema_version_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             import yaml
 
             with open(path, "w", encoding="utf-8") as f:
-                yaml.safe_dump({"version": version}, f, sort_keys=False)
+                yaml.safe_dump({"db_version": int(version)}, f, sort_keys=False)
         except Exception as exc:
             logger.error(f"Failed to write schema meta {path}: {exc}")
 
@@ -231,18 +236,16 @@ class MessageDB:
     @classmethod
     def _run_migrations(cls, engine: Engine) -> None:
         current_version = cls._read_schema_version()
-        current_version_tuple = cls._schema_version_tuple(current_version)
-        target_version_tuple = tuple(cls._SCHEMA_VERSION)
+        target_version = int(cls._SCHEMA_VERSION)
         migration_flag = False
         logger.info(
-            f"Database schema migration check: current={current_version}, target={cls._SCHEMA_VERSION[0]}.{cls._SCHEMA_VERSION[1]}"
+            f"Database schema migration check: current={current_version}, target={target_version}"
         )
 
-        if current_version_tuple > target_version_tuple:
+        if current_version > target_version:
             logger.warning(
                 "Current database schema is newer than target; skipping downgrade "
-                f"(current={current_version_tuple[0]}.{current_version_tuple[1]}, "
-                f"target={target_version_tuple[0]}.{target_version_tuple[1]})"
+                f"(current={current_version}, target={target_version})"
             )
 
         for step in cls._load_migration_steps():
@@ -251,50 +254,62 @@ class MessageDB:
                 logger.debug(f"Skipping malformed migration step: {step!r}")
                 continue
 
-            if tuple(to_version) > target_version_tuple:
+            if int(to_version) > target_version:
                 logger.debug(
-                    f"Skipping migration {step.name}: target capped at {target_version_tuple[0]}.{target_version_tuple[1]}"
+                    f"Skipping migration {step.name}: target capped at {target_version}"
                 )
                 continue
 
-            if current_version_tuple >= tuple(to_version):
+            if current_version >= int(to_version):
                 logger.debug(
-                    f"Skipping migration {step.name}: already at {current_version_tuple[0]}.{current_version_tuple[1]}"
+                    f"Skipping migration {step.name}: already at {current_version}"
                 )
                 continue
 
-            module_path = getattr(step, "module_path", None)
-            if not module_path:
+            from_version = getattr(step, "from_version", None)
+            if from_version is None or current_version < int(from_version):
+                logger.debug(
+                    f"Skipping migration {step.name}: current={current_version} < from={from_version}"
+                )
+                continue
+
+            file_path = getattr(step, "file_path", None)
+            if not file_path:
                 raise FileNotFoundError(
                     f"Missing migration module for {getattr(step, 'name', 'unknown')}"
                 )
 
             logger.info(
-                f"Applying migration {step.from_version[0]}.{step.from_version[1]} -> {step.to_version[0]}.{step.to_version[1]} ({step.name})"
+                f"Applying migration {int(step.from_version)} -> {int(step.to_version)} ({step.name})"
             )
             logger.debug(
-                f"Migration module={module_path}, dialect={engine.dialect.name}"
+                f"Migration file={file_path}, dialect={engine.dialect.name}"
             )
 
-            migration_module = importlib.import_module(module_path)
+            migration_name = f"nextbridge_migration_{step.from_version}_{step.to_version}"
+            spec = importlib.util.spec_from_file_location(migration_name, file_path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Failed to load migration spec from {file_path}")
+            migration_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration_module)
             upgrade = getattr(migration_module, "upgrade", None)
             if not callable(upgrade):
-                raise AttributeError(f"Migration module {module_path} has no upgrade()")
+                raise AttributeError(f"Migration module {file_path} has no upgrade()")
 
             with engine.begin() as conn:
                 upgrade(conn, dialect_name=engine.dialect.name)
 
-            cls._write_schema_version(step.version_text())
+            cls._write_schema_version(int(step.to_version))
             logger.info(
-                f"Migration {step.name} applied successfully, schema={step.version_text()}"
+                f"Migration {step.name} applied successfully, db_version={int(step.to_version)}"
             )
 
             migration_flag = True
-            current_version_tuple = tuple(to_version)
+            current_version = int(to_version)
 
         if migration_flag:
             logger.info(
-                f"Database schema migration completed: schema={current_version_tuple[0]}.{current_version_tuple[1]}"
+                f"Database schema migration completed: db_version={current_version}"
             )
 
     def _session(self) -> Session:
@@ -588,6 +603,35 @@ class MessageDB:
         except Exception as e:
             logger.error(f"Failed to save forward page: {e}")
 
+    def save_forward_asset(
+        self,
+        asset_id: str,
+        page_id: str,
+        instance_id: str,
+        token: str,
+        mime: str,
+        data: bytes,
+        created_at: int,
+        expires_at: int | None,
+    ) -> None:
+        try:
+            with self._session() as s:
+                s.merge(
+                    ForwardAsset(
+                        asset_id=asset_id,
+                        page_id=page_id,
+                        instance_id=instance_id,
+                        token=token,
+                        mime=mime,
+                        data=data,
+                        created_at=created_at,
+                        expires_at=expires_at,
+                    )
+                )
+                s.commit()
+        except Exception as e:
+            logger.error(f"Failed to save forward asset: {e}")
+
     def get_forward_page(self, page_id: str) -> dict | None:
         with self._session() as s:
             row = s.get(ForwardPage, page_id)
@@ -601,6 +645,22 @@ class MessageDB:
                 "created_at": row.created_at,
                 "expires_at": row.expires_at,
                 "destroyed_at": row.destroyed_at,
+            }
+
+    def get_forward_asset(self, asset_id: str) -> dict | None:
+        with self._session() as s:
+            row = s.get(ForwardAsset, asset_id)
+            if row is None:
+                return None
+            return {
+                "asset_id": row.asset_id,
+                "page_id": row.page_id,
+                "instance_id": row.instance_id,
+                "token": row.token,
+                "mime": row.mime,
+                "data": row.data,
+                "created_at": row.created_at,
+                "expires_at": row.expires_at,
             }
 
     def mark_forward_page_destroyed(
@@ -618,6 +678,18 @@ class MessageDB:
                 )
                 s.commit()
         return True
+
+    def purge_expired_forward_assets(self, now: int | None = None) -> int:
+        cutoff = int(now or time.time())
+        with self._session() as s:
+            result = s.execute(
+                delete(ForwardAsset).where(
+                    ForwardAsset.expires_at.is_not(None),
+                    ForwardAsset.expires_at <= cutoff,
+                )
+            )
+            s.commit()
+            return int(getattr(result, "rowcount", 0) or 0)
 
     def get_bridge_id(self, instance_id: str, platform_msg_id: str) -> str | None:
         """Find the bridge ID for a given platform-specific message ID."""
@@ -693,6 +765,6 @@ def init_db(engine: Engine | None = None) -> None:
     _msg_db_instance = MessageDB(engine)
 
 
-def configure_db_schema_from_app_version(app_version: str) -> tuple[int, int]:
-    """Configure the DB migration target schema from app version text."""
-    return MessageDB.configure_schema_version_from_app_version(app_version)
+def db_target_version() -> int:
+    """Return the target integer database version resolved from migration registry."""
+    return MessageDB.target_db_version()

@@ -27,6 +27,7 @@ Add under `napcat.<instance_id>` in `config.json`:
 | `forward_render_mount_path` | No | `"/napcat-forward"` | Mount path (on the shared HTTP server) used to serve merged-forward pages. |
 | `forward_render_persist_enabled` | No | `false` | Enable persistent storage for merged-forward chat records. When enabled, page content is also written to the database so links remain available after restarts. |
 | `forward_render_base_url` | No | `""` | Preferred public URL prefix for merged-forward links. When set, links are generated as `${forward_render_base_url}/{page_id}?t=...` and do **not** auto-append `forward_render_mount_path`. Useful for path-based reverse proxy setups. |
+| `forward_render_asset_ttl_seconds` | No | `86400` | TTL in seconds for merged-forward image assets served from the bridge's own HTTP endpoint. Set to `0` for infinite validity. |
 | `forward_render_cqface_gif` | No | `true` | Rendering strategy for QQ `face` segments inside merged-forward HTML: `false` uses `cqface` unicode mapping; `true`/unset uses built-in default GIF hosts; string uses a custom GIF host base URL. |
 | `proxy` | No | — | Proxy URL for WebSocket connection and media downloading (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 

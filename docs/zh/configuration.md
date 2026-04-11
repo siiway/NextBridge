@@ -235,7 +235,9 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 :::
 
 ::: tip 数据库版本文件
-  NextBridge 会在 `data/meta.yaml` 中记录数据库结构版本。当前版本为 `0.3`。如果该文件不存在，程序会把版本视为 `0.2`，并在启动时按版本差异自动执行 Python 迁移模块。
+  NextBridge 使用 `data/meta.yaml` 中的整数 `db_version` 记录数据库迁移状态。
+  如果文件不存在，或 `db_version` 缺失/非法，程序会按 `0` 处理。
+  第一个迁移从 `1` 开始，启动时会按顺序执行 Python 迁移模块直到最新目标版本。
 :::
 
 ::: warning 连接池

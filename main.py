@@ -14,7 +14,7 @@ import services.util as u
 import services.config_io as config_io
 from services.config_schema import GlobalConfig
 from services.bridge import bridge
-from services.db import configure_db_schema_from_app_version, init_db
+from services.db import db_target_version, init_db
 from services.http_server import HttpServerManager
 
 logger = log.get_logger()
@@ -132,10 +132,9 @@ async def main():
     bridge.command_prefix = validated_global.command_prefix
 
     try:
-        schema_target = configure_db_schema_from_app_version(version)
         init_db()
         logger.info(
-            f"Database initialized at startup with schema target {schema_target[0]}.{schema_target[1]}"
+            f"Database initialized at startup with db_version target {db_target_version()}"
         )
     except Exception:
         logger.opt(exception=True).critical(
