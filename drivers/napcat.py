@@ -19,7 +19,6 @@ import html
 import json
 import math
 import re
-import secrets
 import uuid
 from dataclasses import dataclass
 from functools import lru_cache
@@ -29,7 +28,7 @@ from typing import Any, Literal
 
 import websockets
 import websockets.exceptions
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 
 import services.logger as log
@@ -50,12 +49,16 @@ class NapCatConfig(_DriverConfig):
     cqface_mode: Literal["gif", "emoji"] = "gif"
     stream_threshold: int = 0
     forward_render_enabled: bool = False
-    forward_render_ttl_seconds: int = 86400
+    forward_render_ttl_seconds: int = 180 * 24 * 60 * 60
     forward_render_mount_path: str = "/napcat-forward"
     forward_render_persist_enabled: bool = False
-    forward_render_asset_ttl_seconds: int = 86400
+    # Merged-forward image rendering method:
+    # - "url": store bytes in DB and serve via bridge URL (default)
+    # - "base64": embed data URI directly in HTML
+    forward_render_image_method: Literal["url", "base64"] = "url"
+    forward_render_asset_ttl_seconds: int = 14 * 24 * 60 * 60
     # Preferred public URL prefix for forward links. When set, forward links are
-    # generated as: {forward_render_base_url}/{page_id}?t={token}
+    # generated as: {forward_render_base_url}/{page_id}
     # (mount path is NOT appended automatically).
     forward_render_base_url: str = ""
     # Merged-forward face rendering strategy:
@@ -100,7 +103,6 @@ def _get_forward_page_template() -> Template:
 
 @dataclass(slots=True)
 class _ForwardPage:
-    token: str
     html_content: str
     created_at: datetime.datetime
     expires_at: datetime.datetime
@@ -228,8 +230,76 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             return f"/napcat-forward/{self.instance_id}"
         return configured
 
-    def _effective_forward_ttl(self) -> int:
-        return max(60, int(self.config.forward_render_ttl_seconds or 0))
+    def _coerce_forward_ttl_seconds(self, raw: Any) -> int | None:
+        try:
+            ttl = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return max(60, ttl)
+
+    def _resolve_rule_forward_ttl(self, source_group_id: str) -> int | None:
+        if not source_group_id:
+            return None
+
+        rules = getattr(self.bridge, "_rules", [])
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+
+            if rule.get("type") == "connect":
+                channels = rule.get("channels") or {}
+                src = channels.get(self.instance_id)
+                if not isinstance(src, dict):
+                    continue
+                if str(src.get("group_id", "")) != str(source_group_id):
+                    continue
+
+                src_msg = src.get("msg")
+                if isinstance(src_msg, dict):
+                    ttl = self._coerce_forward_ttl_seconds(
+                        src_msg.get("forward_render_ttl_seconds")
+                    )
+                    if ttl is not None:
+                        return ttl
+
+                rule_msg = rule.get("msg")
+                if isinstance(rule_msg, dict):
+                    ttl = self._coerce_forward_ttl_seconds(
+                        rule_msg.get("forward_render_ttl_seconds")
+                    )
+                    if ttl is not None:
+                        return ttl
+                continue
+
+            from_cfg = rule.get("from") or {}
+            src = from_cfg.get(self.instance_id)
+            if not isinstance(src, dict):
+                continue
+            if str(src.get("group_id", "")) != str(source_group_id):
+                continue
+
+            src_msg = src.get("msg")
+            if isinstance(src_msg, dict):
+                ttl = self._coerce_forward_ttl_seconds(
+                    src_msg.get("forward_render_ttl_seconds")
+                )
+                if ttl is not None:
+                    return ttl
+
+            rule_msg = rule.get("msg")
+            if isinstance(rule_msg, dict):
+                ttl = self._coerce_forward_ttl_seconds(
+                    rule_msg.get("forward_render_ttl_seconds")
+                )
+                if ttl is not None:
+                    return ttl
+
+        return None
+
+    def _effective_forward_ttl(self, source_group_id: str = "") -> int:
+        base_ttl = max(60, int(self.config.forward_render_ttl_seconds or 0))
+        override_ttl = self._resolve_rule_forward_ttl(source_group_id)
+        return override_ttl if override_ttl is not None else base_ttl
 
     def _effective_forward_asset_ttl(self) -> int:
         return max(0, int(self.config.forward_render_asset_ttl_seconds or 0))
@@ -254,11 +324,11 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         return f"{base}{mount_path}"
 
-    def _build_forward_page_url(self, page_id: str, token: str) -> str:
-        return f"{self._forward_public_prefix()}/{page_id}?t={token}"
+    def _build_forward_page_url(self, page_id: str) -> str:
+        return f"{self._forward_public_prefix()}/{page_id}"
 
-    def _build_forward_asset_url(self, asset_id: str, token: str) -> str:
-        return f"{self._forward_public_prefix()}/asset/{asset_id}?t={token}"
+    def _build_forward_asset_url(self, asset_id: str) -> str:
+        return f"{self._forward_public_prefix()}/asset/{asset_id}"
 
     def _ensure_forward_http_mount(self) -> None:
         if not self.config.forward_render_enabled:
@@ -274,16 +344,12 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         app = FastAPI()
 
         @app.get("/{page_id}", response_class=HTMLResponse)
-        async def _get_forward_page(
-            page_id: str,
-            t: str = Query(default="", min_length=1),
-        ) -> HTMLResponse:
+        async def _get_forward_page(page_id: str) -> HTMLResponse:
             page = self._forward_pages.get(page_id)
             if page is None and self.config.forward_render_persist_enabled:
                 stored = msg_db().get_forward_page(page_id)
-                if stored is not None and stored.get("token") == t:
+                if stored is not None:
                     page = _ForwardPage(
-                        token=str(stored.get("token", "")),
                         html_content=str(stored.get("html_content", "")),
                         created_at=datetime.datetime.fromtimestamp(
                             int(stored.get("created_at", 0)), datetime.UTC
@@ -304,9 +370,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             if page is None:
                 raise HTTPException(status_code=404, detail="Forward page not found")
 
-            if page.token != t:
-                raise HTTPException(status_code=404, detail="Forward page not found")
-
             if page.expires_at <= _utc_now() and page.destroyed_at is None:
                 page.destroyed_at = _utc_now()
                 if self.config.forward_render_persist_enabled:
@@ -317,15 +380,9 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             return HTMLResponse(content=page.html_content, status_code=200)
 
         @app.get("/asset/{asset_id}")
-        async def _get_forward_asset(
-            asset_id: str,
-            t: str = Query(default="", min_length=1),
-        ) -> Response:
+        async def _get_forward_asset(asset_id: str) -> Response:
             asset = msg_db().get_forward_asset(asset_id)
             if asset is None:
-                raise HTTPException(status_code=404, detail="Forward asset not found")
-
-            if asset.get("token") != t:
                 raise HTTPException(status_code=404, detail="Forward asset not found")
 
             expires_at = asset.get("expires_at")
@@ -662,10 +719,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         return text, attachments, reply_id, mentions
 
-    def _token_short(self, length: int = 8) -> str:
-        alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-        return "".join(secrets.choice(alphabet) for _ in range(length))
-
     def _normalize_cqface_gif_host(self, host: str) -> str:
         normalized = (host or "").strip()
         if not normalized:
@@ -807,9 +860,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         seg_data: dict,
         *,
         page_id: str,
-        token: str,
     ) -> str:
-        """Download image bytes and serve them from the bridge's own HTTP endpoint."""
+        """Download image bytes and render via configured method (url/base64)."""
         url = self._segment_url(seg_data)
         if not url:
             return html.escape("[图片]")
@@ -832,7 +884,19 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             )
 
         data, mime = result
-        asset_id = uuid.uuid4().hex
+        safe_url = html.escape(url)
+
+        if self.config.forward_render_image_method == "base64":
+            data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+            safe_data_url = html.escape(data_url)
+            return (
+                f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+                f"<img class='fwd-image' src='{safe_data_url}' "
+                "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
+                f"</a>"
+            )
+
+        asset_id = str(uuid.uuid4())
         expires_at: int | None
         asset_ttl = self._effective_forward_asset_ttl()
         if asset_ttl > 0:
@@ -844,15 +908,13 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             asset_id=asset_id,
             page_id=page_id,
             instance_id=self.instance_id,
-            token=token,
             mime=mime,
             data=data,
             created_at=int(_utc_now().timestamp()),
             expires_at=expires_at,
         )
 
-        asset_url = html.escape(self._build_forward_asset_url(asset_id, token))
-        safe_url = html.escape(url)
+        asset_url = html.escape(self._build_forward_asset_url(asset_id))
         return (
             f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
             f"<img class='fwd-image' src='{asset_url}' "
@@ -1205,7 +1267,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         *,
         source_group_id: str,
         page_id: str,
-        token: str,
         depth: int = 0,
     ) -> str:
         rendered: list[str] = []
@@ -1263,7 +1324,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                         await self._render_forward_image_asset_html(
                             seg_data,
                             page_id=page_id,
-                            token=token,
                         )
                     )
                 elif seg_type == "record":
@@ -1294,7 +1354,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                                 nested_nodes,
                                 source_group_id=source_group_id,
                                 page_id=page_id,
-                                token=token,
                                 depth=depth + 1,
                             )
                         )
@@ -1313,7 +1372,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     image_html = await self._render_forward_image_asset_html(
                         seg_data,
                         page_id=page_id,
-                        token=token,
                     )
                     # Check if image was successfully rendered (not the fallback placeholder)
                     if "/asset/" in image_html:
@@ -1410,14 +1468,12 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         *,
         source_group_id: str,
         page_id: str,
-        token: str,
         depth: int,
     ) -> str:
         nested_body = await self._render_forward_nodes_html(
             nodes,
             source_group_id=source_group_id,
             page_id=page_id,
-            token=token,
             depth=depth,
         )
         return (
@@ -1499,17 +1555,15 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             )
             return "[Forwarded messages]"
 
-        page_id = uuid.uuid4().hex
-        token = self._token_short()
+        page_id = str(uuid.uuid4())
         body_html = await self._render_forward_nodes_html(
             nodes,
             source_group_id=source_group_id,
             page_id=page_id,
-            token=token,
         )
         created_at = _utc_now()
         created_at_ts = int(created_at.timestamp())
-        ttl = self._effective_forward_ttl()
+        ttl = self._effective_forward_ttl(source_group_id)
         expires_at = created_at + datetime.timedelta(seconds=ttl)
         expires_at_ts = int(expires_at.timestamp())
         meta_primary_text = (
@@ -1529,7 +1583,6 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         )
 
         self._forward_pages[page_id] = _ForwardPage(
-            token=token,
             html_content=page_html,
             created_at=created_at,
             expires_at=expires_at,
@@ -1538,13 +1591,12 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             msg_db().save_forward_page(
                 page_id=page_id,
                 instance_id=self.instance_id,
-                token=token,
                 html_content=page_html,
                 created_at=created_at_ts,
                 expires_at=expires_at_ts,
             )
 
-        link = self._build_forward_page_url(page_id, token)
+        link = self._build_forward_page_url(page_id)
         return f"[QQ Combined Forward / 合并转发] {link}"
 
     # ------------------------------------------------------------------

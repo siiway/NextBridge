@@ -147,6 +147,7 @@ Controls how the message is formatted when sent to a target.
 | `msg_format` | string | `"{msg}"` | Template string for the message text |
 | `webhook_title` | string | — | Discord webhook display name (Discord only) |
 | `webhook_avatar` | string | — | Discord webhook avatar URL (Discord only) |
+| `forward_render_ttl_seconds` | integer | — | Optional per-rule override for NapCat merged-forward page TTL (seconds, minimum 60). Effective only when the message source is NapCat and merged-forward rendering is enabled. |
 
 ### msg_format template variables
 

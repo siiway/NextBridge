@@ -147,6 +147,7 @@ uv run main.py convert data/rules.yaml data/rules.toml
 | `msg_format` | string | `"{msg}"` | 消息文本的模板字符串 |
 | `webhook_title` | string | — | Discord Webhook 显示名称（仅 Discord 生效） |
 | `webhook_avatar` | string | — | Discord Webhook 头像 URL（仅 Discord 生效） |
+| `forward_render_ttl_seconds` | integer | — | 可选：按规则覆盖 NapCat 合并转发页面有效期（秒，最小 60）。仅在消息来源为 NapCat 且启用了合并转发渲染时生效。 |
 
 ### msg_format 模板变量
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-# Introduced in v0.3: follow-up migration in the same release line.
-# Changes: create `forward_assets` table and related indices.
+# v0.3: create `forward_assets` table and related indices.
 
 from sqlalchemy import Column, Index, Integer, LargeBinary, MetaData, String, Table
 

@@ -76,7 +76,6 @@ class ForwardPage(_Base):
 
     page_id = Column(String, primary_key=True)
     instance_id = Column(String, nullable=False)
-    token = Column(String, nullable=False)
     html_content = Column(Text, nullable=False)
     created_at = Column(Integer, nullable=False)
     expires_at = Column(Integer, nullable=False)
@@ -93,7 +92,6 @@ class ForwardAsset(_Base):
     asset_id = Column(String, primary_key=True)
     page_id = Column(String, nullable=False)
     instance_id = Column(String, nullable=False)
-    token = Column(String, nullable=False)
     mime = Column(String, nullable=False)
     data = Column(LargeBinary, nullable=False)
     created_at = Column(Integer, nullable=False)
@@ -582,7 +580,6 @@ class MessageDB:
         self,
         page_id: str,
         instance_id: str,
-        token: str,
         html_content: str,
         created_at: int,
         expires_at: int,
@@ -594,7 +591,6 @@ class MessageDB:
                     ForwardPage(
                         page_id=page_id,
                         instance_id=instance_id,
-                        token=token,
                         html_content=html_content,
                         created_at=created_at,
                         expires_at=expires_at,
@@ -610,7 +606,6 @@ class MessageDB:
         asset_id: str,
         page_id: str,
         instance_id: str,
-        token: str,
         mime: str,
         data: bytes,
         created_at: int,
@@ -623,7 +618,6 @@ class MessageDB:
                         asset_id=asset_id,
                         page_id=page_id,
                         instance_id=instance_id,
-                        token=token,
                         mime=mime,
                         data=data,
                         created_at=created_at,
@@ -642,7 +636,6 @@ class MessageDB:
             return {
                 "page_id": row.page_id,
                 "instance_id": row.instance_id,
-                "token": row.token,
                 "html_content": row.html_content,
                 "created_at": row.created_at,
                 "expires_at": row.expires_at,
@@ -658,7 +651,6 @@ class MessageDB:
                 "asset_id": row.asset_id,
                 "page_id": row.page_id,
                 "instance_id": row.instance_id,
-                "token": row.token,
                 "mime": row.mime,
                 "data": row.data,
                 "created_at": row.created_at,

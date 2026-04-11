@@ -23,11 +23,12 @@ Add under `napcat.<instance_id>` in `config.json`:
 | `file_send_mode` | No | `"stream"` | How to upload files and videos to QQ. `"stream"` uses chunked `upload_file_stream` (recommended for large files); `"base64"` encodes the whole payload and passes it directly to `upload_group_file`. |
 | `stream_threshold` | No | `0` (disabled) | If greater than 0, automatically switches to `"stream"` mode when a file or video exceeds this many bytes, regardless of `file_send_mode`. |
 | `forward_render_enabled` | No | `false` | Enable merged-forward rendering. When enabled, QQ merged-forward content is rendered to a temporary HTML page and forwarded as a link. |
-| `forward_render_ttl_seconds` | No | `86400` | TTL in seconds for merged-forward HTML pages. Pages stay on the same screen and switch to an expired state when the timer runs out. Minimum is 60 seconds. |
+| `forward_render_ttl_seconds` | No | `15552000` (180 days) | TTL in seconds for merged-forward HTML pages. Pages stay on the same screen and switch to an expired state when the timer runs out. Minimum is 60 seconds. |
 | `forward_render_mount_path` | No | `"/napcat-forward"` | Mount path (on the shared HTTP server) used to serve merged-forward pages. |
 | `forward_render_persist_enabled` | No | `false` | Enable persistent storage for merged-forward chat records. When enabled, page content is also written to the database so links remain available after restarts. |
-| `forward_render_base_url` | No | `""` | Preferred public URL prefix for merged-forward links. When set, links are generated as `${forward_render_base_url}/{page_id}?t=...` and do **not** auto-append `forward_render_mount_path`. Useful for path-based reverse proxy setups. |
-| `forward_render_asset_ttl_seconds` | No | `86400` | TTL in seconds for merged-forward image assets served from the bridge's own HTTP endpoint. Set to `0` for infinite validity. |
+| `forward_render_image_method` | No | `"url"` | Image rendering method for merged-forward HTML. `"url"` stores image bytes in DB and serves via bridge asset URLs; `"base64"` embeds image data URIs directly into the page. |
+| `forward_render_base_url` | No | `""` | Preferred public URL prefix for merged-forward links. When set, links are generated as `${forward_render_base_url}/{page_id}` and do **not** auto-append `forward_render_mount_path`. Useful for path-based reverse proxy setups. |
+| `forward_render_asset_ttl_seconds` | No | `1209600` (14 days) | TTL in seconds for merged-forward image assets served from the bridge's own HTTP endpoint. Set to `0` for infinite validity. |
 | `forward_render_cqface_gif` | No | `true` | Rendering strategy for QQ `face` segments inside merged-forward HTML: `false` uses `cqface` unicode mapping; `true`/unset uses built-in default GIF hosts; string uses a custom GIF host base URL. |
 | `proxy` | No | — | Proxy URL for WebSocket connection and media downloading (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
 
@@ -74,15 +75,19 @@ Incoming messages are parsed from OneBot 11 segment arrays:
 |---|---|
 | `text` | Becomes message text |
 | `at` | Converted to `@name` text |
-| `image` | Forwarded as `voice` attachment; in merged-forward: downloaded and embedded as data URI (unless oversized); if unavailable, displays a placeholder with a link to the original |
+| `image` | Forwarded as `image` attachment; in merged-forward: image rendering follows `forward_render_image_method` (`url` or `base64`) |
 | `record` | Forwarded as `voice` attachment; in merged-forward: embedded as playable audio, with AMR transcoded to OGG when possible |
 | `video` | Forwarded as `video` attachment; in merged-forward: embedded with `<video controls>` |
 | `file` | Forwarded as `file` attachment; in merged-forward: shows metadata (name/size/file_id) and attempts to resolve a downloadable URL |
-| `forward` (merged forward) | Calls `get_forward_msg`, renders a temporary HTML page, and forwards the link; nested forward nodes are rendered recursively; voice nodes are embedded as playable audio; image/mface nodes are downloaded and embedded; file nodes show metadata |
+| `forward` (merged forward) | Calls `get_forward_msg`, renders a temporary HTML page, and forwards the link; nested forward nodes are rendered recursively; voice nodes are embedded as playable audio; image/mface rendering follows `forward_render_image_method`; file nodes show metadata |
 | Others (face...) | Silently skipped; reply segments are shown as a generic reply marker |
 
 ::: info Merged-forward access control
-Generated merged-forward links include a short token (`t` query parameter), and each page has its own TTL. When the timer runs out, the page stays on screen and switches to an expired state. If persistent storage is enabled, the page can still be opened again after a restart.
+Merged-forward links are plain paths and each page has its own TTL. When the timer runs out, the page stays on screen and switches to an expired state. If persistent storage is enabled, the page can still be opened again after a restart.
+:::
+
+::: info Rule-level forward TTL override
+You can override merged-forward page TTL per rule with `msg.forward_render_ttl_seconds` (minimum 60). In `connect` rules, channel-level `channels.<instance>.msg.forward_render_ttl_seconds` takes precedence over rule-level `msg.forward_render_ttl_seconds`.
 :::
 
 ::: info Merged-forward face GIF hosts
