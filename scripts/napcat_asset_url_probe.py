@@ -56,7 +56,9 @@ class NapCatClient:
             "open_timeout": 10,
         }
 
-    async def call(self, action: str, params: dict[str, Any], timeout: float) -> dict[str, Any] | None:
+    async def call(
+        self, action: str, params: dict[str, Any], timeout: float
+    ) -> dict[str, Any] | None:
         echo = str(uuid.uuid4())
         payload = {"action": action, "params": params, "echo": echo}
 
@@ -164,7 +166,9 @@ def collect_assets(payload: dict[str, Any], mode: str) -> list[AssetEntry]:
     return list(dedup.values())
 
 
-async def probe_url(session: aiohttp.ClientSession, url: str, timeout: float) -> dict[str, Any]:
+async def probe_url(
+    session: aiohttp.ClientSession, url: str, timeout: float
+) -> dict[str, Any]:
     expired_errno = "-5503007"
 
     def _looks_expired_text(text: str) -> bool:
@@ -173,7 +177,7 @@ async def probe_url(session: aiohttp.ClientSession, url: str, timeout: float) ->
             "download url has expired" in t
             or "download_url_has_expired" in t
             or '"retcode":-5503007' in t
-            or "\"retcode\": -5503007" in t
+            or '"retcode": -5503007' in t
         )
 
     def _header_errno(headers: Any) -> str:
@@ -263,8 +267,10 @@ def print_assets(label: str, assets: list[AssetEntry]) -> None:
 
 
 def _fmt_local_time(ts: int) -> str:
-    return datetime.datetime.fromtimestamp(ts).astimezone().strftime(
-        "%Y-%m-%d %H:%M:%S %z"
+    return (
+        datetime.datetime.fromtimestamp(ts)
+        .astimezone()
+        .strftime("%Y-%m-%d %H:%M:%S %z")
     )
 
 
@@ -314,18 +320,44 @@ async def _notify_qq_report(
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Probe NapCat asset URL expiry behavior")
-    parser.add_argument("--ws-url", required=True, help="NapCat websocket URL, e.g. ws://127.0.0.1:3001")
+    parser = argparse.ArgumentParser(
+        description="Probe NapCat asset URL expiry behavior"
+    )
+    parser.add_argument(
+        "--ws-url", required=True, help="NapCat websocket URL, e.g. ws://127.0.0.1:3001"
+    )
     parser.add_argument("--ws-token", default="", help="NapCat access token")
     parser.add_argument("--mode", choices=["forward", "msg"], default="forward")
-    parser.add_argument("--id", required=True, help="Forward ID (mode=forward) or message_id (mode=msg)")
-    parser.add_argument("--interval", type=float, default=60.0, help="Seconds between probe rounds")
-    parser.add_argument("--max-rounds", type=int, default=30, help="Maximum probe rounds")
-    parser.add_argument("--action-timeout", type=float, default=30.0, help="Timeout for NapCat actions")
-    parser.add_argument("--probe-timeout", type=float, default=12.0, help="Timeout for URL probe requests")
+    parser.add_argument(
+        "--id", required=True, help="Forward ID (mode=forward) or message_id (mode=msg)"
+    )
+    parser.add_argument(
+        "--interval", type=float, default=60.0, help="Seconds between probe rounds"
+    )
+    parser.add_argument(
+        "--max-rounds", type=int, default=30, help="Maximum probe rounds"
+    )
+    parser.add_argument(
+        "--action-timeout", type=float, default=30.0, help="Timeout for NapCat actions"
+    )
+    parser.add_argument(
+        "--probe-timeout",
+        type=float,
+        default=12.0,
+        help="Timeout for URL probe requests",
+    )
     parser.add_argument("--out", default="", help="Optional JSON report path")
-    parser.add_argument("--notify-qq", default="", help="Optional QQ number to receive final report via send_private_msg")
-    parser.add_argument("--notify-timeout", type=float, default=20.0, help="Timeout for QQ notification action")
+    parser.add_argument(
+        "--notify-qq",
+        default="",
+        help="Optional QQ number to receive final report via send_private_msg",
+    )
+    parser.add_argument(
+        "--notify-timeout",
+        type=float,
+        default=20.0,
+        help="Timeout for QQ notification action",
+    )
     args = parser.parse_args()
 
     report: dict[str, Any] = {
@@ -346,9 +378,13 @@ async def main() -> int:
         report["ended_at"] = int(time.time())
         report["duration_seconds"] = report["ended_at"] - report["started_at"]
         if args.out:
-            Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            Path(args.out).write_text(
+                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         if args.notify_qq:
-            await _notify_qq_report(nc, args.notify_qq, args.notify_timeout, report, args.out)
+            await _notify_qq_report(
+                nc, args.notify_qq, args.notify_timeout, report, args.out
+            )
         return 2
 
     first_payload = first.get("data") or {}
@@ -359,9 +395,13 @@ async def main() -> int:
         report["ended_at"] = int(time.time())
         report["duration_seconds"] = report["ended_at"] - report["started_at"]
         if args.out:
-            Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            Path(args.out).write_text(
+                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         if args.notify_qq:
-            await _notify_qq_report(nc, args.notify_qq, args.notify_timeout, report, args.out)
+            await _notify_qq_report(
+                nc, args.notify_qq, args.notify_timeout, report, args.out
+            )
         return 3
 
     print_assets("baseline", baseline)
@@ -390,14 +430,18 @@ async def main() -> int:
                 }
                 round_info["checks"].append(check_row)
                 ok = bool(status.get("ok"))
-                print(f"  - {key}: ok={ok} reason={status.get('reason')} status={status.get('status')}")
+                print(
+                    f"  - {key}: ok={ok} reason={status.get('reason')} status={status.get('status')}"
+                )
                 if not ok:
                     expired_keys.append(key)
 
             round_info["expired_keys"] = expired_keys
 
             if expired_keys:
-                print(f"[round {round_no}] detected expired/unavailable keys: {expired_keys}")
+                print(
+                    f"[round {round_no}] detected expired/unavailable keys: {expired_keys}"
+                )
                 fresh = await nc.call(action, params, timeout=args.action_timeout)
                 if not fresh or fresh.get("status") != "ok":
                     print(f"[round {round_no}] refetch failed: {fresh}")
@@ -468,7 +512,9 @@ async def main() -> int:
         print(f"[report] wrote: {out_path}")
 
     if args.notify_qq:
-        await _notify_qq_report(nc, args.notify_qq, args.notify_timeout, report, args.out)
+        await _notify_qq_report(
+            nc, args.notify_qq, args.notify_timeout, report, args.out
+        )
 
     return 0
 

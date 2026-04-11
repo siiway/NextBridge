@@ -107,7 +107,9 @@ Index("idx_forward_assets_expires_at", ForwardAsset.expires_at)
 class MessageDB:
     """Handles mapping of message IDs between different platforms."""
 
-    _SCHEMA_VERSION = max((step.to_version for step in db_migrations.MIGRATIONS), default=0)
+    _SCHEMA_VERSION = max(
+        (step.to_version for step in db_migrations.MIGRATIONS), default=0
+    )
 
     @classmethod
     def target_db_version(cls) -> int:
@@ -282,11 +284,11 @@ class MessageDB:
             logger.info(
                 f"Applying migration {int(step.from_version)} -> {int(step.to_version)} ({step.name})"
             )
-            logger.debug(
-                f"Migration file={file_path}, dialect={engine.dialect.name}"
-            )
+            logger.debug(f"Migration file={file_path}, dialect={engine.dialect.name}")
 
-            migration_name = f"nextbridge_migration_{step.from_version}_{step.to_version}"
+            migration_name = (
+                f"nextbridge_migration_{step.from_version}_{step.to_version}"
+            )
             spec = importlib.util.spec_from_file_location(migration_name, file_path)
             if spec is None or spec.loader is None:
                 raise ImportError(f"Failed to load migration spec from {file_path}")
