@@ -913,9 +913,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             )
 
         if self.config.forward_render_image_method == "base64":
-            data_url = (
-                f"data:{normalized_mime};base64,{base64.b64encode(data).decode('ascii')}"
-            )
+            data_url = f"data:{normalized_mime};base64,{base64.b64encode(data).decode('ascii')}"
             safe_data_url = html.escape(data_url)
             return (
                 f"<img class='fwd-image fwd-image-open' src='{safe_data_url}' "
