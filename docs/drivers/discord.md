@@ -22,7 +22,7 @@ Add under `discord.<instance_id>` in `config.json`:
 | `send_method` | No | `webhook` | `"webhook"` or `"bot"` |
 | `max_file_size` | No | `8388608` (8 MB) | Maximum bytes per attachment when sending |
 | `cqface_webhook_fallback` | No | `unicode` | Controls webhook fallback when a message contains `:cqface<id>:` tokens. Set to `"bot"` to send via the bot instead of the webhook, or `"unicode"` to keep using the webhook and replace tokens with the Unicode map in `db/cqface-map.yaml`. |
-| `send_replies_as_bot` | No | `true` | When `true`, reply messages are sent via the bot (if connected) even when `send_method` is `"webhook"`, because Discord webhook mode does not support specifying a reply target message. Requires `bot_token` to take effect. |
+| `send_replies_as_bot` | No | `true` | When `true`, reply messages are sent via the bot (if connected) even when `send_method` is `"webhook"`, because Discord webhook mode does not support specifying a reply target message. Requires `bot_token` to take effect. For NapCat/QQ sources, Discord reply ping (`@replied user`) is enabled only when the source message explicitly `@` mentions `self_id` (the QQ bot account). |
 | `allow_mentions_everyone` | No | `false` | Controls whether outgoing messages can trigger `@everyone` / `@here` mentions on Discord. |
 | `allow_mentions_users` | No | `true` | Controls whether outgoing messages can mention users (`<@id>`). |
 | `allow_mentions_roles` | No | `false` | Controls whether outgoing messages can mention roles (`<@&id>`). |

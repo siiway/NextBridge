@@ -82,6 +82,10 @@ Incoming messages are parsed from OneBot 11 segment arrays:
 | `forward` (merged forward) | Calls `get_forward_msg`, renders a temporary HTML page, and forwards the link; nested forward nodes are rendered recursively; voice nodes are embedded as playable audio; image/mface rendering follows `forward_render_image_method`; file nodes show metadata |
 | Others (face...) | Silently skipped; reply segments are shown as a generic reply marker |
 
+For merged-forward images, clicking the image now opens the bridge-rendered resource (`/asset/...`) in `url` mode, instead of jumping to the original QQ CDN URL. In `base64` mode, the page opens the image via a temporary blob URL without adding a duplicate base64 `href` payload.
+
+When merged-forward sender UID reliability cannot be confidently verified (including single-sender batches), NextBridge marks that sender as `UID 不可信` in the rendered header.
+
 ::: info Merged-forward access control
 Merged-forward links are plain paths and each page has its own TTL. When the timer runs out, the page stays on screen and switches to an expired state. If persistent storage is enabled, the page can still be opened again after a restart.
 :::

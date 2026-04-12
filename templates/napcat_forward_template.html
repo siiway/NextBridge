@@ -142,6 +142,9 @@
       background: #fff;
       object-fit: contain;
     }
+    .fwd-image-open {
+      cursor: zoom-in;
+    }
     .fwd-image-placeholder {
       display: flex;
       align-items: center;
@@ -359,6 +362,38 @@
           window.clearInterval(timer);
         }
       }, 1000);
+
+      const openDataUrlAsBlob = async (dataUrl) => {
+        try {
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const win = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+          if (!win) {
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.click();
+          }
+          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        } catch {
+          window.open(dataUrl, '_blank', 'noopener,noreferrer');
+        }
+      };
+
+      document.addEventListener('click', (event) => {
+        const img = event.target.closest('img.fwd-image-open');
+        if (!img) return;
+        event.preventDefault();
+        const src = img.getAttribute('src') || '';
+        if (!src) return;
+        if (src.startsWith('data:')) {
+          void openDataUrlAsBlob(src);
+          return;
+        }
+        window.open(src, '_blank', 'noopener,noreferrer');
+      });
     })();
   </script>
 </body>

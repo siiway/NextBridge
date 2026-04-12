@@ -495,7 +495,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         user_id = str(event.get("user_id", ""))
         message_id = str(event.get("message_id", ""))
         message_seq = str(
-            event.get("message_seq", event.get("real_id", event.get("seq", "")))
+            event.get("message_seq", event.get("seq", event.get("real_id", "")))
         )
         sender = event.get("sender", {})
         # Prefer group card (nickname-in-group) over global nickname
@@ -514,6 +514,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             face_as_emoji=face_as_emoji,
             source_group_id=group_id,
         )
+        self_id = str(event.get("self_id", ""))
+        source_mentioned_self = any(str(m.get("id", "")) == self_id for m in mentions)
         if not text.strip() and not attachments:
             logger.debug(
                 f"NapCat [{self.instance_id}] ignoring empty message from {nickname}({user_id})"
@@ -535,6 +537,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             message_id=str(event.get("message_id", "")),
             reply_parent=reply_id,
             mentions=mentions,
+            source_mentioned_self=source_mentioned_self,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
             source_proxy=self._media_proxy,
             username=qid or user_id,
@@ -884,16 +887,13 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             )
 
         data, mime = result
-        safe_url = html.escape(url)
 
         if self.config.forward_render_image_method == "base64":
             data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
             safe_data_url = html.escape(data_url)
             return (
-                f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
-                f"<img class='fwd-image' src='{safe_data_url}' "
+                f"<img class='fwd-image fwd-image-open' src='{safe_data_url}' "
                 "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
-                f"</a>"
             )
 
         asset_id = str(uuid.uuid4())
@@ -916,7 +916,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
         asset_url = html.escape(self._build_forward_asset_url(asset_id))
         return (
-            f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+            f"<a href='{asset_url}' target='_blank' rel='noopener noreferrer'>"
             f"<img class='fwd-image' src='{asset_url}' "
             "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
             f"</a>"
@@ -1237,6 +1237,16 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         Some NapCat versions may reuse a pseudo id for different forwarded senders.
         In such cases, using that ID for avatar/QQ display is misleading.
         """
+        sender_uids = {
+            uid
+            for uid, _ in (self._forward_node_sender_fields(node) for node in nodes)
+            if uid
+        }
+        if len(sender_uids) <= 1:
+            # Single-sender forwards cannot be cross-validated inside the batch.
+            # Mark as unreliable to avoid presenting UID as authoritative.
+            return set(sender_uids)
+
         mapping: dict[str, set[str]] = {}
         for node in nodes:
             uid, nick = self._forward_node_sender_fields(node)
@@ -1373,8 +1383,8 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                         seg_data,
                         page_id=page_id,
                     )
-                    # Check if image was successfully rendered (not the fallback placeholder)
-                    if "/asset/" in image_html:
+                    # Check if image was successfully rendered in either url/base64 mode
+                    if "class='fwd-image" in image_html:
                         content_parts.append(image_html)
                     elif summary:
                         plain_text_parts.append(summary)
@@ -1394,15 +1404,25 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
             message_html = "".join(content_parts).strip() or html.escape("[空消息]")
             message_text = "".join(plain_text_parts).strip() or "[空消息]"
-            default_sender = f"{nickname}" + (
-                f" ({user_id})" if user_id and user_id_reliable else ""
-            )
-            header_title = html.escape(
+            default_sender = f"{nickname}" + (f" ({user_id})" if user_id else "")
+            if user_id and not user_id_reliable:
+                default_sender += " [UID 不可信]"
+
+            header_title_raw = (
                 str(richheader.get("title", "")).strip() if richheader else ""
-            ) or html.escape(default_sender)
-            header_content = html.escape(
+            )
+            header_content_raw = (
                 str(richheader.get("content", "")).strip() if richheader else ""
             )
+            if user_id and not user_id_reliable and richheader:
+                header_content_raw = (
+                    f"{header_content_raw} · UID 不可信"
+                    if header_content_raw
+                    else "UID 不可信"
+                )
+
+            header_title = html.escape(header_title_raw) or html.escape(default_sender)
+            header_content = html.escape(header_content_raw)
 
             avatar_url = ""
             if richheader:

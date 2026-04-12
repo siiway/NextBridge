@@ -22,7 +22,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 | `send_method` | 否 | `webhook` | `"webhook"` 或 `"bot"` |
 | `max_file_size` | 否 | `8388608`（8 MB） | 发送附件时单个文件的最大字节数 |
 | `cqface_webhook_fallback` | 否 | `unicode` | 控制消息中包含 `:cqface<id>:` 标记且使用 Webhook 发送时的回退方式。设为 `"bot"` 时会改用 Bot 发送；设为 `"unicode"` 时仍使用 Webhook，并按 `db/cqface-map.yaml` 中的 Unicode 映射替换标记。 |
-| `send_replies_as_bot` | 否 | `true` | 为 `true` 时，回复消息在 Bot 已连接情况下会优先通过 Bot 发送，即使 `send_method` 为 `"webhook"`。原因是 Discord Webhook 模式不支持指定回复目标消息。需配置 `bot_token` 才会生效。 |
+| `send_replies_as_bot` | 否 | `true` | 为 `true` 时，回复消息在 Bot 已连接情况下会优先通过 Bot 发送，即使 `send_method` 为 `"webhook"`。原因是 Discord Webhook 模式不支持指定回复目标消息。需配置 `bot_token` 才会生效。对于 NapCat/QQ 来源，Discord 回复是否 ping 被回复者（`@replied user`）由源消息是否显式 `@` 了 `self_id`（QQ 机器人账号）决定：只有 `@self_id` 才会启用 ping。 |
 | `allow_mentions_everyone` | 否 | `false` | 控制出站消息是否允许触发 Discord 的 `@everyone` / `@here` 提醒。 |
 | `allow_mentions_users` | 否 | `true` | 控制出站消息是否允许提及用户（`<@id>`）。 |
 | `allow_mentions_roles` | 否 | `false` | 控制出站消息是否允许提及身份组（`<@&id>`）。 |

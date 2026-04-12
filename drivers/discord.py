@@ -609,10 +609,17 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 send_kwargs["files"] = discord_files
             if reference is not None:
                 send_kwargs["reference"] = reference
+
+            replied_user = True
+            source_mentioned_self = kwargs.get("source_mentioned_self")
+            if source_mentioned_self is not None:
+                replied_user = bool(source_mentioned_self)
+
             send_kwargs["allowed_mentions"] = discord.AllowedMentions(
                 everyone=self.config.allow_mentions_everyone,
                 users=self.config.allow_mentions_users,
                 roles=self.config.allow_mentions_roles,
+                replied_user=replied_user,
             )
 
             sent = await ch.send(**send_kwargs)

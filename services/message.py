@@ -29,6 +29,9 @@ class NormalizedMessage:
     mentions: list[dict] = field(
         default_factory=list
     )  # list of {"id": str, "name": str}
+    source_mentioned_self: bool | None = (
+        None  # whether source message explicitly @mentioned the source bot account
+    )
     time: str | None = None
     source_proxy: str | None = (
         None  # proxy URL for downloading attachments from source platform

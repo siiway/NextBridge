@@ -261,9 +261,9 @@ class MessageDB:
                 continue
 
             if current_version >= int(to_version):
-                logger.debug(
-                    f"Skipping migration {step.name}: already at {current_version}"
-                )
+                # logger.debug(
+                #     f"Skipping migration {step.name}: already at {current_version}"
+                # )
                 continue
 
             from_version = getattr(step, "from_version", None)

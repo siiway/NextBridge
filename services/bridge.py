@@ -407,6 +407,7 @@ class Bridge:
             "time": msg.time,
             "username": username_value,
             "nickname": getattr(msg, "nickname", ""),
+            "source_mentioned_self": getattr(msg, "source_mentioned_self", None),
         }
         try:
             formatted = fmt.format(**ctx)
