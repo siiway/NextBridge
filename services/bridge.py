@@ -506,14 +506,28 @@ class Bridge:
 
             # Resolve target mentions
             target_mentions = []
+            source_self_mention_names: list[str] = []
+            source_self_id = str(getattr(msg, "source_self_id", "") or "")
             for m in msg.mentions:
                 target_uid = msg_db().get_bound_user_id(
                     msg.instance_id, m["id"], target_id
                 )
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
+                    continue
+
+                # Fallback: source @self_id (bot) mention can be converted by
+                # target drivers that know their own bot account id.
+                m_id = str(m.get("id", "") or "")
+                m_name = str(m.get("name", "") or "").strip()
+                if source_self_id and m_id == source_self_id and m_name:
+                    source_self_mention_names.append(m_name)
             if target_mentions:
                 extra_out["mentions"] = target_mentions
+            if source_self_mention_names:
+                extra_out["source_self_mention_names"] = list(
+                    dict.fromkeys(source_self_mention_names)
+                )
 
             try:
                 new_msg_id = await sender(
@@ -599,14 +613,28 @@ class Bridge:
 
             # Resolve target mentions
             target_mentions = []
+            source_self_mention_names: list[str] = []
+            source_self_id = str(getattr(msg, "source_self_id", "") or "")
             for m in msg.mentions:
                 target_uid = msg_db().get_bound_user_id(
                     msg.instance_id, m["id"], target_id
                 )
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
+                    continue
+
+                # Fallback: source @self_id (bot) mention can be converted by
+                # target drivers that know their own bot account id.
+                m_id = str(m.get("id", "") or "")
+                m_name = str(m.get("name", "") or "").strip()
+                if source_self_id and m_id == source_self_id and m_name:
+                    source_self_mention_names.append(m_name)
             if target_mentions:
                 extra_out["mentions"] = target_mentions
+            if source_self_mention_names:
+                extra_out["source_self_mention_names"] = list(
+                    dict.fromkeys(source_self_mention_names)
+                )
 
             try:
                 new_msg_id = await sender(

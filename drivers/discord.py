@@ -395,7 +395,24 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             text = f"{prefix}\n{text}" if text else prefix
 
         # Handle mentions: replace @Name with <@id>
-        mentions = kwargs.get("mentions", [])
+        mentions = list(kwargs.get("mentions", []))
+
+        # Fallback conversion for source "@self_id" mentions.
+        # Bridge passes source mention display names, and we map them to the
+        # current Discord bot account mention when available.
+        source_self_mention_names = kwargs.get("source_self_mention_names", [])
+        if source_self_mention_names and self._client and self._client.user:
+            bot_id = str(self._client.user.id)
+            existing_names = {
+                str(m.get("name", "")).strip() for m in mentions if isinstance(m, dict)
+            }
+            for raw_name in source_self_mention_names:
+                name = str(raw_name).strip()
+                if not name or name in existing_names:
+                    continue
+                mentions.append({"id": bot_id, "name": name})
+                existing_names.add(name)
+
         for m in mentions:
             text = text.replace(f"@{m['name']}", f"<@{m['id']}>")
 

@@ -118,3 +118,4 @@ If the file is absent or an emoji is not found, the token falls back to the Unic
 
 - Bot messages are automatically ignored (webhook echoes are not re-bridged).
 - Files are downloaded and re-uploaded via multipart form. If a file exceeds `max_file_size`, its URL is appended to the message text.
+- For NapCat/QQ sources, an explicit `@self_id` mention is also converted into a Discord mention of the target bot account when bot identity is available.

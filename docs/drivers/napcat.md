@@ -84,7 +84,11 @@ Incoming messages are parsed from OneBot 11 segment arrays:
 
 For merged-forward images, clicking the image now opens the bridge-rendered resource (`/asset/...`) in `url` mode, instead of jumping to the original QQ CDN URL. In `base64` mode, the page opens the image via a temporary blob URL without adding a duplicate base64 `href` payload.
 
+For security hardening, merged-forward image embedding now only allows a safe MIME allowlist (JPEG/PNG/GIF/WebP/BMP/AVIF). Unsafe types (for example `text/html` or `image/svg+xml`) are blocked from inline rendering and shown as a placeholder link.
+
 When merged-forward sender UID reliability cannot be confidently verified (including single-sender batches), NextBridge marks that sender as `UID 不可信` in the rendered header.
+
+Even when UID is marked unreliable, the rendered header still displays the QQ number (with the `UID 不可信` tag) for manual verification.
 
 ::: info Merged-forward access control
 Merged-forward links are plain paths and each page has its own TTL. When the timer runs out, the page stays on screen and switches to an expired state. If persistent storage is enabled, the page can still be opened again after a restart.

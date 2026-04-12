@@ -29,6 +29,7 @@ class NormalizedMessage:
     mentions: list[dict] = field(
         default_factory=list
     )  # list of {"id": str, "name": str}
+    source_self_id: str = ""  # source platform bot account id (if available)
     source_mentioned_self: bool | None = (
         None  # whether source message explicitly @mentioned the source bot account
     )

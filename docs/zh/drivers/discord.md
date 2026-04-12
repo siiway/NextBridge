@@ -118,3 +118,4 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 
 - Bot 发送的消息不会被再次桥接（Webhook 回显不会触发事件）。
 - 文件会被下载后通过 multipart 表单重新上传。若文件超过 `max_file_size`，其 URL 将以文字形式附加到消息中。
+- 对于 NapCat/QQ 来源，若源消息显式 `@self_id`，在可获取目标 Bot 身份时也会转换为 Discord 端对目标 Bot 账号的 mention。

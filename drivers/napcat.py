@@ -537,6 +537,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             message_id=str(event.get("message_id", "")),
             reply_parent=reply_id,
             mentions=mentions,
+            source_self_id=self_id,
             source_mentioned_self=source_mentioned_self,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
             source_proxy=self._media_proxy,
@@ -765,6 +766,19 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         )
 
     @staticmethod
+    def _is_safe_forward_image_mime(mime: str) -> bool:
+        normalized = (mime or "").split(";", 1)[0].strip().lower()
+        # Block script-capable or non-image payloads from being embedded/served.
+        return normalized in {
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp",
+            "image/bmp",
+            "image/avif",
+        }
+
+    @staticmethod
     def _segment_url(seg_data: dict) -> str:
         url = (
             seg_data.get("url")
@@ -887,9 +901,21 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             )
 
         data, mime = result
+        normalized_mime = (mime or "").split(";", 1)[0].strip().lower()
+        if not self._is_safe_forward_image_mime(normalized_mime):
+            safe_url = html.escape(url)
+            return (
+                f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
+                "<div class='fwd-image-placeholder'>"
+                "图片 MIME 类型不安全，已阻止内嵌预览"
+                "</div>"
+                f"</a>"
+            )
 
         if self.config.forward_render_image_method == "base64":
-            data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+            data_url = (
+                f"data:{normalized_mime};base64,{base64.b64encode(data).decode('ascii')}"
+            )
             safe_data_url = html.escape(data_url)
             return (
                 f"<img class='fwd-image fwd-image-open' src='{safe_data_url}' "
@@ -908,7 +934,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             asset_id=asset_id,
             page_id=page_id,
             instance_id=self.instance_id,
-            mime=mime,
+            mime=normalized_mime,
             data=data,
             created_at=int(_utc_now().timestamp()),
             expires_at=expires_at,
@@ -1398,7 +1424,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 richheader = self._apply_forward_msg_format_header(
                     msg_format=msg_format,
                     nickname=nickname,
-                    user_id=user_id if user_id_reliable else "",
+                    user_id=user_id,
                     msg_text=msg_text,
                 )
 
@@ -1415,6 +1441,12 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 str(richheader.get("content", "")).strip() if richheader else ""
             )
             if user_id and not user_id_reliable and richheader:
+                if user_id not in header_content_raw:
+                    header_content_raw = (
+                        f"QQ: {user_id} · {header_content_raw}"
+                        if header_content_raw
+                        else f"QQ: {user_id}"
+                    )
                 header_content_raw = (
                     f"{header_content_raw} · UID 不可信"
                     if header_content_raw
