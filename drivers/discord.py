@@ -356,11 +356,19 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         if force_bot and self._send_method == "webhook" and webhook_url is not None:
             fmt = kwargs.get("bot_msg_format") or kwargs.get("msg_format")
             if isinstance(fmt, str) and fmt:
+                username_value = kwargs.get("username", "")
+                if isinstance(username_value, str):
+                    username_value = username_value.strip()
+                else:
+                    username_value = str(username_value or "")
+                if not username_value:
+                    username_value = str(kwargs.get("user_id") or "")
                 ctx = {
                     "platform": kwargs.get("platform"),
                     "instance_id": kwargs.get("instance_id"),
                     "from": kwargs.get("from"),
                     "user": kwargs.get("user"),
+                    "username": username_value,
                     "user_id": kwargs.get("user_id"),
                     "user_avatar": kwargs.get("user_avatar"),
                     "msg": kwargs.get("msg"),
