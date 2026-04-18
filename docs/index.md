@@ -4,7 +4,7 @@ layout: home
 hero:
   name: NextBridge
   text: The chat bridge that links up all the major chat platforms!
-  tagline: Connect QQ, Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack, Google Chat, Mattermost, VoceChat, Rocket.Chat — and more — with a single config file.
+  tagline: Connect QQ through a unified QQ driver (NapCat, Lagrange, or generic OneBot 11), Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack, Google Chat, Mattermost, VoceChat, Rocket.Chat — and more — with a single config file.
   image:
     src: https://icons.siiway.org/nextbridge/icon.svg
     alt: NextBridge Logo
@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Multi-platform
-    details: Supports QQ (via NapCat), Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack, Google Chat, Mattermost, VoceChat, Rocket.Chat, Webhook and WhatsApp.
+    details: Supports QQ through the unified QQ driver with NapCat, Lagrange, and generic OneBot 11 protocols, plus Discord, Telegram, Feishu/Lark, DingTalk, Yunhu, KOOK, Matrix, Signal, Slack, Google Chat, Mattermost, VoceChat, Rocket.Chat, Webhook and WhatsApp.
     link: /platform-support
     linkText: View support status
   - title: Config-driven routing
@@ -28,7 +28,7 @@ features:
   - title: Media bridging
     details: Images, videos, voice messages, and files are automatically downloaded and re-uploaded to the target platform. Configurable per-instance size limits.
   - title: Per-channel message formatting
-    details: Customize the message format for each target platform independently. Discord webhooks and Telegram richheader get native username and avatar; QQ gets clean text prefixes.
+    details: Customize the message format for each target platform independently. Discord webhooks and Telegram richheader get native username and avatar; QQ gets clean text prefixes and protocol-aware forwarding.
   - title: User Commands
     details: Users can bind their accounts across platforms with /nb bind setup and /nb bind confirm to ensure perfect cross-platform mentions and notifications. Link multiple identities into a single global ID.
     link: /user-commands

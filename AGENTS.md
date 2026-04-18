@@ -9,11 +9,20 @@
 
 # 可用的 driver api 文档
 
+> [!IMPORTANT]
 > 请只根据现在**正在编辑的功能**按需读取
 
-## NapCat (QQ) API Docs
+## QQ (NapCat) API Docs
 
 https://s.apifox.cn/apidoc/docs-site/5348325/llms.txt
+
+## QQ (Lagrange) API Docs
+
+Lagrange.OneBot: https://lagrange-onebot.apifox.cn/llms.txt
+
+## QQ (OneBot v11) API Docs
+
+https://github.com/botuniverse/onebot-11#%E5%86%85%E5%AE%B9%E7%9B%AE%E5%BD%95
 
 ## Yunhu API Docs
 

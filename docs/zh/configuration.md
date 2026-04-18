@@ -39,7 +39,7 @@ uv run main.py convert data/config.yaml data/config.toml
 | 层级 | 说明 |
 |---|---|
 | `global` | 全局配置选项，适用于所有驱动，除非在特定驱动配置中被覆盖 |
-| `<平台名>` | 取值为 `napcat`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`vocechat`、`matrix`、`signal`、`teams`、`googlechat`、`slack`、`mattermost`、`rocketchat`、`webhook` 之一 |
+| `<平台名>` | 取值为 `qq`、`discord`、`telegram`、`feishu`、`dingtalk`、`yunhu`、`kook`、`vocechat`、`matrix`、`signal`、`teams`、`googlechat`、`slack`、`mattermost`、`rocketchat`、`webhook` 之一 |
 | `<实例ID>` | 由你自由命名，在规则配置中用于引用此实例 |
 
 ## 全局配置
@@ -259,7 +259,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 
 ```json
 {
-  "napcat": {
+  "qq": {
     "qq_main": {
       "ws_url": "ws://127.0.0.1:3001",
       "ws_token": "secret"
@@ -322,7 +322,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 ## 完整示例（YAML）
 
 ```yaml
-napcat:
+qq:
   qq_main:
     ws_url: ws://127.0.0.1:3001
     ws_token: secret

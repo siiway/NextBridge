@@ -147,13 +147,13 @@ Controls how the message is formatted when sent to a target.
 | `msg_format` | string | `"{msg}"` | Template string for the message text |
 | `webhook_title` | string | — | Discord webhook display name (Discord only) |
 | `webhook_avatar` | string | — | Discord webhook avatar URL (Discord only) |
-| `forward_render_ttl_seconds` | integer | — | Optional per-rule override for NapCat merged-forward page TTL (seconds, minimum 60). Effective only when the message source is NapCat and merged-forward rendering is enabled. |
+| `forward_render_ttl_seconds` | integer | — | Optional per-rule override for QQ merged-forward page TTL (seconds, minimum 60). Effective only when the message source uses the QQ driver and merged-forward rendering is enabled. |
 
 ### msg_format template variables
 
 | Variable | Description |
 |---|---|
-| `{platform}` | Platform name of the sender, e.g. `napcat`, `discord` |
+| `{platform}` | Platform name of the sender, e.g. `qq`, `discord` |
 | `{instance_id}` | Instance ID of the sender as defined in config.json |
 | `{from}` | Alias for `{instance_id}` |
 | `{user}` | Display name of the sender |
@@ -183,7 +183,7 @@ Both attributes support the same `{variable}` substitutions as `msg_format`.
 | Telegram (with `rich_header_host`) | Small OG link-preview card above the message (avatar + title + content) |
 | Telegram (fallback) | `**title** · *content*` HTML bold/italic header prepended to text |
 | Discord | `**title** · *content*` Markdown bold/italic header prepended to text |
-| QQ (NapCat) | `[title · content]` plain text prepended |
+| QQ | `[title · content]` plain text prepended |
 | Feishu / DingTalk | `[title · content]` plain text prepended |
 
 **Example — rich header for Telegram with QQ-style plain text for QQ:**
@@ -236,7 +236,7 @@ The channel address dict inside `from`, `to`, or `channels` depends on the drive
 
 | Platform | Keys |
 |---|---|
-| NapCat (QQ) | `group_id` |
+| QQ | `group_id` |
 | Discord | `server_id`, `channel_id` |
 | Telegram | `chat_id` |
 | Feishu | `chat_id` |

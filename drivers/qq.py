@@ -1,8 +1,8 @@
-# QQ driver via NapCat (OneBot 11 WebSocket protocol).
-# NapCat acts as a WebSocket server; this driver connects as a client,
+# QQ driver for OneBot 11 WebSocket protocol.
+# The QQ bot server acts as a WebSocket endpoint; this driver connects as a client,
 # receives push events, and sends actions over the same connection.
 #
-# Config keys (under napcat.<instance_id>):
+# Config keys (under qq.<instance_id>):
 #   ws_url        – WebSocket URL, e.g. "ws://127.0.0.1:3001"
 #   ws_token      – Optional access token
 #   max_file_size    – Max bytes to download when bridging media (default 10 MB)
@@ -20,6 +20,7 @@ import json
 import math
 import re
 import uuid
+import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -41,7 +42,8 @@ from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
 
 
-class NapCatConfig(_DriverConfig):
+class QqConfig(_DriverConfig):
+    protocol: Literal["napcat", "lagrange", "onebot_v11"] = "napcat"
     ws_url: str = "ws://127.0.0.1:3001"
     ws_token: str = ""
     max_file_size: int = 10 * 1024 * 1024
@@ -50,7 +52,7 @@ class NapCatConfig(_DriverConfig):
     stream_threshold: int = 0
     forward_render_enabled: bool = False
     forward_render_ttl_seconds: int = 180 * 24 * 60 * 60
-    forward_render_mount_path: str = "/napcat-forward"
+    forward_render_mount_path: str = "/qq-forward"
     forward_render_persist_enabled: bool = False
     # Merged-forward image rendering method:
     # - "url": store bytes in DB and serve via bridge URL (default)
@@ -75,7 +77,7 @@ _DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface
 _FORWARD_TEMPLATE_PATH: Path = (
     Path(__file__).resolve().parent.parent
     / "templates"
-    / "napcat_forward_template.html"
+    / "qq_forward_template.html"
 )
 _RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
 _RICHHEADER_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
@@ -162,8 +164,10 @@ def _load_face_gif(face_id_raw) -> bytes | None:
         return None
 
 
-class NapCatDriver(BaseDriver[NapCatConfig]):
-    def __init__(self, instance_id: str, config: NapCatConfig, bridge):
+class QqDriver(BaseDriver[QqConfig]):
+    platform_name = "qq"
+
+    def __init__(self, instance_id: str, config: QqConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._ws: Any = None  # websockets connection (type varies by version)
         # echo_id → Future; used to await responses for specific actions
@@ -217,7 +221,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             await asyncio.sleep(5)
 
     def _normalize_mount_path(self, path: str) -> str:
-        normalized = (path or "/napcat-forward").strip()
+        normalized = (path or "/qq-forward").strip()
         if not normalized.startswith("/"):
             normalized = f"/{normalized}"
         if len(normalized) > 1 and normalized.endswith("/"):
@@ -226,9 +230,15 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
 
     def _forward_mount_path(self) -> str:
         configured = self._normalize_mount_path(self.config.forward_render_mount_path)
-        if configured == "/napcat-forward":
-            return f"/napcat-forward/{self.instance_id}"
+        if configured == "/qq-forward":
+            return f"/qq-forward/{self.instance_id}"
         return configured
+
+    def _supports_forward_api(self) -> bool:
+        return self.config.protocol in {"napcat", "lagrange"}
+
+    def _supports_stream_file_upload(self) -> bool:
+        return self.config.protocol == "napcat"
 
     def _coerce_forward_ttl_seconds(self, raw: Any) -> int | None:
         try:
@@ -526,7 +536,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
 
         msg = NormalizedMessage(
-            platform="napcat",
+            platform=self.platform_name,
             instance_id=self.instance_id,
             channel={"group_id": group_id},
             nickname=nickname,
@@ -747,6 +757,41 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             return _DEFAULT_FORWARD_CQFACE_GIF_HOST
 
         return _DEFAULT_FORWARD_CQFACE_GIF_HOST
+
+    async def _upload_group_file_from_bytes(
+        self,
+        data_bytes: bytes,
+        filename: str,
+        group_id: str,
+    ) -> bool:
+        with tempfile.NamedTemporaryFile(
+            prefix="nextbridge-qq-",
+            suffix=f"-{Path(filename).name}",
+            delete=False,
+        ) as tmp:
+            tmp.write(data_bytes)
+            tmp_path = tmp.name
+
+        try:
+            resp = await self._call(
+                "upload_group_file",
+                {
+                    "group_id": int(group_id),
+                    "file": tmp_path,
+                    "name": filename,
+                },
+            )
+            if resp and resp.get("status") == "ok":
+                return True
+            logger.warning(
+                f"QQ [{self.instance_id}] upload_group_file failed for '{filename}': {resp}"
+            )
+            return False
+        finally:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _render_forward_face_segment_html(self, seg_data: dict) -> str:
         face_id = str(seg_data.get("id", "")).strip()
@@ -976,8 +1021,12 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         *,
         file_id: str,
         source_group_id: str,
+        busid: str | None = None,
     ) -> str:
         if not file_id:
+            return ""
+
+        if self.config.protocol == "onebot_v11":
             return ""
 
         cache_key = f"{source_group_id}:{file_id}"
@@ -997,12 +1046,10 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                 ("get_group_file_url", {"group_id": group_id_num, "file_id": file_id})
             )
         if source_group_id:
-            action_candidates.append(
-                (
-                    "get_group_file_url",
-                    {"group_id": source_group_id, "file_id": file_id},
-                )
-            )
+            params = {"group_id": source_group_id, "file_id": file_id}
+            if busid not in (None, ""):
+                params["busid"] = busid
+            action_candidates.append(("get_group_file_url", params))
         action_candidates.append(("get_file", {"file_id": file_id}))
 
         for action, params in action_candidates:
@@ -1044,6 +1091,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             url = await self._resolve_forward_file_download_url(
                 file_id=file_id,
                 source_group_id=source_group_id,
+                busid=str(seg_data.get("busid", seg_data.get("bus_id", ""))).strip(),
             )
 
         download_html = "<span class='asset file disabled'>暂无法下载</span>"
@@ -1232,7 +1280,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
             else ""
         )
         ctx = {
-            "platform": "napcat",
+            "platform": "qq",
             "instance_id": self.instance_id,
             "from": self.instance_id,
             "user": nickname,
@@ -1577,7 +1625,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         *,
         source_group_id: str,
     ) -> str:
-        if not self.config.forward_render_enabled:
+        if not self.config.forward_render_enabled or not self._supports_forward_api():
             return "[Forwarded messages]"
 
         forward_id = str(seg_data.get("id", "")).strip()
@@ -1720,7 +1768,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         """
         Upload bytes via OneBot upload_file_stream (chunked base64).
 
-        NapCat processes chunk_data and is_complete in separate branches:
+        QQ-compatible OneBot implementations process chunk_data and is_complete in separate branches:
         when chunk_data is present it stores the chunk and returns early,
         so is_complete must be sent as a separate final request with no chunk_data.
 
@@ -1731,7 +1779,7 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         total_chunks = max(1, math.ceil(total / CHUNK_SIZE))
         stream_id = str(uuid.uuid4())
 
-        # Upload all chunks (NapCat param is "filename", not "file_name")
+        # Upload all chunks (the stream API expects "filename", not "file_name")
         for i in range(total_chunks):
             chunk = data_bytes[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE]
             b64 = base64.b64encode(chunk).decode()
@@ -1936,31 +1984,44 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
                     if result:
                         data_bytes, _ = result
                         fname = att.name or "file"
-                        mode = self._resolve_send_mode(len(data_bytes))
-                        if mode == "base64":
-                            b64 = base64.b64encode(data_bytes).decode()
-                            await self._call(
-                                "upload_group_file",
-                                {
-                                    "group_id": int(group_id),
-                                    "file": f"base64://{b64}",
-                                    "name": fname,
-                                },
-                            )
-                        else:  # stream (default)
-                            file_path = await self._upload_file_stream(
-                                data_bytes, fname
-                            )
-                            if file_path:
+                        if self._supports_stream_file_upload():
+                            mode = self._resolve_send_mode(len(data_bytes))
+                            if mode == "base64":
+                                b64 = base64.b64encode(data_bytes).decode()
                                 await self._call(
                                     "upload_group_file",
                                     {
                                         "group_id": int(group_id),
-                                        "file": file_path,
+                                        "file": f"base64://{b64}",
                                         "name": fname,
                                     },
                                 )
-                            else:
+                            else:  # stream (default)
+                                file_path = await self._upload_file_stream(
+                                    data_bytes, fname
+                                )
+                                if file_path:
+                                    await self._call(
+                                        "upload_group_file",
+                                        {
+                                            "group_id": int(group_id),
+                                            "file": file_path,
+                                            "name": fname,
+                                        },
+                                    )
+                                else:
+                                    segments.append(
+                                        {
+                                            "type": "text",
+                                            "data": {"text": f"\n[文件: {att.name}]"},
+                                        }
+                                    )
+                        else:
+                            if not await self._upload_group_file_from_bytes(
+                                data_bytes,
+                                fname,
+                                str(group_id),
+                            ):
                                 segments.append(
                                     {
                                         "type": "text",
@@ -1991,4 +2052,4 @@ class NapCatDriver(BaseDriver[NapCatConfig]):
         return None
 
 
-register("napcat", NapCatConfig, NapCatDriver)
+register("qq", QqConfig, QqDriver)

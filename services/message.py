@@ -16,7 +16,7 @@ class Attachment:
 class NormalizedMessage:
     """Platform-agnostic message passed through the bridge."""
 
-    platform: str = ""  # e.g. "napcat", "discord", "telegram"
+    platform: str = ""  # e.g. "qq", "discord", "telegram"
     instance_id: str = ""  # key as defined in config.json
     channel: dict = field(default_factory=dict)  # platform-specific channel info
     nickname: str = ""  # full display name of sender

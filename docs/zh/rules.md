@@ -147,13 +147,13 @@ uv run main.py convert data/rules.yaml data/rules.toml
 | `msg_format` | string | `"{msg}"` | 消息文本的模板字符串 |
 | `webhook_title` | string | — | Discord Webhook 显示名称（仅 Discord 生效） |
 | `webhook_avatar` | string | — | Discord Webhook 头像 URL（仅 Discord 生效） |
-| `forward_render_ttl_seconds` | integer | — | 可选：按规则覆盖 NapCat 合并转发页面有效期（秒，最小 60）。仅在消息来源为 NapCat 且启用了合并转发渲染时生效。 |
+| `forward_render_ttl_seconds` | integer | — | 可选：按规则覆盖 QQ 合并转发页面有效期（秒，最小 60）。仅在消息来源为 QQ 驱动且启用了合并转发渲染时生效。 |
 
 ### msg_format 模板变量
 
 | 变量 | 说明 |
 |---|---|
-| `{platform}` | 发送方的平台名，如 `napcat`、`discord` |
+| `{platform}` | 发送方的平台名，如 `qq`、`discord` |
 | `{instance_id}` | 发送方的实例 ID（与 config.json 中定义一致） |
 | `{from}` | `{instance_id}` 的别名 |
 | `{user}` | 发送者的显示名称 |
@@ -183,7 +183,7 @@ uv run main.py convert data/rules.yaml data/rules.toml
 | Telegram（已配置 `rich_header_host`） | 消息上方的小型 OG 链接预览卡片（含头像、标题、副标题） |
 | Telegram（回退模式） | 加粗/斜体 HTML 头部文字，附加在消息文本前 |
 | Discord | `**title** · *content*` Markdown 加粗/斜体，附加在文本前 |
-| QQ（NapCat） | `[title · content]` 纯文本，附加在消息前 |
+| QQ | `[title · content]` 纯文本，附加在消息前 |
 | 飞书 / 钉钉 | `[title · content]` 纯文本，附加在消息前 |
 
 **示例——Telegram 使用富头部，QQ 使用纯文本格式：**
@@ -236,7 +236,7 @@ Alice (123456789): 大家好
 
 | 平台 | 键名 |
 |---|---|
-| NapCat (QQ) | `group_id` |
+| QQ | `group_id` |
 | Discord | `server_id`、`channel_id` |
 | Telegram | `chat_id` |
 | 飞书 | `chat_id` |

@@ -22,7 +22,7 @@ Add under `discord.<instance_id>` in `config.json`:
 | `send_method` | No | `webhook` | `"webhook"` or `"bot"` |
 | `max_file_size` | No | `8388608` (8 MB) | Maximum bytes per attachment when sending |
 | `cqface_webhook_fallback` | No | `unicode` | Controls webhook fallback when a message contains `:cqface<id>:` tokens. Set to `"bot"` to send via the bot instead of the webhook, or `"unicode"` to keep using the webhook and replace tokens with the Unicode map in `db/cqface-map.yaml`. |
-| `send_replies_as_bot` | No | `true` | When `true`, reply messages are sent via the bot (if connected) even when `send_method` is `"webhook"`, because Discord webhook mode does not support specifying a reply target message. Requires `bot_token` to take effect. For NapCat/QQ sources, Discord reply ping (`@replied user`) is enabled only when the source message explicitly `@` mentions `self_id` (the QQ bot account). |
+| `send_replies_as_bot` | No | `true` | When `true`, reply messages are sent via the bot (if connected) even when `send_method` is `"webhook"`, because Discord webhook mode does not support specifying a reply target message. Requires `bot_token` to take effect. For QQ sources, Discord reply ping (`@replied user`) is enabled only when the source message explicitly `@` mentions `self_id` (the QQ bot account). |
 | `allow_mentions_everyone` | No | `false` | Controls whether outgoing messages can trigger `@everyone` / `@here` mentions on Discord. |
 | `allow_mentions_users` | No | `true` | Controls whether outgoing messages can mention users (`<@id>`). |
 | `allow_mentions_roles` | No | `false` | Controls whether outgoing messages can mention roles (`<@&id>`). |
@@ -104,7 +104,7 @@ All keys support the same template variables as `msg_format`.
 
 ## CQ Face Emojis (discord_emojis.json)
 
-When using NapCat's `cqface_mode: "emoji"`, the Discord driver resolves `:cqface<id>:` tokens to Discord custom emojis (`<:cqface306:emoji_id>`) when sending via bot. If the bot cannot resolve a custom emoji, or webhook fallback is set to `unicode`, the driver uses the Unicode map in `db/cqface-map.yaml`. To set up native emoji resolution:
+When using the QQ driver's `cqface_mode: "emoji"`, the Discord driver resolves `:cqface<id>:` tokens to Discord custom emojis (`<:cqface306:emoji_id>`) when sending via bot. If the bot cannot resolve a custom emoji, or webhook fallback is set to `unicode`, the driver uses the Unicode map in `db/cqface-map.yaml`. To set up native emoji resolution:
 
 1. Go to `https://discord.com/developers/applications/<your_app_id>/emojis` in your browser.
 2. Open the browser **Network** tab (F12 → Network).
@@ -118,4 +118,4 @@ If the file is absent or an emoji is not found, the token falls back to the Unic
 
 - Bot messages are automatically ignored (webhook echoes are not re-bridged).
 - Files are downloaded and re-uploaded via multipart form. If a file exceeds `max_file_size`, its URL is appended to the message text.
-- For NapCat/QQ sources, an explicit `@self_id` mention is also converted into a Discord mention of the target bot account when bot identity is available.
+- For QQ sources, an explicit `@self_id` mention is also converted into a Discord mention of the target account when identity is available.

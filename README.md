@@ -8,7 +8,7 @@
 
 ## Platform List
 
- - [x] [Tencent QQ](https://im.qq.com) (with [NapCat](https://napneko.github.io))
+ - [x] [Tencent QQ](https://im.qq.com) (with the QQ driver: NapCat, Lagrange, and OneBot 11 protocols)
  - [x] [Discord](https://discord.gg)
  - [x] [Telegram](https://telegram.org)
  - [x] [VoceChat](https://voce.chat)
@@ -38,6 +38,8 @@
 ## Special Thanks
 
  - NapCat
+ - Lagrange.OneBot
+ - OneBot v11
  - discord.py
  - python-telegram-bot
  - mautrix-python

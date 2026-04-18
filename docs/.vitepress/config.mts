@@ -15,7 +15,7 @@ const enSidebar = [
     text: 'Drivers',
     items: [
       { text: 'Overview', link: '/drivers/' },
-      { text: 'NapCat (QQ)', link: '/drivers/napcat' },
+      { text: 'QQ', link: '/drivers/qq' },
       { text: 'Discord', link: '/drivers/discord' },
       { text: 'Telegram', link: '/drivers/telegram' },
       { text: 'Feishu / Lark', link: '/drivers/feishu' },
@@ -50,7 +50,7 @@ const zhSidebar = [
     text: '驱动器',
     items: [
       { text: '概览', link: '/zh/drivers/' },
-      { text: 'NapCat (QQ)', link: '/zh/drivers/napcat' },
+      { text: 'QQ', link: '/zh/drivers/qq' },
       { text: 'Discord', link: '/zh/drivers/discord' },
       { text: 'Telegram', link: '/zh/drivers/telegram' },
       { text: '飞书 / Lark', link: '/zh/drivers/feishu' },

@@ -107,6 +107,6 @@ Google Chat 驱动器通过**服务账号**和 **Google Chat REST API** 将 Goog
 
 - 服务账号必须在同一项目中启用 **Chat API**；无需任何 IAM 角色。
 - Google Chat 要求有效的 HTTPS 端点，Chat 配置界面会拒绝纯 HTTP 地址。
-- 仅当附件已有公开 URL 时，图片才会以 Card v2 小部件发送。来自其他平台（如 NapCat）的二进制附件将显示为文本标签，因为 Google Chat REST API 不支持在不借助 Drive/存储服务的情况下直接上传二进制文件。
+- 仅当附件已有公开 URL 时，图片才会以 Card v2 小部件发送。来自其他平台（如 QQ）的二进制附件将显示为文本标签，因为 Google Chat REST API 不支持在不借助 Drive/存储服务的情况下直接上传二进制文件。
 - `rich_header` 前缀使用 Google Chat 有限的 Markdown 语法：`*粗体*` 和 `_斜体_`。
 - Google Chat 支持空间、私信和群聊。请使用对应会话的 `space_name`。

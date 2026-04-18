@@ -6,7 +6,7 @@ Note: `Receive` means messages can be ingested into NextBridge; `Send` means Nex
 
 | Platform                    | Status | Receive | Send | Mentions | Replies | Media | Custom Proxy | Notes                                                                   |
 | :-------------------------- | :----- | :------ | :--- | :------- | :------ | :---- | :----------- | :---------------------------------------------------------------------- |
-| **Tencent QQ** (via NapCat) | ✅      | ✅       | ✅    | ✅        | ✅       | ✅     | ✅            | Uses unofficial NapCat WebSocket bridge                                 |
+| **Tencent QQ** (QQ driver)  | ✅      | ✅       | ✅    | ✅        | ✅       | ✅     | ✅            | Supports NapCat, Lagrange, and generic OneBot 11 protocols               |
 | **Discord**                 | ✅      | ✅       | ✅    | ✅        | ℹ️      | ✅     | ✅            | Webhook cannot specify reply target; reply bridging requires bot path   |
 | **Telegram**                | ✅      | ✅       | ✅    | ✅        | ✅       | ⚠️    | ✅            | Uses long polling                                                       |
 | **Feishu / Lark**           | ✅      | ✅       | ✅    | ⚠️       | ⚠️      | ❌     | ❌            | Webhook / WebSocket receive; IM API send; **SDK doesn't support proxy** |

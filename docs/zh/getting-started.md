@@ -34,7 +34,7 @@ NextBridge 从 `data/` 目录读取两个 JSON 配置文件。
 
 ```json
 {
-  "napcat": {
+  "qq": {
     "我的QQ": {
       "ws_url": "ws://127.0.0.1:3001",
       "ws_token": "your_token"

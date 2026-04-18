@@ -108,6 +108,6 @@ If `endpoint_url` is omitted, verification is skipped (safe for development or d
 
 - The service account must have the **Chat API** enabled in the same project; it does **not** need any IAM roles.
 - Google Chat requires a valid HTTPS endpoint. Plain HTTP is rejected by the Chat configuration UI.
-- Images are sent as Card v2 widgets only when the attachment already has a public URL. Binary attachments from other platforms (e.g., NapCat) appear as text labels since Google Chat's REST API does not support direct binary uploads without additional Drive/storage setup.
+- Images are sent as Card v2 widgets only when the attachment already has a public URL. Binary attachments from other platforms (e.g., QQ) appear as text labels since Google Chat's REST API does not support direct binary uploads without additional Drive/storage setup.
 - The `rich_header` prefix uses Google Chat's limited Markdown syntax: `*bold*` and `_italic_`.
 - Google Chat currently supports spaces, direct messages, and group DMs. Use the `space_name` from the appropriate conversation.

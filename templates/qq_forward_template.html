@@ -258,143 +258,34 @@
       box-shadow: none;
     }
     .forward-state {
-      display: none;
-    }
-    .page.is-destroyed .msg {
-      opacity: .6;
-      filter: grayscale(.15);
-    }
-    .page.is-destroyed .sender-main,
-    .page.is-destroyed .content {
-      color: #7b6054;
-    }
-    .reply-preview {
-      margin: 0 0 10px;
-      padding: 8px 10px;
-      border-left: 3px solid rgba(125, 226, 255, .55);
-      background: rgba(125, 226, 255, .08);
-      border-radius: 10px;
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(123, 194, 255, .22);
+      background: rgba(17, 28, 45, .78);
       color: var(--muted);
       font-size: 12px;
-      line-height: 1.55;
+      line-height: 1.7;
     }
-    .reply-preview.is-missing {
-      border-left-color: rgba(255, 156, 146, .7);
-      background: rgba(255, 122, 104, .08);
-      color: #f0c0ba;
-    }
-    .reply-preview-title {
-      color: var(--ink);
-      font-weight: 700;
-      margin-bottom: 2px;
-      word-break: break-word;
-    }
-    .reply-preview-text {
-      white-space: pre-wrap;
-      word-break: break-word;
+    .forward-state.is-destroyed {
+      border-color: rgba(255, 140, 131, .45);
+      background: rgba(48, 23, 23, .72);
+      color: #ffbdb5;
     }
   </style>
 </head>
-<body data-page-state="$page_state" data-created-at="$created_at_epoch" data-expires-at="$expires_at_epoch" data-destroyed-at="$destroyed_at_epoch">
+<body>
   <main class="page">
     <section class="head">
-      <h1>$title</h1>
-      <div class="meta">$meta_primary <span class="status-chip" id="forward-status-chip">$page_state_text</span></div>
-      <div class="meta sub" id="forward-secondary">$meta_secondary</div>
+      <h1>$title<span class="status-chip $page_state">$page_state_text</span></h1>
+      <div class="meta">$meta_primary</div>
+      <div class="meta sub">$meta_secondary</div>
     </section>
-    <section id="forward-body">$body</section>
+    <section>$body</section>
+    <section class="forward-state $page_state">
+      <strong>$page_state_banner</strong><br />
+      $page_state_detail
+    </section>
   </main>
-  <script>
-    (() => {
-      const body = document.body;
-      const statusChip = document.getElementById('forward-status-chip');
-      const secondary = document.getElementById('forward-secondary');
-      const createdAt = Number(body.dataset.createdAt || 0);
-      const expiresAt = Number(body.dataset.expiresAt || 0);
-      const destroyedAt = Number(body.dataset.destroyedAt || 0);
-      const initialState = body.dataset.pageState || 'active';
-
-      const pad = (value) => String(value).padStart(2, '0');
-      const formatDuration = (seconds) => {
-        const total = Math.max(0, Math.floor(seconds));
-        const days = Math.floor(total / 86400);
-        const hours = Math.floor((total % 86400) / 3600);
-        const minutes = Math.floor((total % 3600) / 60);
-        const secs = total % 60;
-        if (days > 0) return `$${days}天$${hours}小时$${minutes}分$${secs}秒`;
-        if (hours > 0) return `$${hours}小时$${minutes}分$${secs}秒`;
-        if (minutes > 0) return `$${minutes}分$${secs}秒`;
-        return `$${secs}秒`;
-      };
-      const formatDateTime = (epochSeconds) => {
-        if (!epochSeconds) return '未知';
-        const d = new Date(epochSeconds * 1000);
-        return `$${d.getFullYear()}-$${pad(d.getMonth() + 1)}-$${pad(d.getDate())} $${pad(d.getHours())}:$${pad(d.getMinutes())}:$${pad(d.getSeconds())}`;
-      };
-      const setDestroyed = () => {
-        body.classList.add('is-destroyed');
-        statusChip.textContent = '已销毁';
-        statusChip.classList.add('is-destroyed');
-        secondary.textContent = `已销毁于 $${formatDateTime(destroyedAt || expiresAt)}`;
-      };
-      const setActive = () => {
-        const remaining = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
-        statusChip.textContent = '有效';
-        statusChip.classList.remove('is-destroyed');
-        secondary.textContent = `有效期至 $${formatDateTime(expiresAt)} · 距离销毁约 $${formatDuration(remaining)}`;
-      };
-      const refresh = () => {
-        const now = Math.floor(Date.now() / 1000);
-        const destroyed = initialState === 'destroyed' || (destroyedAt > 0 && now >= destroyedAt) || (expiresAt > 0 && now >= expiresAt);
-        if (destroyed) {
-          setDestroyed();
-          return true;
-        }
-        setActive();
-        return false;
-      };
-
-      if (refresh()) {
-        return;
-      }
-      const timer = window.setInterval(() => {
-        if (refresh()) {
-          window.clearInterval(timer);
-        }
-      }, 1000);
-
-      const openDataUrlAsBlob = async (dataUrl) => {
-        try {
-          const res = await fetch(dataUrl);
-          const blob = await res.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          const win = window.open(blobUrl, '_blank', 'noopener,noreferrer');
-          if (!win) {
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            a.click();
-          }
-          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-        } catch {
-          window.open(dataUrl, '_blank', 'noopener,noreferrer');
-        }
-      };
-
-      document.addEventListener('click', (event) => {
-        const img = event.target.closest('img.fwd-image-open');
-        if (!img) return;
-        event.preventDefault();
-        const src = img.getAttribute('src') || '';
-        if (!src) return;
-        if (src.startsWith('data:')) {
-          void openDataUrlAsBlob(src);
-          return;
-        }
-        window.open(src, '_blank', 'noopener,noreferrer');
-      });
-    })();
-  </script>
 </body>
 </html>

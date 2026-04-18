@@ -17,7 +17,7 @@ def register(name: str, config_cls: type[BaseModel], driver_cls: type) -> None:
     """Register a driver under *name*.
 
     Args:
-        name:       Platform key used in the config file  (e.g. ``"napcat"``).
+        name:       Platform key used in the config file  (e.g. ``"qq"``).
         config_cls: Pydantic model class for per-instance config validation.
         driver_cls: ``BaseDriver`` subclass to instantiate.
     """

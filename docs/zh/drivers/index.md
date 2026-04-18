@@ -8,7 +8,7 @@
 
 | 平台 | 驱动器 | 接收 | 发送 | 备注 |
 |---|---|---|---|---|
-| 腾讯 QQ | [NapCat](/zh/drivers/napcat) | ✅ | ✅ | 使用非官方 NapCat WebSocket 桥接方案 |
+| 腾讯 QQ | [QQ](/zh/drivers/qq) | ✅ | ✅ | 支持 NapCat、Lagrange 和通用 OneBot 11 协议 |
 | Discord | [Discord](/zh/drivers/discord) | ✅ | ✅ | 通过 Bot 网关接收；通过 Webhook 或 Bot 发送 |
 | Telegram | [Telegram](/zh/drivers/telegram) | ✅ | ✅ | 使用长轮询 |
 | 飞书 / Lark | [飞书](/zh/drivers/feishu) | ✅ | ✅ | Webhook 接收；IM API 发送 |

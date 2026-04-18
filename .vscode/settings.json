@@ -5,5 +5,11 @@
     //     "rules": {
     //         "unresolved-import": "ignore"
     //     }
-    // }
+    // },
+    "[python]": {
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.formatOnType": true,
+        "editor.wordBasedSuggestions": "off",
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    }
 }

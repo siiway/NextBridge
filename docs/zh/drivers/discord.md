@@ -22,7 +22,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 | `send_method` | 否 | `webhook` | `"webhook"` 或 `"bot"` |
 | `max_file_size` | 否 | `8388608`（8 MB） | 发送附件时单个文件的最大字节数 |
 | `cqface_webhook_fallback` | 否 | `unicode` | 控制消息中包含 `:cqface<id>:` 标记且使用 Webhook 发送时的回退方式。设为 `"bot"` 时会改用 Bot 发送；设为 `"unicode"` 时仍使用 Webhook，并按 `db/cqface-map.yaml` 中的 Unicode 映射替换标记。 |
-| `send_replies_as_bot` | 否 | `true` | 为 `true` 时，回复消息在 Bot 已连接情况下会优先通过 Bot 发送，即使 `send_method` 为 `"webhook"`。原因是 Discord Webhook 模式不支持指定回复目标消息。需配置 `bot_token` 才会生效。对于 NapCat/QQ 来源，Discord 回复是否 ping 被回复者（`@replied user`）由源消息是否显式 `@` 了 `self_id`（QQ 机器人账号）决定：只有 `@self_id` 才会启用 ping。 |
+| `send_replies_as_bot` | 否 | `true` | 为 `true` 时，回复消息在 Bot 已连接情况下会优先通过 Bot 发送，即使 `send_method` 为 `"webhook"`。原因是 Discord Webhook 模式不支持指定回复目标消息。需配置 `bot_token` 才会生效。对于 QQ 来源，Discord 回复是否 ping 被回复者（`@replied user`）由源消息是否显式 `@` 了 `self_id`（QQ 机器人账号）决定：只有 `@self_id` 才会启用 ping。 |
 | `allow_mentions_everyone` | 否 | `false` | 控制出站消息是否允许触发 Discord 的 `@everyone` / `@here` 提醒。 |
 | `allow_mentions_users` | 否 | `true` | 控制出站消息是否允许提及用户（`<@id>`）。 |
 | `allow_mentions_roles` | 否 | `false` | 控制出站消息是否允许提及身份组（`<@&id>`）。 |
@@ -104,7 +104,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 
 ## CQ 表情 Emoji（discord_emojis.json）
 
-使用 NapCat 驱动器的 `cqface_mode: "emoji"` 时，Discord 驱动器在 Bot 发送时会将 `:cqface<id>:` 标记解析为 Discord 自定义 Emoji（`<:cqface306:emoji_id>`）。如果找不到自定义 Emoji，或 Webhook 回退模式选择了 `unicode`，则会使用 `db/cqface-map.yaml` 里的 Unicode 映射。配置本地自定义 Emoji 的步骤如下：
+使用 QQ 驱动器的 `cqface_mode: "emoji"` 时，Discord 驱动器在 Bot 发送时会将 `:cqface<id>:` 标记解析为 Discord 自定义 Emoji（`<:cqface306:emoji_id>`）。如果找不到自定义 Emoji，或 Webhook 回退模式选择了 `unicode`，则会使用 `db/cqface-map.yaml` 里的 Unicode 映射。配置本地自定义 Emoji 的步骤如下：
 
 1. 在浏览器中访问 `https://discord.com/developers/applications/<your_app_id>/emojis`。
 2. 打开浏览器 **Network**（网络）面板（F12 → Network）。
@@ -118,4 +118,4 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 
 - Bot 发送的消息不会被再次桥接（Webhook 回显不会触发事件）。
 - 文件会被下载后通过 multipart 表单重新上传。若文件超过 `max_file_size`，其 URL 将以文字形式附加到消息中。
-- 对于 NapCat/QQ 来源，若源消息显式 `@self_id`，在可获取目标 Bot 身份时也会转换为 Discord 端对目标 Bot 账号的 mention。
+- 对于 QQ 来源，若源消息显式 `@self_id`，在可获取目标身份时也会转换为 Discord 端对目标账号的 mention。

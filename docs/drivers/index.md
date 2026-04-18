@@ -8,7 +8,7 @@ A **driver** is the adapter between NextBridge and a specific chat platform. Eac
 
 | Platform | Driver | Receive | Send | Notes |
 |---|---|---|---|---|
-| Tencent QQ | [NapCat](/drivers/napcat) | ✅ | ✅ | Uses the unofficial NapCat WebSocket bridge |
+| Tencent QQ | [QQ](/drivers/qq) | ✅ | ✅ | Supports NapCat, Lagrange, and generic OneBot 11 protocols |
 | Discord | [Discord](/drivers/discord) | ✅ | ✅ | Receive via bot gateway; send via webhook or bot |
 | Telegram | [Telegram](/drivers/telegram) | ✅ | ✅ | Uses long polling |
 | Feishu / Lark | [Feishu](/drivers/feishu) | ✅ | ✅ | Webhook receive; IM API send |

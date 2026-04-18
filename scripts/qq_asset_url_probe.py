@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Probe QQ/NapCat asset URL expiry and re-fetch behavior.
+"""Probe QQ asset URL expiry and re-fetch behavior.
 
 This script helps validate the hypothesis:
 - QQ CDN asset URLs may expire after some time.
-- Re-calling NapCat message-fetch APIs may return fresh URLs.
+- Re-calling QQ message-fetch APIs may return fresh URLs.
 
 Supported fetch modes:
 - forward: action `get_forward_msg` with params {"id": <target_id>}
 - msg:     action `get_msg` with params {"message_id": <target_id>}
 
 Example:
-  uv run scripts/napcat_asset_url_probe.py \
+    uv run scripts/qq_asset_url_probe.py \
     --ws-url ws://127.0.0.1:3001 \
     --ws-token your_token \
     --mode forward \
@@ -43,7 +43,7 @@ class AssetEntry:
     path: str
 
 
-class NapCatClient:
+class QqClient:
     def __init__(self, ws_url: str, ws_token: str = ""):
         if ws_token:
             sep = "&" if "?" in ws_url else "?"
@@ -275,7 +275,7 @@ def _fmt_local_time(ts: int) -> str:
 
 
 async def _notify_qq_report(
-    nc: NapCatClient,
+    nc: QqClient,
     qq: str,
     timeout: float,
     report: dict[str, Any],
@@ -290,7 +290,7 @@ async def _notify_qq_report(
     rounds = len(report.get("rounds") or [])
 
     lines = [
-        "[napcat-asset-probe] 探测完成",
+        "[qq-asset-probe] 探测完成",
         f"启动时间: {_fmt_local_time(started_at)}",
         f"结束时间: {_fmt_local_time(ended_at)}",
         f"模式: {report.get('mode', '')}",
@@ -321,12 +321,12 @@ async def _notify_qq_report(
 
 async def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Probe NapCat asset URL expiry behavior"
+        description="Probe QQ asset URL expiry behavior"
     )
     parser.add_argument(
-        "--ws-url", required=True, help="NapCat websocket URL, e.g. ws://127.0.0.1:3001"
+        "--ws-url", required=True, help="QQ websocket URL, e.g. ws://127.0.0.1:3001"
     )
-    parser.add_argument("--ws-token", default="", help="NapCat access token")
+    parser.add_argument("--ws-token", default="", help="QQ access token")
     parser.add_argument("--mode", choices=["forward", "msg"], default="forward")
     parser.add_argument(
         "--id", required=True, help="Forward ID (mode=forward) or message_id (mode=msg)"
@@ -338,7 +338,7 @@ async def main() -> int:
         "--max-rounds", type=int, default=30, help="Maximum probe rounds"
     )
     parser.add_argument(
-        "--action-timeout", type=float, default=30.0, help="Timeout for NapCat actions"
+        "--action-timeout", type=float, default=30.0, help="Timeout for QQ actions"
     )
     parser.add_argument(
         "--probe-timeout",
@@ -370,7 +370,7 @@ async def main() -> int:
 
     action, params = fetch_request(args.mode, args.id)
 
-    nc = NapCatClient(args.ws_url, args.ws_token)
+    nc = QqClient(args.ws_url, args.ws_token)
     first = await nc.call(action, params, timeout=args.action_timeout)
     if not first or first.get("status") != "ok":
         print(f"[fatal] first {action} failed: {first}")

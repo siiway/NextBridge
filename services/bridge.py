@@ -141,9 +141,11 @@ class Bridge:
         platform = None
         owner = getattr(send_func, "__self__", None)
         if owner is not None:
-            module = owner.__class__.__module__
-            if module.startswith("drivers."):
-                platform = module.split(".", 1)[1]
+            platform = getattr(owner, "platform_name", None)
+            if not platform:
+                module = owner.__class__.__module__
+                if module.startswith("drivers."):
+                    platform = module.split(".", 1)[1]
 
         self._senders[instance_id] = (platform, send_func)
         logger.debug(f"Registered sender for instance: {instance_id}")

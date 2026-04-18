@@ -39,7 +39,7 @@ The config has a two-level structure regardless of format:
 | Level | Description |
 |---|---|
 | `global` | Global configuration options that apply to all drivers unless overridden |
-| `<platform>` | One of `napcat`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `vocechat`, `matrix`, `signal`, `teams`, `googlechat`, `slack`, `mattermost`, `rocketchat`, `webhook` |
+| `<platform>` | One of `qq`, `discord`, `telegram`, `feishu`, `dingtalk`, `yunhu`, `kook`, `vocechat`, `matrix`, `signal`, `teams`, `googlechat`, `slack`, `mattermost`, `rocketchat`, `webhook` |
 | `<instance_id>` | A name you choose freely — used to reference this instance in rules |
 
 ## Global Configuration
@@ -259,7 +259,7 @@ You can run **multiple instances of the same platform** by adding more keys unde
 
 ```json
 {
-  "napcat": {
+  "qq": {
     "qq_main": {
       "ws_url": "ws://127.0.0.1:3001",
       "ws_token": "secret"
@@ -322,7 +322,7 @@ You can run **multiple instances of the same platform** by adding more keys unde
 ## Full example (YAML)
 
 ```yaml
-napcat:
+qq:
   qq_main:
     ws_url: ws://127.0.0.1:3001
     ws_token: secret

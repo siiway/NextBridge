@@ -34,7 +34,7 @@ Declare each platform instance with its credentials. Every key under a platform 
 
 ```json
 {
-  "napcat": {
+  "qq": {
     "my_qq": {
       "ws_url": "ws://127.0.0.1:3001",
       "ws_token": "your_token"
