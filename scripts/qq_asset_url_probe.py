@@ -320,9 +320,7 @@ async def _notify_qq_report(
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Probe QQ asset URL expiry behavior"
-    )
+    parser = argparse.ArgumentParser(description="Probe QQ asset URL expiry behavior")
     parser.add_argument(
         "--ws-url", required=True, help="QQ websocket URL, e.g. ws://127.0.0.1:3001"
     )

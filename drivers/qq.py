@@ -75,9 +75,7 @@ logger = log.get_logger()
 
 _DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface-gif/"
 _FORWARD_TEMPLATE_PATH: Path = (
-    Path(__file__).resolve().parent.parent
-    / "templates"
-    / "qq_forward_template.html"
+    Path(__file__).resolve().parent.parent / "templates" / "qq_forward_template.html"
 )
 _RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
 _RICHHEADER_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
