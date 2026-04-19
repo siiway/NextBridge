@@ -6,7 +6,7 @@ NextBridge supports several built-in commands that users can type directly into 
 
 ## Account Binding
 
-NextBridge only renders cross-platform mentions as native pings after you create an **explicit binding (bind)**. It no longer falls back to matching **display names**, because that becomes ambiguous when multiple users share the same name.
+NextBridge resolves cross-platform mentions by trying **explicit binding (bind)** first. If no binding is available, it may fall back to matching **display names** on the target platform.
 
 **Built-in commands use the global command prefix from config. The default prefix is `nb`, so the examples below use `/nb ...`.**
 
@@ -33,3 +33,19 @@ If you want to reset your identity or unlink your accounts, you can type:
 To see all accounts currently linked to your identity, type:
 
 `/nb bind list`
+
+## Cross-Platform Ping by Nickname
+
+When someone does not have an account on your current platform, you can ping them by their nickname on another platform.
+
+Use:
+
+`/ping <nickname>`
+
+Example:
+
+- You are on QQ.
+- The target user only has a Discord account named `Alice`.
+- Send `/ping Alice` in QQ.
+
+NextBridge will try to resolve `Alice` on each target instance and convert it into a native mention where possible.

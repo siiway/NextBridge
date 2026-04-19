@@ -158,8 +158,26 @@ class Bridge:
         prefix = self._get_command_prefix()
         return (
             f"Usage: `/{prefix} bind setup`, `/{prefix} bind confirm <code>`, "
-            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`"
+            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <nickname>`"
         )
+
+    def _parse_ping_command(self, text: str) -> str | None:
+        parts = text.strip().split(maxsplit=1)
+        if not parts:
+            return None
+        command = parts[0]
+        if not command.startswith("/"):
+            return None
+
+        root = command[1:].split("@", 1)[0].lower()
+        if root != "ping":
+            return None
+
+        if len(parts) < 2:
+            return ""
+
+        nickname = parts[1].strip().lstrip("@").strip()
+        return nickname
 
     def _parse_internal_command(self, text: str) -> tuple[str, list[str]] | None:
         parts = text.split()
@@ -277,6 +295,18 @@ class Bridge:
 
     async def on_message(self, msg: NormalizedMessage):
         logger.info(f"on_message: {msg!s}")
+        ping_nickname = self._parse_ping_command(msg.text)
+        if ping_nickname is not None:
+            if not ping_nickname:
+                sender_info = self._senders.get(msg.instance_id)
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, "Usage: `/ping <nickname>`")
+                return
+
+            msg.text = f"@{ping_nickname}"
+            msg.mentions = [{"id": "", "name": ping_nickname}]
+
         # Handle internal commands
         command = self._parse_internal_command(msg.text)
         if command is not None:
@@ -453,6 +483,24 @@ class Bridge:
             extra
         )
 
+    def _resolve_target_mention_user_id(
+        self, msg: NormalizedMessage, mention: dict[str, Any], target_instance: str
+    ) -> str | None:
+        mention_id = str(mention.get("id", "") or "")
+        mention_name = str(mention.get("name", "") or "").strip()
+
+        if mention_id:
+            target_uid = msg_db().get_bound_user_id(
+                msg.instance_id, mention_id, target_instance
+            )
+            if target_uid:
+                return target_uid
+
+        if mention_name:
+            return msg_db().get_user_id_by_name(target_instance, mention_name)
+
+        return None
+
     async def _dispatch(
         self,
         msg: NormalizedMessage,
@@ -511,9 +559,7 @@ class Bridge:
             source_self_mention_names: list[str] = []
             source_self_id = str(getattr(msg, "source_self_id", "") or "")
             for m in msg.mentions:
-                target_uid = msg_db().get_bound_user_id(
-                    msg.instance_id, m["id"], target_id
-                )
+                target_uid = self._resolve_target_mention_user_id(msg, m, target_id)
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
                     continue
@@ -618,9 +664,7 @@ class Bridge:
             source_self_mention_names: list[str] = []
             source_self_id = str(getattr(msg, "source_self_id", "") or "")
             for m in msg.mentions:
-                target_uid = msg_db().get_bound_user_id(
-                    msg.instance_id, m["id"], target_id
-                )
+                target_uid = self._resolve_target_mention_user_id(msg, m, target_id)
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
                     continue

@@ -19,8 +19,8 @@ import html
 import json
 import math
 import re
-import uuid
 import tempfile
+import uuid
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -36,7 +36,8 @@ import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import cqface, media
-from services.config import UNSET, get as get_config, get_proxy
+from services.config import UNSET, get_proxy
+from services.config import get as get_config
 from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage

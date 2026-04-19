@@ -4,16 +4,16 @@ import importlib
 import importlib.util
 import sys
 from pathlib import Path
+from tomllib import load as load_toml
 
 from pydantic import ValidationError
-from tomllib import load as load_toml
 
 import services.error  # noqa: F401
 import services.logger as log
 import services.util as u
-import services.config_io as config_io
-from services.config_schema import GlobalConfig
+from services import config_io
 from services.bridge import bridge
+from services.config_schema import GlobalConfig
 from services.db import db_target_version, init_db
 from services.http_server import HttpServerManager
 
@@ -102,7 +102,7 @@ async def main():
 
     bridge.load_sensitive_values(raw)
 
-    enabled_platforms = [key for key in raw.keys() if key != "global"]
+    enabled_platforms = [key for key in raw if key != "global"]
     _load_all_drivers(enabled_platforms)
     from drivers.registry import all_drivers
 
