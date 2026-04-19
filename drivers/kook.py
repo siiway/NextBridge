@@ -14,22 +14,21 @@
 # Rule channel keys:
 #   channel_id – KOOK text channel ID
 
-from drivers.registry import register
 import io
 import re
 
 import khl
-
-import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
-from services.db import msg_db
-from drivers import BaseDriver
-
 from aiohttp import ClientSession
 from aiohttp_socks import ProxyConnector
+
+import services.logger as log
+from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.db import msg_db
+from services.message import Attachment, NormalizedMessage
 
 
 class KookConfig(_DriverConfig):
@@ -61,19 +60,8 @@ class KookDriver(BaseDriver[KookConfig]):
             logger.debug(f"Kook [{self.instance_id}] using proxy {self._proxy}")
 
             requester = self._bot.client.gate.requester
-            original_request = requester.request
-            proxy_url = self._proxy
-
-            async def proxied_request(method: str, route: str, **params):
-                # inject connector on 1st request
-                if requester._cs is not None and requester._cs.connector is None:
-                    connector = ProxyConnector.from_url(proxy_url, rdns=True)
-                    sess = ClientSession(connector=connector)
-                    requester._cs = sess
-
-                return await original_request(method, route, **params)
-
-            requester.request = proxied_request
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+            requester._cs = ClientSession(connector=connector)
 
         # Register our handler alongside khl's internal command-manager handler.
         # khl's Client dispatches to all registered handlers for a given type.

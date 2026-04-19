@@ -27,7 +27,6 @@
 # Rule channel keys:
 #   chat_id – Feishu open chat ID, e.g. "oc_xxxxxxxxxxxxxxxxxx"
 
-from drivers.registry import register
 import asyncio
 import io
 import json
@@ -35,26 +34,27 @@ import logging
 import re
 import threading
 
-from fastapi import FastAPI, Request, Response
 import lark_oapi as lark
+from fastapi import FastAPI, Request, Response
 from lark_oapi.api.contact.v3 import GetUserRequest
 from lark_oapi.api.im.v1 import (
-    CreateMessageRequest,
-    CreateMessageRequestBody,
-    CreateImageRequest,
-    CreateImageRequestBody,
     CreateFileRequest,
     CreateFileRequestBody,
+    CreateImageRequest,
+    CreateImageRequestBody,
+    CreateMessageRequest,
+    CreateMessageRequestBody,
     GetMessageResourceRequest,
     ReplyMessageRequest,
     ReplyMessageRequestBody,
 )
 
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class FeishuConfig(_DriverConfig):
@@ -202,10 +202,10 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
     async def _handle_http(self, request: Request) -> Response:
         assert self._handler is not None  # Type narrowing - handler is set in start()
         handler = self._handler
-        body = await request.read()
+        body = await request.body()
         # Create RawRequest with correct parameter names for lark-oapi
         raw_req = lark.RawRequest()
-        raw_req.uri = request.path
+        raw_req.uri = request.url.path
         raw_req.headers = dict(request.headers)
         raw_req.body = body
 
@@ -213,7 +213,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         loop = asyncio.get_running_loop()
         resp = await loop.run_in_executor(None, lambda: handler.do(raw_req))
         return Response(
-            body=resp.content,
+            content=resp.content,
             status_code=resp.status_code or 200,
             media_type=getattr(resp, "content_type", "application/json")
             or "application/json",

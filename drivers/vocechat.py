@@ -22,7 +22,6 @@
 #   gid – VoceChat group/channel ID  (integer or string)
 #   uid – VoceChat user ID for DMs   (integer or string)
 
-from drivers.registry import register
 import asyncio
 import json
 
@@ -32,11 +31,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config import get_proxy, UNSET
-from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class VoceChatConfig(_DriverConfig):
@@ -113,7 +113,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
 
     async def _handle_event(self, request: Request) -> PlainTextResponse:
         try:
-            body = await request.read()
+            body = await request.body()
             event = json.loads(body)
         except Exception:
             return PlainTextResponse("Bad JSON", status_code=400)

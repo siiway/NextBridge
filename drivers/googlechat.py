@@ -25,29 +25,28 @@
 #
 # * Exactly one of service_account_file or service_account_json is required.
 
-from drivers.registry import register
 import asyncio
 import json
 from pathlib import Path
 
 import aiohttp
+import google.auth.transport.requests as _ga_req
+import google.oauth2.service_account as _sa
+import requests
 from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import model_validator
-import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-import google.oauth2.service_account as _sa
-import google.auth.transport.requests as _ga_req
-
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class GoogleChatConfig(_DriverConfig):
@@ -199,7 +198,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 return PlainTextResponse("Invalid token", status_code=403)
 
         try:
-            body = await request.read()
+            body = await request.body()
             event = json.loads(body)
         except Exception:
             return PlainTextResponse("Bad JSON", status_code=400)

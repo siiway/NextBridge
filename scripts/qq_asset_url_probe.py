@@ -49,12 +49,6 @@ class QqClient:
             sep = "&" if "?" in ws_url else "?"
             ws_url = f"{ws_url}{sep}access_token={ws_token}"
         self.ws_url = ws_url
-        self._connect_kwargs = {
-            "ping_interval": None,
-            "ping_timeout": None,
-            "close_timeout": 5,
-            "open_timeout": 10,
-        }
 
     async def call(
         self, action: str, params: dict[str, Any], timeout: float
@@ -62,7 +56,13 @@ class QqClient:
         echo = str(uuid.uuid4())
         payload = {"action": action, "params": params, "echo": echo}
 
-        async with websockets.connect(self.ws_url, **self._connect_kwargs) as ws:
+        async with websockets.connect(
+            self.ws_url,
+            ping_interval=None,
+            ping_timeout=None,
+            close_timeout=5,
+            open_timeout=10,
+        ) as ws:
             await ws.send(json.dumps(payload, ensure_ascii=False))
 
             deadline = asyncio.get_running_loop().time() + timeout

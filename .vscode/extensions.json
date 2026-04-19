@@ -5,6 +5,7 @@
         "yzhang.markdown-all-in-one",
         // "astral-sh.ty",
         "ms-python.python",
-        "redhat.vscode-yaml"
+        "redhat.vscode-yaml",
+        "astral-sh.ty"
     ]
 }

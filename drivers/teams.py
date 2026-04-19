@@ -18,7 +18,6 @@
 #                     (e.g. "https://smba.trafficmanager.net/amer/")
 #   conversation_id – Value of activity.conversation.id
 
-from drivers.registry import register
 import asyncio
 import json
 import time
@@ -29,11 +28,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class TeamsConfig(_DriverConfig):
@@ -125,7 +125,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
 
     async def _handle_activity(self, request: Request) -> PlainTextResponse:
         try:
-            body = await request.read()
+            body = await request.body()
             activity = json.loads(body)
         except Exception:
             return PlainTextResponse("Bad JSON", status_code=400)

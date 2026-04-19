@@ -18,9 +18,15 @@
 # Rule channel keys:
 #   room_id – Matrix room ID, e.g. "!abc123:matrix.org"
 
-from drivers.registry import register
+from pathlib import Path
+from typing import cast
+
+from aiohttp import ClientSession, TCPConnector
+from aiohttp_socks import ProxyConnector
+from mautrix.api import HTTPAPI
 from mautrix.client import Client
 from mautrix.client.syncer import EventHandler
+from mautrix.crypto import OlmMachine
 from mautrix.types import (
     AudioInfo,
     ContentURI,
@@ -38,21 +44,15 @@ from mautrix.types import (
     UserID,
     VideoInfo,
 )
-from mautrix.api import HTTPAPI
-from mautrix.crypto import OlmMachine
-from typing import cast
-from aiohttp import ClientSession, TCPConnector
-from aiohttp_socks import ProxyConnector
-from pathlib import Path
-
 from pydantic import model_validator
 
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class MatrixConfig(_DriverConfig):
@@ -152,9 +152,10 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         if self.config.enable_e2e:
             try:
                 from contextlib import asynccontextmanager
+
+                from mautrix.client.state_store import MemoryStateStore
                 from mautrix.crypto import StateStore
                 from mautrix.crypto.store import MemoryCryptoStore
-                from mautrix.client.state_store import MemoryStateStore
 
                 # Create a custom CryptoStore that overrides the transaction() method
                 class CustomCryptoStore(MemoryCryptoStore):
@@ -283,13 +284,13 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             name = await self._client.get_displayname(UserID(user_id))
             if name:
                 display_name = name
-        except Exception:
+        except Exception:  # noqa: S110
             pass
         try:
             mxc = await self._client.get_avatar_url(UserID(user_id))
             if mxc:
                 avatar_url = self._mxc_to_http(str(mxc))
-        except Exception:
+        except Exception:  # noqa: S110
             pass
         return display_name, avatar_url
 
@@ -311,21 +312,27 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
 
             # Convert to a regular MessageEvent and process
             if decrypted_event:
-                # Create a mock MessageEvent with the decrypted content
-                from mautrix.types import MessageEvent, RoomID, UserID
+                # Create a mock MessageEvent with the decrypted message content.
+                decrypted_content = getattr(decrypted_event, "content", None)
+                if isinstance(
+                    decrypted_content,
+                    (TextMessageEventContent, MediaMessageEventContent),
+                ):
+                    from mautrix.types import MessageEvent, RoomID, UserID
 
-                # Create a new event with decrypted content
-                decrypted_msg_event = MessageEvent(
-                    content=decrypted_event,
-                    type=EventType.ROOM_MESSAGE,
-                    room_id=RoomID(event.room_id),
-                    event_id=event.event_id,
-                    sender=UserID(event.sender),
-                    timestamp=event.timestamp,
-                )
-
-                # Process the decrypted message
-                await self._on_message(decrypted_msg_event)
+                    decrypted_msg_event = MessageEvent(
+                        content=decrypted_content,
+                        type=EventType.ROOM_MESSAGE,
+                        room_id=RoomID(event.room_id),
+                        event_id=event.event_id,
+                        sender=UserID(event.sender),
+                        timestamp=event.timestamp,
+                    )
+                    await self._on_message(decrypted_msg_event)
+                else:
+                    logger.warning(
+                        f"Matrix [{self.instance_id}] unsupported decrypted content type"
+                    )
             else:
                 logger.warning(f"Matrix [{self.instance_id}] Failed to decrypt event")
         except Exception as e:

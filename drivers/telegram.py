@@ -96,7 +96,11 @@ def _prepare_photo_for_telegram(
                 scale = min(_TG_PHOTO_MAX_SIDE / width, _TG_PHOTO_MAX_SIDE / height)
                 width = max(1, int(width * scale))
                 height = max(1, int(height * scale))
-                resampling = getattr(Image, "Resampling", Image).LANCZOS
+                # Pillow>=9 uses Image.Resampling; older versions expose constants on Image.
+                if hasattr(Image, "Resampling"):
+                    resampling = Image.Resampling.LANCZOS
+                else:
+                    resampling = Image.LANCZOS
                 work = work.resize((width, height), resampling)
                 changed = True
 
@@ -320,7 +324,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             if from_user
             else user_id
         )
-        username = from_user.username if from_user else ""
+        username = from_user.username or "" if from_user else ""
 
         # Get user avatar
         user_avatar = ""

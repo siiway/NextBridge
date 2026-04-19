@@ -23,32 +23,30 @@
 #   channel_id – Slack channel ID, e.g. "C1234567890"
 #                (ignored when send_method="webhook"; channel is fixed by the webhook URL)
 
-from drivers.registry import register
 import asyncio
 import hashlib
 import hmac as _hmac
 import json
 import time
+from typing import Literal
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
-from typing import Literal
-
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class SlackConfig(_DriverConfig):
@@ -206,7 +204,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
     async def _handle_events_api(
         self, request: Request
     ) -> JSONResponse | PlainTextResponse:
-        body = await request.read()
+        body = await request.body()
 
         if self.config.signing_secret and not _verify_slack_signature(
             self.config.signing_secret, request.headers, body
@@ -430,8 +428,10 @@ class SlackDriver(BaseDriver[SlackConfig]):
                         mid = resp.get("ts")
                         if not first_msg_id:
                             first_msg_id = str(mid)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        f"Slack [{self.instance_id}] failed to send attachment label: {e}"
+                    )
                 continue
 
             data_bytes, mime = result
