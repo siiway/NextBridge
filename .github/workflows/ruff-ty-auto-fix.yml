@@ -1,4 +1,4 @@
-name: Ruff Lint & Format & Auto Fix
+name: Ruff + Ty Auto Fix
 
 on:
   push:
@@ -25,13 +25,19 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Install Ruff & Run Fix (lint issues)
         uses: astral-sh/ruff-action@v3
         with:
-          args: "check --fix"
+          args: "check --fix --output-format=github"
 
       - name: Run Ruff format
-        run: ruff format .
+        run: ruff format . --output-format=github
+
+      - name: Run Ty check
+        run: uv run ty check --output-format=github
 
       - name: Auto commit fixes with Verified badge
         uses: siiway/verified_bot_commit@v0
