@@ -6,6 +6,7 @@
         // "astral-sh.ty",
         "ms-python.python",
         "redhat.vscode-yaml",
-        "astral-sh.ty"
+        "astral-sh.ty",
+        "streetsidesoftware.code-spell-checker"
     ]
 }
