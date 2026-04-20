@@ -300,7 +300,9 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 if name:
                     text = text.replace(f"@{m['name']}", f"@{name}")
             except Exception:
-                logger.debug(f"VoceChat [{self.instance_id}] get user info for mention {m} failed")
+                logger.debug(
+                    f"VoceChat [{self.instance_id}] get user info for mention {m} failed"
+                )
 
         if text.strip():
             # Use markdown if rich_header was applied; plain text otherwise

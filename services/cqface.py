@@ -28,7 +28,7 @@ def _load_cqface_map() -> dict[str, str]:
             with path.open("r", encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
         except Exception:
-            logger.opt(exception=True).warning(f"Load cqface map failed!")
+            logger.opt(exception=True).warning("Load cqface map failed!")
             return {}
 
         if not isinstance(raw, dict):

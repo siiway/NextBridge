@@ -267,7 +267,9 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                     u = data.get("user", {})
                     username = u.get("username", "")
         except Exception:
-            logger.opt(exception=True).debug(f"Rocket.Chat [{self.instance_id}] get username for userid {user_id} failed")
+            logger.opt(exception=True).debug(
+                f"Rocket.Chat [{self.instance_id}] get username for userid {user_id} failed"
+            )
 
         if username:
             self._username_cache[user_id] = username

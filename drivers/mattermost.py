@@ -178,10 +178,14 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                     try:
                         name, _ = await self._get_user_info(uid, server)
                     except Exception:
-                        logger.opt(exception=True).debug(f"Mattermost [{self.instance_id}] get user info failed")
+                        logger.opt(exception=True).debug(
+                            f"Mattermost [{self.instance_id}] get user info failed"
+                        )
                     mentions.append({"id": uid, "name": name})
             except json.JSONDecodeError:
-                logger.debug(f"Mattermost [{self.instance_id}] parse raw memtions json failed")
+                logger.debug(
+                    f"Mattermost [{self.instance_id}] parse raw memtions json failed"
+                )
 
         display_name, avatar_url = await self._get_user_info(user_id, server)
         username = await self._get_username(user_id, server)
@@ -223,7 +227,9 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                     u = await resp.json()
                     username = u.get("username", "")
         except Exception:
-            logger.opt(exception=True).debug(f"Mattermost [{self.instance_id}] get username for userid {user_id} failed")
+            logger.opt(exception=True).debug(
+                f"Mattermost [{self.instance_id}] get username for userid {user_id} failed"
+            )
 
         if username:
             self._username_cache[user_id] = username

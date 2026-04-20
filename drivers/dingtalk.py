@@ -121,8 +121,9 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             match, err = _verify_sign(ts, self.config.signing_secret, sig)
             if not match:
                 logger.warning(
-                    f"DingTalk [{self.instance_id}] webhook signature mismatch"
-                    f": {err}" if err else ""
+                    f"DingTalk [{self.instance_id}] webhook signature mismatch: {err}"
+                    if err
+                    else ""
                 )
                 return JSONResponse({"message": "forbidden"}, status_code=403)
 
@@ -360,9 +361,9 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
 def _verify_sign(timestamp: str, secret: str, sign: str) -> tuple[bool, str]:
     """Verify DingTalk webhook HMAC-SHA256 signature."""
     if not timestamp:
-        return False, 'no timestamp found'
+        return False, "no timestamp found"
     if not sign:
-        return False, 'no sign found'
+        return False, "no sign found"
     try:
         string_to_sign = f"{timestamp}\n{secret}"
         expected = base64.b64encode(
@@ -372,7 +373,7 @@ def _verify_sign(timestamp: str, secret: str, sign: str) -> tuple[bool, str]:
                 digestmod=hashlib.sha256,
             ).digest()
         ).decode("utf-8")
-        return hmac.compare_digest(expected, sign), ''
+        return hmac.compare_digest(expected, sign), ""
     except Exception as e:
         return False, str(e)
 
