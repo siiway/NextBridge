@@ -19,6 +19,7 @@ import html
 import json
 import math
 import re
+import ssl
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ class QqConfig(_DriverConfig):
     protocol: Literal["napcat", "lagrange", "onebot_v11"] = "napcat"
     ws_url: str = "ws://127.0.0.1:3001"
     ws_token: str = ""
+    ws_ssl_verify: bool = True
     max_file_size: int = 10 * 1024 * 1024
     file_send_mode: Literal["stream", "base64"] = "stream"
     cqface_mode: Literal["gif", "emoji"] = "gif"
@@ -203,6 +205,16 @@ class QqDriver(BaseDriver[QqConfig]):
         else:
             connect_kwargs = {}
 
+        if ws_url.lower().startswith("wss://") and not self.config.ws_ssl_verify:
+            # Allow self-signed/private CA certificates when explicitly requested.
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connect_kwargs["ssl"] = ssl_context
+            logger.warning(
+                f"NapCat [{self.instance_id}] TLS certificate verification is disabled for WebSocket"
+            )
+
         while True:
             try:
                 async with websockets.connect(ws_url, **connect_kwargs) as ws:
@@ -211,6 +223,11 @@ class QqDriver(BaseDriver[QqConfig]):
                     await self._listen(ws)
             except websockets.exceptions.ConnectionClosedOK:
                 logger.info(f"NapCat [{self.instance_id}] connection closed normally")
+            except ssl.SSLCertVerificationError as e:
+                logger.error(
+                    f"NapCat [{self.instance_id}] TLS certificate verification failed: {e}. "
+                    "If your server uses a self-signed cert, set qq.<instance_id>.ws_ssl_verify=false"
+                )
             except Exception as e:
                 logger.error(f"NapCat [{self.instance_id}] connection error: {e}")
             finally:
@@ -514,8 +531,8 @@ class QqDriver(BaseDriver[QqConfig]):
             f"group={group_id} message_id={message_id} seq={message_seq}"
         )
         time = event.get("time")
-        # Get user's qid
-        qid = None  # await self._get_qid(user_id, group_id)
+        # Use qid for username when available; fallback to QQ number.
+        qid = (await self._get_qid(user_id, group_id)).strip()
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
         text, attachments, reply_id, mentions = await self._parse_message(
@@ -1731,37 +1748,37 @@ class QqDriver(BaseDriver[QqConfig]):
             self._pending.pop(echo, None)
             return None
 
-    # async def _get_qid(self, user_id: str, group_id: str | None = None) -> str:
-    #     """Get user's qid using NapCat API with caching."""
-    #     # Check cache first
-    #     if user_id in self._qid_cache:
-    #         return self._qid_cache[user_id]
+    async def _get_qid(self, user_id: str, group_id: str | None = None) -> str:
+        """Get user's qid using NapCat API with caching."""
+        # Check cache first
+        if user_id in self._qid_cache:
+            return self._qid_cache[user_id]
 
-    #     try:
-    #         # Use get_stranger_info to get qid
-    #         result = await self._call(
-    #             "get_stranger_info", {"user_id": user_id}, timeout=30.0
-    #         )
-    #         logger.debug(
-    #             f"NapCat [{self.instance_id}] get_stranger_info result for {user_id}: {result}"
-    #         )
-    #         if result and result.get("status") == "ok" and result.get("data"):
-    #             data = result["data"]
-    #             qid = data.get("qid", "")
-    #             # Cache the result
-    #             if qid:
-    #                 self._qid_cache[user_id] = qid
-    #             logger.debug(f"NapCat [{self.instance_id}] qid for {user_id}: {qid}")
-    #             return qid
-    #         else:
-    #             logger.warning(
-    #                 f"NapCat [{self.instance_id}] get_stranger_info failed for {user_id}: {result}"
-    #             )
-    #     except Exception as e:
-    #         logger.warning(
-    #             f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
-    #         )
-    #     return ""
+        try:
+            # Use get_stranger_info to get qid
+            result = await self._call(
+                "get_stranger_info", {"user_id": user_id}, timeout=30.0
+            )
+            # logger.debug(
+            #     f"NapCat [{self.instance_id}] get_stranger_info result for {user_id}: {result}"
+            # )
+            if result and result.get("status") == "ok" and result.get("data"):
+                data = result["data"]
+                qid = data.get("qid", "")
+                # Cache the result
+                if qid:
+                    self._qid_cache[user_id] = qid
+                logger.debug(f"NapCat [{self.instance_id}] qid for {user_id}: {qid}")
+                return qid
+            else:
+                logger.warning(
+                    f"NapCat [{self.instance_id}] get_stranger_info failed for {user_id}: {result}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
+            )
+        return ""
 
     async def _upload_file_stream(self, data_bytes: bytes, filename: str) -> str | None:
         """
