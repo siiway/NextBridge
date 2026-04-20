@@ -136,10 +136,10 @@ class HttpServerManager:
             root.mount(mount.path, mount.app)
             logger.info(f"HTTP mount registered: {mount.instance_id} -> {mount.path}")
 
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        root_path = self.root_path if not self.root_path == "/" else ""
         logger.info(
-            f"Shared HTTP server starting on {self.host}:{self.port}" + self.root_path
-            if not self.root_path == "/"
-            else ""
+            f"Shared HTTP server starting on {host}:{self.port}{root_path}"
         )
         logger.debug(
             f"(root_path='{self.root_path or '/'}', mounts={len(self._mounts)}, "
