@@ -34,13 +34,13 @@ To see all accounts currently linked to your identity, type:
 
 `/nb bind list`
 
-## Cross-Platform Ping by Nickname
+## Cross-Platform Ping by Target
 
-When someone does not have an account on your current platform, you can ping them by their nickname on another platform.
+When someone does not have an account on your current platform, you can ping them by a target identifier on another platform.
 
 Use:
 
-`/ping <nickname>`
+`/ping <target>`
 
 Example:
 
@@ -48,4 +48,13 @@ Example:
 - The target user only has a Discord account named `Alice`.
 - Send `/ping Alice` in QQ.
 
-NextBridge will try to resolve `Alice` on each target instance and convert it into a native mention where possible.
+NextBridge will try to resolve the target on each destination instance and convert it into a native mention where possible.
+
+Default target resolution (non-QQ):
+- Prefer explicit account bindings if available.
+- Otherwise resolve by the target platform username cache (instead of nickname).
+
+QQ target resolution:
+- Prefer explicit account bindings if available.
+- If the target text is numeric, it is treated as a QQ number directly.
+- Otherwise, it is treated as a QQ qid alias and resolved from cached user mappings.

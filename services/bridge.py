@@ -158,7 +158,7 @@ class Bridge:
         prefix = self._get_command_prefix()
         return (
             f"Usage: `/{prefix} bind setup`, `/{prefix} bind confirm <code>`, "
-            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <nickname>`"
+            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <target>`"
         )
 
     def _parse_ping_command(self, text: str) -> str | None:
@@ -341,7 +341,13 @@ class Bridge:
 
         # Save sender's user mapping
         if msg.user_id:
-            msg_db().save_user(msg.instance_id, msg.user_id, msg.user)
+            if msg.instance_id == "qq":
+                # QQ users are better addressed by qid; fallback to QQ number.
+                display_name = (msg.username or msg.user_id).strip() or msg.user_id
+            else:
+                # Default ping target matching prefers stable username over nickname.
+                display_name = (msg.username or msg.user).strip() or msg.user_id
+            msg_db().save_user(msg.instance_id, msg.user_id, display_name)
 
         reply_bridge_id = None
         if msg.reply_parent:
@@ -495,6 +501,16 @@ class Bridge:
             )
             if target_uid:
                 return target_uid
+
+        if target_instance == "qq":
+            # QQ target addressing uses numeric QQ id or qid alias.
+            if mention_id.isdigit():
+                return mention_id
+            if mention_name.isdigit():
+                return mention_name
+            if mention_name:
+                return msg_db().get_user_id_by_name(target_instance, mention_name)
+            return None
 
         if mention_name:
             return msg_db().get_user_id_by_name(target_instance, mention_name)
