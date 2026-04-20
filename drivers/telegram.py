@@ -206,6 +206,8 @@ _CONTENT_FILTER = (
     | filters.ANIMATION
 ) & ~filters.COMMAND
 
+_COMMAND_FILTER = filters.COMMAND
+
 
 class TelegramDriver(BaseDriver[TelegramConfig]):
     def __init__(self, instance_id: str, config: TelegramConfig, bridge):
@@ -232,6 +234,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             .build()
         )
         self._app.add_handler(MessageHandler(_CONTENT_FILTER, self._on_message))
+        self._app.add_handler(MessageHandler(_COMMAND_FILTER, self._on_command_message))
         self._app.add_error_handler(self._on_error)
 
         logger.info(f"Telegram [{self.instance_id}] starting application and polling.")
@@ -286,6 +289,33 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     # ------------------------------------------------------------------
     # Receive
     # ------------------------------------------------------------------
+
+    def _is_nextbridge_command_text(self, text: str) -> bool:
+        command_text = (text or "").strip()
+        if not command_text.startswith("/"):
+            return False
+
+        root = command_text[1:].split(maxsplit=1)[0].split("@", 1)[0].lower()
+        if root == "ping":
+            return True
+
+        prefix = (self.bridge.command_prefix or "nb").strip().lstrip("/").lower()
+        if not prefix:
+            prefix = "nb"
+        return root == prefix
+
+    async def _on_command_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        msg = update.message
+        if not msg or not msg.text:
+            return
+
+        # Only forward NextBridge built-in commands (/ping and /<prefix> ...).
+        if not self._is_nextbridge_command_text(msg.text):
+            return
+
+        await self._on_message(update, context)
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = update.message

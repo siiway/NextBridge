@@ -15,14 +15,14 @@ The Telegram driver uses [python-telegram-bot](https://python-telegram-bot.org/)
 
 Add under `telegram.<instance_id>` in `config.json`:
 
-| Key | Required | Default | Description |
-|---|---|---|---|
-| `bot_token` | Yes | — | Bot token from @BotFather |
-| `max_file_size` | No | `52428800` (50 MB) | Maximum bytes per attachment when sending |
-| `rich_header_host` | No | `"https://richheader.siiway.top"` | Base URL of your Cloudflare rich-header worker (see [Rich Header](#rich-header)) |
-| `avatar_proxy_host` | No | — | Base URL of your Cloudflare avatar proxy worker (see [Avatar Proxy](#avatar-proxy)) |
-| `photo_padding_color` | No | `"#000000"` | Padding color used when Telegram image dimensions are invalid (supports `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `r,g,b[,a]`). Set to `null` to disable padding; over-limit images are downgraded to text labels in the same `[Image: ...]` format. |
-| `proxy` | No | — | Proxy URL for all Telegram API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting). |
+| Key                   | Required | Default                           | Description                                                                                                                                                                                                                                |
+| --------------------- | -------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bot_token`           | Yes      | —                                 | Bot token from @BotFather                                                                                                                                                                                                                  |
+| `max_file_size`       | No       | `52428800` (50 MB)                | Maximum bytes per attachment when sending                                                                                                                                                                                                  |
+| `rich_header_host`    | No       | `"https://richheader.siiway.top"` | Base URL of your Cloudflare rich-header worker (see [Rich Header](#rich-header))                                                                                                                                                           |
+| `avatar_proxy_host`   | No       | —                                 | Base URL of your Cloudflare avatar proxy worker (see [Avatar Proxy](#avatar-proxy))                                                                                                                                                        |
+| `photo_padding_color` | No       | `"#000000"`                       | Padding color used when Telegram image dimensions are invalid (supports `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `r,g,b[,a]`). Set to `null` to disable padding; over-limit images are downgraded to text labels in the same `[Image: ...]` format. |
+| `proxy`               | No       | —                                 | Proxy URL for all Telegram API requests (e.g., `http://proxy.example.com:8080` or `socks5://proxy.example.com:1080`). Set to `null` to explicitly disable proxy for this instance (ignores global proxy setting).                          |
 
 ```json
 {
@@ -54,8 +54,8 @@ To disable image padding and fallback to text for over-limit images:
 
 Use under `channels` or `from`/`to` in `rules.json`:
 
-| Key | Description |
-|---|---|
+| Key       | Description                                                                  |
+| --------- | ---------------------------------------------------------------------------- |
 | `chat_id` | Telegram chat ID. Use a negative number for groups (e.g. `"-1002206757362"`) |
 
 ```json
@@ -66,25 +66,25 @@ Use under `channels` or `from`/`to` in `rules.json`:
 
 ## Received message types
 
-| Telegram type | Attachment type |
-|---|---|
-| Photo | `image` |
-| Video | `video` |
-| Voice | `voice` |
-| Audio | `voice` |
-| Document | `file` |
-| Animation (GIF) | `video` |
+| Telegram type   | Attachment type |
+| --------------- | --------------- |
+| Photo           | `image`         |
+| Video           | `video`         |
+| Voice           | `voice`         |
+| Audio           | `voice`         |
+| Document        | `file`          |
+| Animation (GIF) | `video`         |
 
 Media messages may include a caption, which becomes the message text.
 
 ## Sending
 
 | Attachment type | Telegram API method |
-|---|---|
-| `image` | `send_photo` |
-| `voice` | `send_voice` |
-| `video` | `send_video` |
-| `file` | `send_document` |
+| --------------- | ------------------- |
+| `image`         | `send_photo`        |
+| `voice`         | `send_voice`        |
+| `video`         | `send_video`        |
+| `file`          | `send_document`     |
 
 The message text is sent as the caption of the first attachment. If there are no attachments (or all fail), it is sent as a plain `send_message`. Text for subsequent attachments is omitted.
 
@@ -122,9 +122,9 @@ We provide a public endpoint, `https://richheader.siiway.top`. Feel free to use 
 
 ### Fallback behaviour
 
-| Condition | Behaviour |
-|---|---|
-| `rich_header_host` is not set | Bold/italic HTML header prepended to the message text |
+| Condition                          | Behaviour                                                                     |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| `rich_header_host` is not set      | Bold/italic HTML header prepended to the message text                         |
 | Message includes media attachments | Same bold/italic HTML fallback (Telegram captions cannot carry link previews) |
 
 ## Avatar Proxy
@@ -141,11 +141,12 @@ When `avatar_proxy_host` is configured, NextBridge uses a Cloudflare Worker to p
 
 ### Fallback behaviour
 
-| Condition | Behaviour |
-|---|---|
+| Condition                      | Behaviour                                |
+| ------------------------------ | ---------------------------------------- |
 | `avatar_proxy_host` is not set | Avatar URLs are not included in messages |
 
 ## Notes
 
 - Telegram bots cannot initiate conversations with users. Make sure the bot is already in the target group before running NextBridge.
 - The bot's own messages are not echoed back (Telegram does not send bot message events to the bot itself).
+- Telegram command pass-through: NextBridge allows built-in commands (`/ping` and `/<command_prefix> ...`, default `/nb ...`) to enter bridge processing. Other bot commands are ignored by the Telegram driver.
