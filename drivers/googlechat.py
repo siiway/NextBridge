@@ -200,8 +200,10 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         try:
             body = await request.body()
             event = json.loads(body)
-        except Exception:
+        except json.JSONDecodeError:
             return PlainTextResponse("Bad JSON", status_code=400)
+        except Exception:
+            return PlainTextResponse("Receive Failed", status_code=500)
 
         if event.get("type") != "MESSAGE":
             # Acknowledge other events (ADDED_TO_SPACE, REMOVED_FROM_SPACE...)

@@ -110,15 +110,19 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
     async def _handle_http(self, request: Request) -> JSONResponse:
         try:
             body: dict = json.loads(await request.body())
-        except Exception:
+        except json.JSONDecodeError:
             return JSONResponse({"message": "bad request"}, status_code=400)
+        except Exception:
+            return JSONResponse({"message": "receive failed"}, status_code=500)
 
         if self.config.signing_secret:
             ts = request.headers.get("timestamp", "")
             sig = request.headers.get("sign", "")
-            if not _verify_sign(ts, self.config.signing_secret, sig):
+            match, err = _verify_sign(ts, self.config.signing_secret, sig)
+            if not match:
                 logger.warning(
                     f"DingTalk [{self.instance_id}] webhook signature mismatch"
+                    f": {err}" if err else ""
                 )
                 return JSONResponse({"message": "forbidden"}, status_code=403)
 
@@ -353,10 +357,12 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
 # ------------------------------------------------------------------
 
 
-def _verify_sign(timestamp: str, secret: str, sign: str) -> bool:
+def _verify_sign(timestamp: str, secret: str, sign: str) -> tuple[bool, str]:
     """Verify DingTalk webhook HMAC-SHA256 signature."""
-    if not timestamp or not sign:
-        return False
+    if not timestamp:
+        return False, 'no timestamp found'
+    if not sign:
+        return False, 'no sign found'
     try:
         string_to_sign = f"{timestamp}\n{secret}"
         expected = base64.b64encode(
@@ -366,9 +372,9 @@ def _verify_sign(timestamp: str, secret: str, sign: str) -> bool:
                 digestmod=hashlib.sha256,
             ).digest()
         ).decode("utf-8")
-        return hmac.compare_digest(expected, sign)
-    except Exception:
-        return False
+        return hmac.compare_digest(expected, sign), ''
+    except Exception as e:
+        return False, str(e)
 
 
 register("dingtalk", DingTalkConfig, DingTalkDriver)

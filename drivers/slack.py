@@ -213,7 +213,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
 
         try:
             payload = json.loads(body)
-        except Exception:
+        except json.JSONDecodeError:
             return PlainTextResponse("Bad JSON", status_code=400)
 
         # URL verification challenge (sent by Slack when the endpoint is first saved)

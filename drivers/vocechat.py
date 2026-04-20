@@ -115,8 +115,10 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         try:
             body = await request.body()
             event = json.loads(body)
-        except Exception:
+        except json.JSONDecodeError:
             return PlainTextResponse("Bad JSON", status_code=400)
+        except Exception:
+            return PlainTextResponse("Handle failed", status_code=500)
 
         asyncio.create_task(self._dispatch(event))
         return PlainTextResponse("ok", status_code=200)
@@ -298,7 +300,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 if name:
                     text = text.replace(f"@{m['name']}", f"@{name}")
             except Exception:
-                pass
+                logger.debug(f"VoceChat [{self.instance_id}] get user info for mention {m} failed")
 
         if text.strip():
             # Use markdown if rich_header was applied; plain text otherwise

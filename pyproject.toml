@@ -52,7 +52,6 @@ indent-width = 4
 [tool.ruff.lint]
 ignore = [
     "E741",   # Ambiguous variable name: l / O / I
-    "BLE001", # Blind Execpiton
 ]
 
 [dependency-groups]

@@ -152,7 +152,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         # data.post is a double-encoded JSON string
         try:
             post = json.loads(data.get("data", {}).get("post", "{}"))
-        except Exception:
+        except json.JSONDecodeError:
             return
 
         user_id = post.get("user_id", "")
@@ -175,10 +175,13 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                 mentioned_uids = json.loads(raw_mentions)
                 for uid in mentioned_uids:
                     # Resolve name
-                    name, _ = await self._get_user_info(uid, server)
+                    try:
+                        name, _ = await self._get_user_info(uid, server)
+                    except Exception:
+                        logger.opt(exception=True).debug(f"Mattermost [{self.instance_id}] get user info failed")
                     mentions.append({"id": uid, "name": name})
-            except Exception:
-                pass
+            except json.JSONDecodeError:
+                logger.debug(f"Mattermost [{self.instance_id}] parse raw memtions json failed")
 
         display_name, avatar_url = await self._get_user_info(user_id, server)
         username = await self._get_username(user_id, server)
@@ -220,7 +223,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                     u = await resp.json()
                     username = u.get("username", "")
         except Exception:
-            pass
+            logger.opt(exception=True).debug(f"Mattermost [{self.instance_id}] get username for userid {user_id} failed")
 
         if username:
             self._username_cache[user_id] = username
@@ -243,7 +246,9 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                     name = u.get("nickname") or full or u.get("username", user_id)
                     avatar = f"{server}/api/v4/users/{user_id}/image"
         except Exception:
-            pass
+            logger.opt(exception=True).debug(
+                f"Mattermost [{self.instance_id}] get avatar for userid {user_id} failed"
+            )
 
         self._user_cache[user_id] = (name, avatar)
         return name, avatar
@@ -265,7 +270,9 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                     name = info.get("name", name)
                     size = info.get("size", -1)
         except Exception:
-            pass
+            logger.opt(exception=True).debug(
+                f"Mattermost [{self.instance_id}] get file {file_id} info failed"
+            )
 
         if size > 0 and size > max_size:
             return None

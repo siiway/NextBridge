@@ -1,11 +1,5 @@
 {
-    "Codegeex.RepoIndex": true,
     "ty.diagnosticMode": "workspace",
-    // "ty.configuration": {
-    //     "rules": {
-    //         "unresolved-import": "ignore"
-    //     }
-    // },
     "[python]": {
         "diffEditor.ignoreTrimWhitespace": false,
         "editor.formatOnType": true,

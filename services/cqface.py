@@ -8,7 +8,9 @@ from typing import Any
 import yaml
 
 from services.util import get_data_path
+import services.logger as log
 
+logger = log.get_logger()
 _CQFACE_RE = re.compile(r":cqface(\d+):")
 
 
@@ -26,6 +28,7 @@ def _load_cqface_map() -> dict[str, str]:
             with path.open("r", encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
         except Exception:
+            logger.opt(exception=True).warning(f"Load cqface map failed!")
             return {}
 
         if not isinstance(raw, dict):

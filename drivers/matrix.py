@@ -284,13 +284,13 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             name = await self._client.get_displayname(UserID(user_id))
             if name:
                 display_name = name
-        except Exception:  # noqa: S110
+        except Exception:
             pass
         try:
             mxc = await self._client.get_avatar_url(UserID(user_id))
             if mxc:
                 avatar_url = self._mxc_to_http(str(mxc))
-        except Exception:  # noqa: S110
+        except Exception:
             pass
         return display_name, avatar_url
 

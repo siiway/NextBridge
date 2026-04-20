@@ -39,6 +39,7 @@
 #   rc_alias  – Display name override  (e.g. "{user}")
 #   rc_avatar – Avatar URL override    (e.g. "{user_avatar}", must be HTTPS)
 
+import json
 from drivers.registry import register
 import asyncio
 
@@ -141,8 +142,10 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
     async def _handle_webhook(self, request: Request) -> JSONResponse:
         try:
             body = await request.json()
-        except Exception:
+        except json.JSONDecodeError:
             return JSONResponse({"error": "bad request"}, status_code=400)
+        except Exception:
+            return JSONResponse({"error": "receive body failed"}, status_code=500)
 
         if self.config.webhook_token:
             if body.get("token", "") != self.config.webhook_token:
@@ -264,7 +267,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                     u = data.get("user", {})
                     username = u.get("username", "")
         except Exception:
-            pass
+            logger.opt(exception=True).debug(f"Rocket.Chat [{self.instance_id}] get username for userid {user_id} failed")
 
         if username:
             self._username_cache[user_id] = username

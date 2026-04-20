@@ -127,8 +127,10 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         try:
             body = await request.body()
             activity = json.loads(body)
-        except Exception:
+        except json.JSONDecodeError:
             return PlainTextResponse("Bad JSON", status_code=400)
+        except Exception:
+            return PlainTextResponse("Handle failed", status_code=500)
 
         if activity.get("type") != "message":
             return PlainTextResponse("ok", status_code=200)

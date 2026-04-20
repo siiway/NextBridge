@@ -2,15 +2,19 @@ name: Ruff + Ty Auto Fix
 
 on:
   push:
-    branches-ignore:
-      - "dependabot/**"
-      - "temp/**"
-      - "scratch/**"
-    paths-ignore:
-      - ".github/**"
-      - "docs/**"
-      - "**/*.md"
+    paths:
+      - "**/*.py"
+      - "**/*.pyi"
+      - "pyproject.toml"
+      - "pyrightconfig.json"
+      - "uv.lock"
   pull_request:
+    paths:
+      - "**/*.py"
+      - "**/*.pyi"
+      - "pyproject.toml"
+      - "pyrightconfig.json"
+      - "uv.lock"
   workflow_dispatch:
 
 jobs:
@@ -34,7 +38,7 @@ jobs:
           args: "check --fix --output-format=github"
 
       - name: Run Ruff format
-        run: ruff format . --output-format=github
+        run: ruff format --output-format=github
 
       - name: Run Ty check
         run: uv run ty check --output-format=github
