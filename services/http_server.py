@@ -138,9 +138,7 @@ class HttpServerManager:
 
         host = f"[{self.host}]" if ":" in self.host else self.host
         root_path = self.root_path if not self.root_path == "/" else ""
-        logger.info(
-            f"Shared HTTP server starting on {host}:{self.port}{root_path}"
-        )
+        logger.info(f"Shared HTTP server starting on {host}:{self.port}{root_path}")
         logger.debug(
             f"(root_path='{self.root_path or '/'}', mounts={len(self._mounts)}, "
             f"start_without_mounts={self.start_without_mounts})"
