@@ -10,6 +10,8 @@ NextBridge resolves cross-platform mentions by trying **explicit binding (bind)*
 
 **Built-in commands use the global command prefix from config. The default prefix is `nb`, so the examples below use `/nb ...`.**
 
+Type `/nb` (or `/nb help`) to see the list of available built-in commands.
+
 **Account Binding** allows you to explicitly link your IDs across platforms so that mentions always target the correct account.
 
 ### How to bind accounts

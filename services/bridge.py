@@ -181,14 +181,16 @@ class Bridge:
 
     def _parse_internal_command(self, text: str) -> tuple[str, list[str]] | None:
         parts = text.split()
-        if len(parts) < 2 or not parts[0].startswith("/"):
+        if not parts or not parts[0].startswith("/"):
             return None
 
-        root = parts[0][1:]
-        if root != self._get_command_prefix():
+        root = parts[0][1:].split("@", 1)[0].lower()
+        if root != self._get_command_prefix().lower():
             return None
 
-        return parts[1].lower(), parts[2:]
+        action = parts[1].lower() if len(parts) > 1 else ""
+        args = parts[2:] if len(parts) > 2 else []
+        return action, args
 
     async def _handle_bind_setup_command(self, msg: NormalizedMessage):
         """Generate a 6-digit binding code for the user."""
@@ -311,7 +313,17 @@ class Bridge:
         command = self._parse_internal_command(msg.text)
         if command is not None:
             action, args = command
+            sender_info = self._senders.get(msg.instance_id)
+            if action in ("", "help"):
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, self._get_command_help())
+                return
+
             if action != "bind":
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, self._get_command_help())
                 return
 
             subcommand = args[0].lower() if args else ""
@@ -333,7 +345,6 @@ class Bridge:
                     await self._handle_bind_list_command(msg)
                     return
 
-            sender_info = self._senders.get(msg.instance_id)
             if sender_info:
                 _, sender = sender_info
                 await sender(msg.channel, self._get_command_help())
