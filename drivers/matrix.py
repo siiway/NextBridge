@@ -21,6 +21,7 @@
 from pathlib import Path
 from typing import cast
 
+import fresholm.import_hook  # noqa: F401
 from aiohttp import ClientSession, TCPConnector
 from aiohttp_socks import ProxyConnector
 from mautrix.api import HTTPAPI

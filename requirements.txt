@@ -363,6 +363,7 @@ cryptography==46.0.6 \
     # via
     #   alibabacloud-openapi-util
     #   alibabacloud-tea-openapi
+    #   fresholm
     #   google-auth
 darabonba-core==1.0.5 \
     --hash=sha256:671ab8dbc4edc2a8f88013da71646839bb8914f1259efc069353243ef52ea27c
@@ -374,6 +375,13 @@ discord-py==2.7.1 \
 fastapi==0.135.3 \
     --hash=sha256:9b0f590c813acd13d0ab43dd8494138eb58e484bfac405db1f3187cfc5810d98 \
     --hash=sha256:bd6d7caf1a2bdd8d676843cdcd2287729572a1ef524fc4d65c17ae002a1be654
+    # via nextbridge
+fresholm==0.2.4 \
+    --hash=sha256:556e84a5e9a6ae2f18fc9518d93647056de7ca03bdf44adc91c49afeba3abfc7 \
+    --hash=sha256:5dd950f0fb66dedfbd07153dff0511025cf391e92d40bc623a9a7c2e0cd5a316 \
+    --hash=sha256:705a106c036fb4a8e859493bdbc221196135dc7cbd774fca57d987d7f92718ae \
+    --hash=sha256:d4350ba5b0a2ef2652b9c42dccca2f504843c0fc5e61e8020ae17e36a38a8573 \
+    --hash=sha256:e334528330a9aac8fb7a74388972c1a55f8f5d33dc0bcf4aaec5f34341bb47cd
     # via nextbridge
 frozenlist==1.8.0 \
     --hash=sha256:0325024fe97f94c41c08872db482cf8ac4800d80e79222c6b0b7b162d5b13686 \
