@@ -1069,7 +1069,7 @@ class QqDriver(BaseDriver[QqConfig]):
         action_candidates.append(("get_file", {"file_id": file_id}))
 
         for action, params in action_candidates:
-            response = await self._call(action, params, timeout=12.0)
+            response = await self._call(action, params, timeout=12.0, retries=2)
             if not response or response.get("status") != "ok":
                 continue
 
@@ -1652,7 +1652,12 @@ class QqDriver(BaseDriver[QqConfig]):
             f"NapCat [{self.instance_id}] rendering forward segment id={forward_id}"
         )
 
-        response = await self._call("get_forward_msg", {"id": forward_id}, timeout=30.0)
+        response = await self._call(
+            "get_forward_msg",
+            {"id": forward_id},
+            timeout=30.0,
+            retries=2,
+        )
         if not response or response.get("status") != "ok":
             logger.warning(
                 f"NapCat [{self.instance_id}] get_forward_msg failed for id={forward_id}: {response}"
@@ -1727,26 +1732,53 @@ class QqDriver(BaseDriver[QqConfig]):
         return self.config.file_send_mode
 
     async def _call(
-        self, action: str, params: dict, timeout: float = 30.0
+        self,
+        action: str,
+        params: dict,
+        timeout: float = 30.0,
+        retries: int = 0,
     ) -> dict | None:
         """Send a OneBot action and await its echo response."""
         if self._ws is None:
             return None
-        echo = str(uuid.uuid4())
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
-        self._pending[echo] = fut
-        payload = {"action": action, "params": params, "echo": echo}
-        try:
-            await self._ws.send(json.dumps(payload, ensure_ascii=False))
-            return await asyncio.wait_for(fut, timeout=timeout)
-        except TimeoutError:
-            logger.warning(f"NapCat [{self.instance_id}] action '{action}' timed out")
-            self._pending.pop(echo, None)
-            return None
-        except Exception as e:
-            logger.error(f"NapCat [{self.instance_id}] action '{action}' error: {e}")
-            self._pending.pop(echo, None)
-            return None
+        max_attempts = max(1, int(retries) + 1)
+
+        for attempt in range(1, max_attempts + 1):
+            echo = str(uuid.uuid4())
+            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+            self._pending[echo] = fut
+            payload = {"action": action, "params": params, "echo": echo}
+            try:
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                return await asyncio.wait_for(fut, timeout=timeout)
+            except TimeoutError:
+                self._pending.pop(echo, None)
+                if attempt >= max_attempts:
+                    logger.warning(
+                        f"NapCat [{self.instance_id}] action '{action}' timed out "
+                        f"after {attempt} attempt(s)"
+                    )
+                    return None
+                logger.warning(
+                    f"NapCat [{self.instance_id}] action '{action}' timed out, "
+                    f"retrying ({attempt}/{max_attempts - 1})"
+                )
+                await asyncio.sleep(min(2.0, 0.3 * (2 ** (attempt - 1))))
+            except Exception as e:
+                self._pending.pop(echo, None)
+                if attempt >= max_attempts:
+                    logger.error(
+                        f"NapCat [{self.instance_id}] action '{action}' error "
+                        f"after {attempt} attempt(s): {e}"
+                    )
+                    return None
+                logger.warning(
+                    f"NapCat [{self.instance_id}] action '{action}' error, "
+                    f"retrying ({attempt}/{max_attempts - 1}): {e}"
+                )
+                await asyncio.sleep(min(2.0, 0.3 * (2 ** (attempt - 1))))
+
+        return None
 
     async def _get_qid(self, user_id: str, group_id: str | None = None) -> str:
         """Get user's qid using NapCat API with caching."""
@@ -1757,7 +1789,10 @@ class QqDriver(BaseDriver[QqConfig]):
         try:
             # Use get_stranger_info to get qid
             result = await self._call(
-                "get_stranger_info", {"user_id": user_id}, timeout=30.0
+                "get_stranger_info",
+                {"user_id": user_id},
+                timeout=30.0,
+                retries=2,
             )
             # logger.debug(
             #     f"NapCat [{self.instance_id}] get_stranger_info result for {user_id}: {result}"
@@ -1880,10 +1915,34 @@ class QqDriver(BaseDriver[QqConfig]):
             segments.append({"type": "reply", "data": {"id": str(reply_to_id)}})
 
         rich_header = kwargs.get("rich_header")
+        has_non_image_attachments = any(
+            att.type != "image"
+            for att in (attachments or [])
+            if att.url or att.data is not None
+        )
+        send_header_separately = bool(
+            rich_header and has_non_image_attachments and not str(text or "").strip()
+        )
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            if not send_header_separately:
+                t, c = rich_header.get("title", ""), rich_header.get("content", "")
+                prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
+                text = f"{prefix}\n{text}" if text else prefix
+            else:
+                t, c = rich_header.get("title", ""), rich_header.get("content", "")
+                prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
+                header_resp = await self._call(
+                    "send_group_msg",
+                    {
+                        "group_id": int(group_id),
+                        "message": [{"type": "text", "data": {"text": prefix}}],
+                    },
+                )
+                if not header_resp or header_resp.get("status") != "ok":
+                    logger.warning(
+                        f"NapCat [{self.instance_id}] failed to send standalone rich header "
+                        f"before media message: {header_resp}"
+                    )
 
         # Process mentions: replace @Name with at segments
         mentions = kwargs.get("mentions", [])
