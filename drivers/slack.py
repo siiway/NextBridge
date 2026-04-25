@@ -2,7 +2,7 @@
 #
 # Receive: two modes —
 #   Socket Mode (when app_token is set)              – WebSocket; no public URL needed.
-#   Events API  (when signing_secret + listen_port)  – HTTP webhook from Slack.
+#   Events API  (when signing_secret is set)         – HTTP webhook from Slack.
 #
 # Send: two modes controlled by "send_method" in config —
 #   "bot"     (default) – chat.postMessage + files.upload (requires bot_token).
@@ -16,7 +16,6 @@
 #   send_method          – "bot" (default) | "webhook"
 #   incoming_webhook_url – Incoming Webhook URL for send_method="webhook"
 #   signing_secret       – Slack signing secret for Events API signature verification
-#   listen_port          – HTTP port for Events API receive
 #   listen_path          – HTTP path for Events API (default: "/slack/events")
 #   max_file_size        – Max bytes per attachment when sending (default 50 MB)
 #
@@ -24,31 +23,30 @@
 #   channel_id – Slack channel ID, e.g. "C1234567890"
 #                (ignored when send_method="webhook"; channel is fixed by the webhook URL)
 
-from drivers.registry import register
 import asyncio
 import hashlib
 import hmac as _hmac
 import json
 import time
+from typing import Literal
 
 import aiohttp
-from aiohttp import web
 from aiohttp_socks import ProxyConnector
-
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
-from typing import Literal
-
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class SlackConfig(_DriverConfig):
@@ -57,7 +55,6 @@ class SlackConfig(_DriverConfig):
     send_method: Literal["bot", "webhook"] = "bot"
     incoming_webhook_url: str = ""
     signing_secret: str = ""
-    listen_port: int = 0
     listen_path: str = "/slack/events"
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
@@ -118,7 +115,6 @@ class SlackDriver(BaseDriver[SlackConfig]):
         send_method = self.config.send_method
         webhook_url = self.config.incoming_webhook_url
         signing_secret = self.config.signing_secret
-        listen_port = self.config.listen_port
         listen_path = self.config.listen_path
 
         if self._proxy:
@@ -153,21 +149,21 @@ class SlackDriver(BaseDriver[SlackConfig]):
             return
 
         # ------ Events API webhook receive -----------------------------------
-        if signing_secret and listen_port:
-            web_app = web.Application()
-            web_app.router.add_post(listen_path, self._handle_events_api)
-            runner = web.AppRunner(web_app)
-            await runner.setup()
-            site = web.TCPSite(runner, "0.0.0.0", listen_port)
-            await site.start()
+        if signing_secret:
+            app = FastAPI()
+            app.add_api_route("/", self._handle_events_api, methods=["POST"])
+            if self.http_server is None:
+                logger.error(
+                    f"Slack [{self.instance_id}] shared HTTP server unavailable"
+                )
+                return
+            self.http_server.mount(self.instance_id, listen_path, app)
             logger.info(
-                f"Slack [{self.instance_id}] Events API listening on "
-                f"0.0.0.0:{listen_port}{listen_path}"
+                f"Slack [{self.instance_id}] Events API mounted at {listen_path}"
             )
             try:
                 await asyncio.Event().wait()
             finally:
-                await runner.cleanup()
                 await self._session.close()
             return
 
@@ -205,26 +201,28 @@ class SlackDriver(BaseDriver[SlackConfig]):
     # Receive — Events API (HTTP webhook)
     # ------------------------------------------------------------------
 
-    async def _handle_events_api(self, request: web.Request) -> web.Response:
-        body = await request.read()
+    async def _handle_events_api(
+        self, request: Request
+    ) -> JSONResponse | PlainTextResponse:
+        body = await request.body()
 
         if self.config.signing_secret and not _verify_slack_signature(
             self.config.signing_secret, request.headers, body
         ):
-            return web.Response(status=403, text="Invalid signature")
+            return PlainTextResponse("Invalid signature", status_code=403)
 
         try:
             payload = json.loads(body)
-        except Exception:
-            return web.Response(status=400, text="Bad JSON")
+        except json.JSONDecodeError:
+            return PlainTextResponse("Bad JSON", status_code=400)
 
         # URL verification challenge (sent by Slack when the endpoint is first saved)
         if payload.get("type") == "url_verification":
-            return web.json_response({"challenge": payload.get("challenge", "")})
+            return JSONResponse({"challenge": payload.get("challenge", "")})
 
         event = payload.get("event", {})
         asyncio.create_task(self._dispatch_event(event))
-        return web.Response(status=200, text="ok")
+        return PlainTextResponse("ok", status_code=200)
 
     # ------------------------------------------------------------------
     # Receive — shared event dispatch
@@ -262,7 +260,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             platform="slack",
             instance_id=self.instance_id,
             channel={"channel_id": channel_id},
-            user=display_name,
+            nickname=display_name,
             user_id=user_id,
             user_avatar=user_avatar,
             text=text,
@@ -271,7 +269,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             reply_parent=str(event.get("thread_ts", ""))
             if event.get("thread_ts")
             else None,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
         )
         await self.bridge.on_message(normalized)
 
@@ -411,11 +409,13 @@ class SlackDriver(BaseDriver[SlackConfig]):
             except Exception as e:
                 logger.error(f"Slack [{self.instance_id}] chat_postMessage failed: {e}")
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 try:
@@ -427,8 +427,10 @@ class SlackDriver(BaseDriver[SlackConfig]):
                         mid = resp.get("ts")
                         if not first_msg_id:
                             first_msg_id = str(mid)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        f"Slack [{self.instance_id}] failed to send attachment label: {e}"
+                    )
                 continue
 
             data_bytes, mime = result

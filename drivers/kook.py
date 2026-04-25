@@ -14,22 +14,21 @@
 # Rule channel keys:
 #   channel_id – KOOK text channel ID
 
-from drivers.registry import register
 import io
 import re
 
 import khl
-
-import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
-from services.db import msg_db
-from drivers import BaseDriver
-
 from aiohttp import ClientSession
 from aiohttp_socks import ProxyConnector
+
+import services.logger as log
+from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.db import msg_db
+from services.message import Attachment, NormalizedMessage
 
 
 class KookConfig(_DriverConfig):
@@ -61,19 +60,8 @@ class KookDriver(BaseDriver[KookConfig]):
             logger.debug(f"Kook [{self.instance_id}] using proxy {self._proxy}")
 
             requester = self._bot.client.gate.requester
-            original_request = requester.request
-            proxy_url = self._proxy
-
-            async def proxied_request(method: str, route: str, **params):
-                # inject connector on 1st request
-                if requester._cs is not None and requester._cs.connector is None:
-                    connector = ProxyConnector.from_url(proxy_url, rdns=True)
-                    sess = ClientSession(connector=connector)
-                    requester._cs = sess
-
-                return await original_request(method, route, **params)
-
-            requester.request = proxied_request  # type: ignore
+            connector = ProxyConnector.from_url(self._proxy, rdns=True)
+            requester._cs = ClientSession(connector=connector)
 
         # Register our handler alongside khl's internal command-manager handler.
         # khl's Client dispatches to all registered handlers for a given type.
@@ -98,7 +86,7 @@ class KookDriver(BaseDriver[KookConfig]):
         author = msg.author  # GuildUser
         user_id = str(author.id)
         # Prefer the per-guild nickname over the global username
-        username = author.nickname or author.username or user_id
+        username = author.username or ""
         avatar = author.avatar or ""
         text = msg.content or ""
 
@@ -125,13 +113,14 @@ class KookDriver(BaseDriver[KookConfig]):
             platform="kook",
             instance_id=self.instance_id,
             channel={"channel_id": channel_id},
-            user=username,
+            nickname=username,
             user_id=user_id,
             user_avatar=avatar,
             text=text,
             attachments=[],
             mentions=mentions,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
+            username=username,
         )
         await self.bridge.on_message(normalized)
 
@@ -176,7 +165,7 @@ class KookDriver(BaseDriver[KookConfig]):
         has_image = False
         attachment_fragments: list[str] = []
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue

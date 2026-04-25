@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  nextbridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nextbridge
+    restart: unless-stopped
+    volumes:
+      # 挂载数据目录，用于保存配置文件和数据库
+      - ./data:/app/data
+      # 挂载日志目录
+      - ./logs:/app/logs
+    environment:
+      # 设置数据目录
+      - NEXTBRIDGE_DATA_DIR=/app/data
+      # 设置日志级别
+      - LOG_LEVEL=INFO
+      # ports:
+      # 如果需要访问HTTP服务，取消注释并修改端口
+      # - "8000:8000"
+    networks:
+      - nextbridge-network
+
+networks:
+  nextbridge-network:
+    driver: bridge

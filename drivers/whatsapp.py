@@ -143,7 +143,7 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
             platform="whatsapp",
             instance_id=self.instance_id,
             channel={"chat_id": chat_str},
-            user=user,
+            nickname=user,
             user_id=user,
             user_avatar="",
             text=text,

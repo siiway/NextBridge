@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
 from os import environ
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 
@@ -39,7 +39,7 @@ class DatabaseConfig(BaseModel):
         - PostgreSQL: postgresql://user:password@host:port/database
     """
 
-    url: str = "sqlite:///messages.db"
+    url: str = "sqlite:///data.db"
     """SQLAlchemy database URL. Relative SQLite paths are resolved under the data directory."""
 
     echo: bool = False
@@ -77,9 +77,10 @@ class LoggingConfig(BaseModel):
     """Number of days to keep log files. Older log files are automatically deleted.
     Set to 0 to disable automatic deletion."""
 
-    compression: Literal[
-        "gz", "bz2", "xz", "lzma", "tar", "tar.gz", "tar.bz2", "tar.xz", "zip", None
-    ] = "zip"
+    compression: (
+        Literal["gz", "bz2", "xz", "lzma", "tar", "tar.gz", "tar.bz2", "tar.xz", "zip"]
+        | None
+    ) = "zip"
     """Compression format for rotated log files (e.g., "zip", "gz", "tar.gz").
     Set to None to disable compression."""
 
@@ -96,12 +97,74 @@ class LoggingConfig(BaseModel):
         return upper
 
 
+class HttpConfig(BaseModel):
+    """Shared HTTP server configuration for mounted driver webhooks."""
+
+    host: str = "0.0.0.0"
+    """Host/IP for the shared HTTP server."""
+
+    port: int = 9080
+    """Port for the shared HTTP server."""
+
+    root_path: str = ""
+    """Optional ASGI root_path, useful behind path-prefixed reverse proxies."""
+
+    log_level: Literal["critical", "error", "warning", "info", "debug"] = "info"
+    """Uvicorn log level used by the shared HTTP server."""
+
+    enable: Literal["unset", "true", "false"] = "unset"
+    """HTTP server startup mode.
+
+    - ``unset``: auto start only when at least one driver mounts a sub-app.
+    - ``true``: always start HTTP server.
+    - ``false``: never start HTTP server.
+    """
+
+    @field_validator("root_path", mode="before")
+    def normalize_root_path(cls, v):
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid http.root_path: {v}")
+        rp = v.strip()
+        if not rp or rp == "/":
+            return ""
+        if not rp.startswith("/"):
+            rp = f"/{rp}"
+        return rp.rstrip("/")
+
+    @field_validator("enable", mode="before")
+    def normalize_enable(cls, v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if v is None:
+            return "unset"
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid http.enable: {v}")
+        val = v.strip().lower()
+        if val not in {"unset", "true", "false"}:
+            raise ValueError("http.enable must be one of: unset, true, false")
+        return val
+
+
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
+
+    command_prefix: str = "nb"
+    """Prefix used for built-in bridge commands, e.g. ``/nb bind setup``.
+
+    The value is written without the leading slash. The default is ``nb``.
+    """
 
     proxy: str | None = UNSET
     """Global proxy URL for all drivers that support proxy configuration.
     Individual driver proxy settings will override this global setting."""
+
+    base_url: str = ""
+    """Public base URL used when generating externally reachable links.
+
+    Example: ``https://bridge.example.com``
+    """
 
     strict_echo_match: CoercedBool = False
     """Controls how the bridge prevents echoing messages back to the same channel/instance.
@@ -116,6 +179,20 @@ class GlobalConfig(BaseModel):
 
     database: DatabaseConfig = DatabaseConfig()
     """Database configuration for message and user mappings."""
+
+    http: HttpConfig = HttpConfig()
+    """Shared HTTP server configuration for mounted driver webhooks."""
+
+    @field_validator("command_prefix", mode="before")
+    def normalize_command_prefix(cls, v):
+        if v is None:
+            return "nb"
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid command prefix: {v}")
+        prefix = v.strip().lstrip("/")
+        if not prefix:
+            raise ValueError("command_prefix cannot be empty")
+        return prefix
 
     @field_validator("proxy", mode="after")
     def get_proxy_from_env(cls, v: str):
@@ -138,6 +215,19 @@ class GlobalConfig(BaseModel):
         logger.debug("No global proxy configuration found")
         return None
 
+    @field_validator("base_url", mode="before")
+    def normalize_base_url(cls, v):
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid global.base_url: {v}")
+        base = v.strip()
+        if not base:
+            return ""
+        if not base.startswith(("http://", "https://")):
+            base = f"https://{base.lstrip('/')}"
+        return base.rstrip("/")
+
 
 # ---------------------------------------------------------------------------
 # Base for all driver config blocks — unknown keys are a validation error
@@ -152,3 +242,12 @@ class _DriverConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    proxy: str | None = UNSET
+    """Proxy URL used by driver API/gateway requests."""
+
+    media_proxy: str | None = UNSET
+    """Proxy URL used only when fetching media/attachments.
+
+    Defaults to following ``proxy`` when unset.
+    """

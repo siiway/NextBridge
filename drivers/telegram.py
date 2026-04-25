@@ -18,27 +18,32 @@
 #                       to avoid exposing the bot token. The worker should be
 #                       deployed from cloudflare/tg-avatar-proxy.js with BOT_TOKEN
 #                       environment variable set. Falls back to none when absent.
+#   photo_padding_color – Padding color used when fixing extreme image aspect
+#                       ratios before send_photo (default "#000000").
+#                       Set to null to disable padding; over-limit photos are
+#                       sent as text labels instead of send_photo.
 #
 # Rule channel keys:
 #   chat_id – Telegram chat ID (negative for groups, e.g. "-100123456789")
 
-from drivers.registry import register
 import asyncio
 import html
 import io
 from urllib.parse import urlencode
 
+from PIL import Image, UnidentifiedImageError
 from telegram import LinkPreviewOptions, ReplyParameters, Update
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from drivers import BaseDriver
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
+from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
+from services.message import Attachment, NormalizedMessage
 
 
 class TelegramConfig(_DriverConfig):
@@ -46,10 +51,13 @@ class TelegramConfig(_DriverConfig):
     max_file_size: int = 50 * 1024 * 1024
     rich_header_host: str = "https://richheader.siiway.top"
     avatar_proxy_host: str = ""  # Base URL for avatar proxy (e.g. "https://avatarproxy.yourname.workers.dev")
+    photo_padding_color: str | None = "#000000"
     proxy: str | None = UNSET
 
 
 logger = log.get_logger()
+_TG_PHOTO_MAX_SIDE = 10000
+_TG_PHOTO_MAX_RATIO = 20
 
 
 # Catch all non-command message types that may carry content
@@ -58,6 +66,134 @@ def _richheader_html(title: str, content: str) -> str:
     t = html.escape(title)
     c = html.escape(content)
     return f"<b>{t}</b>" + (f" · <i>{c}</i>" if c else "")
+
+
+def _prepare_photo_for_telegram(
+    data: bytes, filename: str, padding_color: str | None
+) -> tuple[bytes | None, str]:
+    """Adjust photo dimensions for Telegram bot API constraints."""
+    if Image is None:
+        return data, filename
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            mode = "RGBA" if "A" in img.getbands() else "RGB"
+            work = img.convert(mode)
+            width, height = work.size
+
+            over_side_limit = width > _TG_PHOTO_MAX_SIDE or height > _TG_PHOTO_MAX_SIDE
+            over_ratio_limit = (
+                width > height * _TG_PHOTO_MAX_RATIO
+                or height > width * _TG_PHOTO_MAX_RATIO
+            )
+            if (over_side_limit or over_ratio_limit) and padding_color is None:
+                return None, filename
+
+            changed = False
+
+            # Telegram rejects photos with side > 10000.
+            if width > _TG_PHOTO_MAX_SIDE or height > _TG_PHOTO_MAX_SIDE:
+                scale = min(_TG_PHOTO_MAX_SIDE / width, _TG_PHOTO_MAX_SIDE / height)
+                width = max(1, int(width * scale))
+                height = max(1, int(height * scale))
+                # Pillow>=9 uses Image.Resampling; older versions expose constants on Image.
+                if hasattr(Image, "Resampling"):
+                    resampling = Image.Resampling.LANCZOS
+                else:
+                    resampling = Image.LANCZOS
+                work = work.resize((width, height), resampling)
+                changed = True
+
+            target_w, target_h = width, height
+            if width > height * _TG_PHOTO_MAX_RATIO:
+                target_h = (width + _TG_PHOTO_MAX_RATIO - 1) // _TG_PHOTO_MAX_RATIO
+            elif height > width * _TG_PHOTO_MAX_RATIO:
+                target_w = (height + _TG_PHOTO_MAX_RATIO - 1) // _TG_PHOTO_MAX_RATIO
+
+            if target_w != width or target_h != height:
+                bg = _parse_padding_color(padding_color, mode)
+                canvas = Image.new(mode, (target_w, target_h), bg)
+                offset = ((target_w - width) // 2, (target_h - height) // 2)
+                if mode == "RGBA":
+                    canvas.paste(work, offset, work)
+                else:
+                    canvas.paste(work, offset)
+                work = canvas
+                changed = True
+
+            if not changed:
+                return data, filename
+
+            out = io.BytesIO()
+            base = (
+                filename.rsplit(".", 1)[0] if "." in filename else (filename or "photo")
+            )
+            if mode == "RGBA":
+                work.save(out, format="PNG")
+                out_name = f"{base}.png"
+            else:
+                work.save(out, format="JPEG", quality=95)
+                out_name = f"{base}.jpg"
+            return out.getvalue(), out_name
+    except UnidentifiedImageError:
+        return data, filename
+    except Exception as e:
+        logger.debug(
+            f"Telegram [{__name__}] image preprocess skipped for {filename}: {e}"
+        )
+        return data, filename
+
+
+def _parse_padding_color(color: str | None, mode: str) -> tuple[int, ...]:
+    """Parse padding color from config; supports #RGB/#RRGGBB/#RRGGBBAA and r,g,b[,a]."""
+    value = (color or "").strip()
+    rgb = (0, 0, 0)
+    rgba = (0, 0, 0, 255)
+
+    try:
+        if value.startswith("#"):
+            hex_value = value[1:]
+            match len(hex_value):
+                case 3:
+                    r, g, b = (int(ch * 2, 16) for ch in hex_value)
+                    rgb = (r, g, b)
+                    rgba = (r, g, b, 255)
+                case 6:
+                    r = int(hex_value[0:2], 16)
+                    g = int(hex_value[2:4], 16)
+                    b = int(hex_value[4:6], 16)
+                    rgb = (r, g, b)
+                    rgba = (r, g, b, 255)
+                case 8:
+                    r = int(hex_value[0:2], 16)
+                    g = int(hex_value[2:4], 16)
+                    b = int(hex_value[4:6], 16)
+                    a = int(hex_value[6:8], 16)
+                    rgb = (r, g, b)
+                    rgba = (r, g, b, a)
+        elif "," in value:
+            parts = [int(p.strip()) for p in value.split(",")]
+            if len(parts) >= 3:
+                r = min(255, max(0, parts[0]))
+                g = min(255, max(0, parts[1]))
+                b = min(255, max(0, parts[2]))
+                a = min(255, max(0, parts[3])) if len(parts) >= 4 else 255
+                rgb = (r, g, b)
+                rgba = (r, g, b, a)
+    except Exception as exc:
+        logger.warning(f"Parse padding color {color} failed: {exc}")
+
+    return rgba if mode == "RGBA" else rgb
+
+
+def _attachment_fallback_label(
+    att_type: str, label: str, parse_mode: str | None
+) -> str:
+    """Format a degraded attachment label for text fallback."""
+    if parse_mode == "HTML":
+        label = html.escape(label)
+    display_type = "Image" if att_type == "image" else att_type.capitalize()
+    return f"\n[{display_type}: {label}]"
 
 
 _CONTENT_FILTER = (
@@ -69,6 +205,8 @@ _CONTENT_FILTER = (
     | filters.Document.ALL
     | filters.ANIMATION
 ) & ~filters.COMMAND
+
+_COMMAND_FILTER = filters.COMMAND
 
 
 class TelegramDriver(BaseDriver[TelegramConfig]):
@@ -96,6 +234,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             .build()
         )
         self._app.add_handler(MessageHandler(_CONTENT_FILTER, self._on_message))
+        self._app.add_handler(MessageHandler(_COMMAND_FILTER, self._on_command_message))
         self._app.add_error_handler(self._on_error)
 
         logger.info(f"Telegram [{self.instance_id}] starting application and polling.")
@@ -133,7 +272,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
     async def stop(self):
         if not self._app:
-            return None
+            return
         if self._app.updater and self._app.updater.running:
             await self._app.updater.stop()
         if self._app.running:
@@ -151,6 +290,33 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     # Receive
     # ------------------------------------------------------------------
 
+    def _is_nextbridge_command_text(self, text: str) -> bool:
+        command_text = (text or "").strip()
+        if not command_text.startswith("/"):
+            return False
+
+        root = command_text[1:].split(maxsplit=1)[0].split("@", 1)[0].lower()
+        if root == "ping":
+            return True
+
+        prefix = (self.bridge.command_prefix or "nb").strip().lstrip("/").lower()
+        if not prefix:
+            prefix = "nb"
+        return root == prefix
+
+    async def _on_command_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        msg = update.message
+        if not msg or not msg.text:
+            return
+
+        # Only forward NextBridge built-in commands (/ping and /<prefix> ...).
+        if not self._is_nextbridge_command_text(msg.text):
+            return
+
+        await self._on_message(update, context)
+
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = update.message
         if not msg:
@@ -162,31 +328,33 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         mentions = []
         entities = msg.entities or msg.caption_entities or []
         for ent in entities:
-            if ent.type == "mention":
-                # @username mention
-                # Extract username from text
-                offset = ent.offset
-                length = ent.length
-                username = text[offset : offset + length]  # includes @
-                # We don't have ID for @username mentions easily unless we resolve it
-                # But we can store it as name=username
-                mentions.append({"id": username, "name": username[1:]})
-            elif ent.type == "text_mention":
-                # Text link to user
-                user = ent.user
-                if user:
-                    uid = str(user.id)
-                    name = user.full_name or user.username or uid
-                    mentions.append({"id": uid, "name": name})
+            match ent.type:
+                case "mention":
+                    # @username mention
+                    # Extract username from text
+                    offset = ent.offset
+                    length = ent.length
+                    username = text[offset : offset + length]  # includes @
+                    # We don't have ID for @username mentions easily unless we resolve it
+                    # But we can store it as name=username
+                    mentions.append({"id": username, "name": username[1:]})
+                case "text_mention":
+                    # Text link to user
+                    user = ent.user
+                    if user:
+                        uid = str(user.id)
+                        name = user.full_name or user.username or uid
+                        mentions.append({"id": uid, "name": name})
 
         chat_id = str(msg.chat_id)
         from_user = msg.from_user
         user_id = str(from_user.id) if from_user else ""
-        user_name = (
+        nickname = (
             (from_user.full_name or from_user.username or user_id)
             if from_user
             else user_id
         )
+        username = from_user.username or "" if from_user else ""
 
         # Get user avatar
         user_avatar = ""
@@ -322,7 +490,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             platform="telegram",
             instance_id=self.instance_id,
             channel={"chat_id": chat_id},
-            user=user_name,
+            nickname=nickname,
             user_id=user_id,
             user_avatar=user_avatar,
             text=text,
@@ -333,7 +501,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             else None,
             mentions=mentions,
             time=msg.date.isoformat() if msg.date else None,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
+            username=username,
         )
         await self.bridge.on_message(normalized)
 
@@ -424,7 +593,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     )
                     text = text.replace(f"@{html.escape(m['name'])}", link)
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         try:
             for att in attachments or []:
                 if not att.url and att.data is None:
@@ -436,69 +605,79 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 if not result:
                     # Oversized or failed — append as text (escape if in HTML mode)
                     label = att.name or att.url or ""
-                    if parse_mode == "HTML":
-                        label = html.escape(label)
-                    text += f"\n[{att.type.capitalize()}: {label}]"
+                    text += _attachment_fallback_label(att.type, label, parse_mode)
                     continue
 
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
 
+                if att.type == "image":
+                    data_bytes, fname = _prepare_photo_for_telegram(
+                        data_bytes,
+                        fname,
+                        self.config.photo_padding_color,
+                    )
+                    if data_bytes is None:
+                        label = att.name or att.url or fname
+                        text += _attachment_fallback_label("image", label, parse_mode)
+                        continue
+
                 # validate photo data
                 if not data_bytes or len(data_bytes) == 0:
                     logger.warning(f"Empty image data for {fname}, skipping")
                     label = att.name or att.url or ""
-                    if parse_mode == "HTML":
-                        label = html.escape(label)
-                    text += f"\n[{att.type.capitalize()}: {label}]"
+                    text += _attachment_fallback_label(att.type, label, parse_mode)
                     continue
 
                 bio = io.BytesIO(data_bytes)
                 bio.name = fname
                 caption = text if not caption_used else None
 
-                if att.type == "image":
-                    sent = await self._app.bot.send_photo(
-                        chat_id=cid,
-                        photo=bio,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        reply_parameters=reply_params,
-                    )
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
-                elif att.type == "voice":
-                    sent = await self._app.bot.send_voice(
-                        chat_id=cid,
-                        voice=bio,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        reply_parameters=reply_params,
-                    )
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
-                elif att.type == "video":
-                    sent = await self._app.bot.send_video(
-                        chat_id=cid,
-                        video=bio,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        reply_parameters=reply_params,
-                    )
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
-                else:
-                    sent = await self._app.bot.send_document(
-                        chat_id=cid,
-                        document=bio,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        reply_parameters=reply_params,
-                    )
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
+                try:
+                    match att.type:
+                        case "image":
+                            sent = await self._app.bot.send_photo(
+                                chat_id=cid,
+                                photo=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
+                        case "voice":
+                            sent = await self._app.bot.send_voice(
+                                chat_id=cid,
+                                voice=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
+                        case "video":
+                            sent = await self._app.bot.send_video(
+                                chat_id=cid,
+                                video=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
+                        case _:
+                            sent = await self._app.bot.send_document(
+                                chat_id=cid,
+                                document=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
 
-                caption_used = True
+                    if not first_msg_id:
+                        first_msg_id = str(sent.message_id)
+                    caption_used = True
+                except Exception as e:
+                    label = att.name or att.url or fname
+                    text += _attachment_fallback_label(att.type, label, parse_mode)
+                    logger.warning(
+                        f"Telegram [{self.instance_id}] attachment send failed ({att.type}): {e}"
+                    )
+                    continue
 
             # Send text-only if no attachments consumed it
             if text and not caption_used:

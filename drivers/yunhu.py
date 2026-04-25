@@ -4,8 +4,7 @@
 #           sync-only yunhu.Openapi helper class).
 #
 # Config keys (under yunhu.<instance_id>):
-#   token        – Bot token from the Yunhu developer portal (required)
-#   webhook_port – Port to listen on for incoming webhooks (default 8765)
+#   token        – Bot token from the Yunhu control console (required)
 #   webhook_path – HTTP path for the webhook endpoint (default "/yunhu-webhook")
 #   proxy_host   – Cloudflare Worker base URL for the media proxy.
 #                  /pfp?url=  is used for Yunhu CDN avatars (adds Referer).
@@ -21,8 +20,9 @@ import asyncio
 from urllib.parse import quote, urlparse
 
 import aiohttp
-from aiohttp import web
 from aiohttp_socks import ProxyConnector
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 import services.logger as log
 import services.media as media
@@ -34,7 +34,6 @@ from drivers import BaseDriver
 
 class YunhuConfig(_DriverConfig):
     token: str = ""
-    webhook_port: int = 8765
     webhook_path: str = "/yunhu-webhook"
     proxy_host: str = "https://yh-proxy.siiway.top"
     max_file_size: int = 10 * 1024 * 1024
@@ -81,16 +80,15 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
 
         self._session = aiohttp.ClientSession(connector=connector)
 
-        port: int = self.config.webhook_port
         path: str = self.config.webhook_path
 
-        app = web.Application()
-        app.router.add_post(path, self._handle_webhook)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", port)
-        await site.start()
-        logger.info(f"Yunhu [{self.instance_id}] webhook listening on :{port}{path}")
+        app = FastAPI()
+        app.add_api_route("/", self._handle_webhook, methods=["POST"])
+        if self.http_server is None:
+            logger.error(f"Yunhu [{self.instance_id}] shared HTTP server unavailable")
+            return
+        self.http_server.mount(self.instance_id, path, app)
+        logger.info(f"Yunhu [{self.instance_id}] webhook mounted at {path}")
 
         await asyncio.Event().wait()  # run indefinitely
 
@@ -145,18 +143,19 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             return None
 
         # Determine the upload URL and field name based on upload_type
-        if upload_type == "image":
-            url = f"{_IMAGE_UPLOAD_URL}?token={self._token}"
-            field = "image"
-            key_name = "imageKey"
-        elif upload_type == "video":
-            url = f"{_VIDEO_UPLOAD_URL}?token={self._token}"
-            field = "video"
-            key_name = "videoKey"
-        else:
-            url = f"{_FILE_UPLOAD_URL}?token={self._token}"
-            field = "file"
-            key_name = "fileKey"
+        match upload_type:
+            case "image":
+                url = f"{_IMAGE_UPLOAD_URL}?token={self._token}"
+                field = "image"
+                key_name = "imageKey"
+            case "video":
+                url = f"{_VIDEO_UPLOAD_URL}?token={self._token}"
+                field = "video"
+                key_name = "videoKey"
+            case _:
+                url = f"{_FILE_UPLOAD_URL}?token={self._token}"
+                field = "file"
+                key_name = "fileKey"
 
         form = aiohttp.FormData()
         form.add_field(field, data_bytes, filename=filename, content_type=content_type)
@@ -183,7 +182,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
     # Receive
     # ------------------------------------------------------------------
 
-    async def _handle_webhook(self, request: web.Request) -> web.Response:
+    async def _handle_webhook(self, request: Request) -> JSONResponse:
         try:
             data = await request.json()
             event_type: str = data.get("header", {}).get("eventType", "")
@@ -197,7 +196,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             )
 
         # Yunhu expects a 200 with code=0 to acknowledge receipt
-        return web.json_response({"code": 0})
+        return JSONResponse({"code": 0})
 
     async def _on_message(self, event: dict):
         sender: dict = event.get("sender", {})
@@ -216,23 +215,23 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         text = ""
         attachments: list[Attachment] = []
 
-        if content_type in ("text", "markdown"):
-            text = content.get("text", "")
-        elif content_type == "image":
-            url = self._proxy_pfp(content.get("imageUrl", ""))
-            name = content.get("imageName", "image.jpg")
-            if url:
-                attachments.append(Attachment(type="image", url=url, name=name))
-        elif content_type == "video":
-            url = self._proxy_pfp(content.get("videoUrl", ""))
-            name = content.get("videoName", "video.mp4")
-            if url:
-                attachments.append(Attachment(type="video", url=url, name=name))
-        elif content_type == "file":
-            url = self._proxy_pfp(content.get("fileUrl", ""))
-            name = content.get("fileName", "file")
-            if url:
-                attachments.append(Attachment(type="file", url=url, name=name))
+        match content_type:
+            case "text" | "markdown":
+                text = content.get("text", "")
+            case "image":
+                url = self._proxy_pfp(content.get("imageUrl", ""))
+                name = content.get("imageName", "image.jpg")
+                if url:
+                    attachments.append(Attachment(type="image", url=url, name=name))
+            case "video":
+                url = self._proxy_pfp(content.get("videoUrl", ""))
+                name = content.get("videoName", "video.mp4")
+                if url:
+                    attachments.append(Attachment(type="video", url=url, name=name))
+            case "file":
+                logger.debug(
+                    f"Yunhu [{self.instance_id}] ignoring received file message: {message.get('msgId') or message.get('messageId') or ''}"
+                )
 
         if not text.strip() and not attachments:
             return
@@ -246,14 +245,14 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             platform="yunhu",
             instance_id=self.instance_id,
             channel={"chat_id": chat_id, "chat_type": chat_type},
-            user=username,
+            nickname=username,
             user_id=user_id,
             user_avatar=avatar,
             text=text,
             attachments=attachments,
             message_id=str(mid) if mid else None,
             reply_parent=str(pid) if pid else None,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
         )
         await self.bridge.on_message(msg)
 
@@ -315,7 +314,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 )
             )
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
@@ -360,33 +359,34 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                     )
                 continue
 
-            if att.type == "image":
-                payloads.append(
-                    _add_common(
-                        {
-                            "contentType": "image",
-                            "content": {"imageKey": key},
-                        }
+            match att.type:
+                case "image":
+                    payloads.append(
+                        _add_common(
+                            {
+                                "contentType": "image",
+                                "content": {"imageKey": key},
+                            }
+                        )
                     )
-                )
-            elif att.type == "video":
-                payloads.append(
-                    _add_common(
-                        {
-                            "contentType": "video",
-                            "content": {"videoKey": key},
-                        }
+                case "video":
+                    payloads.append(
+                        _add_common(
+                            {
+                                "contentType": "video",
+                                "content": {"videoKey": key},
+                            }
+                        )
                     )
-                )
-            else:  # voice / file / unknown
-                payloads.append(
-                    _add_common(
-                        {
-                            "contentType": "file",
-                            "content": {"fileKey": key},
-                        }
+                case _:  # voice / file / unknown
+                    payloads.append(
+                        _add_common(
+                            {
+                                "contentType": "file",
+                                "content": {"fileKey": key},
+                            }
+                        )
                     )
-                )
 
         if not payloads:
             return None

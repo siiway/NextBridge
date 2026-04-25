@@ -13,7 +13,6 @@
 #   app_secret     – DingTalk app secret (required)
 #   robot_code     – Bot robot code     (required for sending)
 #   signing_secret – Webhook signing secret (optional; skips verify if absent)
-#   listen_port    – HTTP port          (default: 8082)
 #   listen_path    – HTTP path          (default: "/dingtalk/event")
 #
 # Rule channel keys:
@@ -32,13 +31,14 @@ import time
 from typing import Any
 
 import aiohttp
-from aiohttp import web
 from alibabacloud_tea_openapi import models as open_api_models
 from alibabacloud_tea_util import models as util_models
 from alibabacloud_dingtalk.oauth2_1_0.client import Client as OAuthClient
 from alibabacloud_dingtalk.oauth2_1_0 import models as oauth_models
 from alibabacloud_dingtalk.robot_1_0.client import Client as RobotClient
 from alibabacloud_dingtalk.robot_1_0 import models as robot_models
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 import services.logger as log
 import services.media as media
@@ -55,7 +55,6 @@ class DingTalkConfig(_DriverConfig):
     app_secret: str
     robot_code: str
     signing_secret: str = ""
-    listen_port: int = 8082
     listen_path: str = "/dingtalk/event"
     max_file_size: int = 20 * 1024 * 1024
 
@@ -86,25 +85,21 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         self._robot_client = RobotClient(cfg)
         self._session = aiohttp.ClientSession()
 
-        port = self.config.listen_port
-        path = self.config.listen_path
-
-        web_app = web.Application()
-        web_app.router.add_post(path, self._handle_http)
-
-        runner = web.AppRunner(web_app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", port)
-        await site.start()
+        app = FastAPI()
+        app.add_api_route("/", self._handle_http, methods=["POST"])
+        if self.http_server is None:
+            logger.error(
+                f"DingTalk [{self.instance_id}] shared HTTP server unavailable"
+            )
+            return
+        self.http_server.mount(self.instance_id, self.config.listen_path, app)
         logger.info(
-            f"DingTalk [{self.instance_id}] HTTP server listening on "
-            f"0.0.0.0:{port}{path}"
+            f"DingTalk [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
 
         try:
             await asyncio.Event().wait()
         finally:
-            await runner.cleanup()
             await self._session.close()
             self._session = None
 
@@ -112,27 +107,32 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
     # Receive
     # ------------------------------------------------------------------
 
-    async def _handle_http(self, request: web.Request) -> web.Response:
+    async def _handle_http(self, request: Request) -> JSONResponse:
         try:
-            body: dict = await request.json()
+            body: dict = json.loads(await request.body())
+        except json.JSONDecodeError:
+            return JSONResponse({"message": "bad request"}, status_code=400)
         except Exception:
-            return web.json_response({"message": "bad request"}, status=400)
+            return JSONResponse({"message": "receive failed"}, status_code=500)
 
         if self.config.signing_secret:
             ts = request.headers.get("timestamp", "")
             sig = request.headers.get("sign", "")
-            if not _verify_sign(ts, self.config.signing_secret, sig):
+            match, err = _verify_sign(ts, self.config.signing_secret, sig)
+            if not match:
                 logger.warning(
-                    f"DingTalk [{self.instance_id}] webhook signature mismatch"
+                    f"DingTalk [{self.instance_id}] webhook signature mismatch: {err}"
+                    if err
+                    else ""
                 )
-                return web.json_response({"message": "forbidden"}, status=403)
+                return JSONResponse({"message": "forbidden"}, status_code=403)
 
         if body.get("msgtype") != "text":
-            return web.json_response({})
+            return JSONResponse({})
 
         text = body.get("text", {}).get("content", "").strip()
         if not text:
-            return web.json_response({})
+            return JSONResponse({})
 
         # "openConversationId" is the API-usable ID; fall back to "conversationId"
         open_conv_id = body.get("openConversationId") or body.get("conversationId", "")
@@ -154,14 +154,14 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             platform="dingtalk",
             instance_id=self.instance_id,
             channel={"open_conversation_id": open_conv_id},
-            user=sender_nick or sender_id,
+            nickname=sender_nick or sender_id,
             user_id=sender_id,
             user_avatar="",
             text=text,
             mentions=mentions,
         )
         await self.bridge.on_message(msg)
-        return web.json_response({})
+        return JSONResponse({})
 
     # ------------------------------------------------------------------
     # Send
@@ -212,6 +212,8 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 param["at"] = {"atUserIds": at_uids}
             await self._send_org_msg(open_conv_id, token, "sampleText", param)
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
@@ -224,7 +226,9 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 continue
 
             # All other attachments: download bytes and upload to DingTalk
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, source_proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 await self._send_org_msg(
@@ -354,10 +358,12 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
 # ------------------------------------------------------------------
 
 
-def _verify_sign(timestamp: str, secret: str, sign: str) -> bool:
+def _verify_sign(timestamp: str, secret: str, sign: str) -> tuple[bool, str]:
     """Verify DingTalk webhook HMAC-SHA256 signature."""
-    if not timestamp or not sign:
-        return False
+    if not timestamp:
+        return False, "no timestamp found"
+    if not sign:
+        return False, "no sign found"
     try:
         string_to_sign = f"{timestamp}\n{secret}"
         expected = base64.b64encode(
@@ -367,9 +373,9 @@ def _verify_sign(timestamp: str, secret: str, sign: str) -> bool:
                 digestmod=hashlib.sha256,
             ).digest()
         ).decode("utf-8")
-        return hmac.compare_digest(expected, sign)
-    except Exception:
-        return False
+        return hmac.compare_digest(expected, sign), ""
+    except Exception as e:
+        return False, str(e)
 
 
 register("dingtalk", DingTalkConfig, DingTalkDriver)

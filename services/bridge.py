@@ -1,13 +1,14 @@
-import re
-import json
-import hashlib
-from typing import Callable
 import asyncio
+import hashlib
+import json
+import re
+from collections.abc import Callable
+from typing import Any
 
 import services.logger as log
-import services.config as config
-from services.message import NormalizedMessage
+from services import config, cqface
 from services.db import msg_db
+from services.message import NormalizedMessage
 
 logger = log.get_logger()
 
@@ -18,7 +19,6 @@ _SENSITIVE_KEY_PATTERNS = (
     "secret",
     "password",
     "webhook_url",
-    "webhook_path",
     "access_token",
 )
 
@@ -71,9 +71,10 @@ class Bridge:
 
     def __init__(self):
         self._rules: list[dict] = []
-        self._senders: dict[str, Callable] = {}
+        self._senders: dict[str, tuple[str | None, Callable]] = {}
         self._sensitive: frozenset[str] = frozenset()
         self.strict_echo_match: bool = False
+        self.command_prefix: str = "nb"
 
     # ------------------------------------------------------------------
     # Setup
@@ -137,40 +138,96 @@ class Bridge:
         )
 
     def register_sender(self, instance_id: str, send_func: Callable):
-        self._senders[instance_id] = send_func
+        platform = None
+        owner = getattr(send_func, "__self__", None)
+        if owner is not None:
+            platform = getattr(owner, "platform_name", None)
+            if not platform:
+                module = owner.__class__.__module__
+                if module.startswith("drivers."):
+                    platform = module.split(".", 1)[1]
+
+        self._senders[instance_id] = (platform, send_func)
         logger.debug(f"Registered sender for instance: {instance_id}")
 
-    async def _handle_bind_command(self, msg: NormalizedMessage):
+    def _get_command_prefix(self) -> str:
+        prefix = (self.command_prefix or "nb").strip().lstrip("/")
+        return prefix or "nb"
+
+    def _get_command_help(self) -> str:
+        prefix = self._get_command_prefix()
+        return (
+            f"Usage: `/{prefix} bind setup`, `/{prefix} bind confirm <code>`, "
+            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <target>`"
+        )
+
+    def _parse_ping_command(self, text: str) -> str | None:
+        parts = text.strip().split(maxsplit=1)
+        if not parts:
+            return None
+        command = parts[0]
+        if not command.startswith("/"):
+            return None
+
+        root = command[1:].split("@", 1)[0].lower()
+        if root != "ping":
+            return None
+
+        if len(parts) < 2:
+            return ""
+
+        nickname = parts[1].strip().lstrip("@").strip()
+        return nickname
+
+    def _parse_internal_command(self, text: str) -> tuple[str, list[str]] | None:
+        parts = text.split()
+        if not parts or not parts[0].startswith("/"):
+            return None
+
+        root = parts[0][1:].split("@", 1)[0].lower()
+        if root != self._get_command_prefix().lower():
+            return None
+
+        action = parts[1].lower() if len(parts) > 1 else ""
+        args = parts[2:] if len(parts) > 2 else []
+        return action, args
+
+    async def _handle_bind_setup_command(self, msg: NormalizedMessage):
         """Generate a 6-digit binding code for the user."""
         import random
 
         code = f"{random.randint(100000, 999999)}"
         msg_db().create_binding_code(code, msg.instance_id, msg.user_id)
 
-        sender = self._senders.get(msg.instance_id)
-        if sender:
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, sender = sender_info
             try:
+                prefix = self._get_command_prefix()
                 await sender(
                     msg.channel,
-                    f"Your binding code is: `{code}` (valid for 5 mins). Type `/confirm {code}` on the other platform to link accounts.",
+                    f"Your binding code is: `{code}` (valid for 5 mins). Type `/{prefix} bind confirm {code}` on the other platform to link accounts.",
                 )
             except Exception as e:
                 logger.error(f"Failed to send bind code back: {e}")
 
-    async def _handle_confirm_command(self, msg: NormalizedMessage):
+    async def _handle_bind_confirm_command(
+        self, msg: NormalizedMessage, code: str | None
+    ):
         """Confirm a binding code from another platform."""
-        parts = msg.text.split()
-        if len(parts) < 2:
-            sender = self._senders.get(msg.instance_id)
-            if sender:
-                await sender(msg.channel, "Usage: `/confirm <code>`")
+        if not code:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, sender = sender_info
+                prefix = self._get_command_prefix()
+                await sender(msg.channel, f"Usage: `/{prefix} bind confirm <code>`")
             return
 
-        code = parts[1]
         success = msg_db().consume_binding_code(code, msg.instance_id, msg.user_id)
 
-        sender = self._senders.get(msg.instance_id)
-        if sender:
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, sender = sender_info
             if success:
                 await sender(
                     msg.channel,
@@ -179,16 +236,16 @@ class Bridge:
             else:
                 await sender(msg.channel, "❌ Invalid or expired binding code.")
 
-    async def _handle_rm_command(self, msg: NormalizedMessage):
+    async def _handle_bind_rm_command(
+        self, msg: NormalizedMessage, target_inst: str | None
+    ):
         """Remove account bindings for the user."""
-        parts = msg.text.split()
-        target_inst = parts[1] if len(parts) > 1 else None
-
         success = msg_db().remove_user_binding(
             msg.instance_id, msg.user_id, target_inst
         )
-        sender = self._senders.get(msg.instance_id)
-        if sender:
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, sender = sender_info
             if success:
                 if target_inst:
                     await sender(
@@ -210,11 +267,12 @@ class Bridge:
                         msg.channel, "❓ You don't have any active account bindings."
                     )
 
-    async def _handle_list_command(self, msg: NormalizedMessage):
+    async def _handle_bind_list_command(self, msg: NormalizedMessage):
         """List all accounts linked to the user's global identity."""
         bindings = msg_db().get_all_bindings(msg.instance_id, msg.user_id)
-        sender = self._senders.get(msg.instance_id)
-        if sender:
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, sender = sender_info
             if not bindings:
                 await sender(
                     msg.channel, "❓ You don't have any active account bindings."
@@ -238,28 +296,69 @@ class Bridge:
     # ------------------------------------------------------------------
 
     async def on_message(self, msg: NormalizedMessage):
-        # logger.debug(
-        #     f"on_message: platform={msg.platform} instance={msg.instance_id} "
-        #     f"channel={msg.channel} user={msg.user!r} text={msg.text!r}"
-        # )
-        logger.debug(f"on_message: {str(msg)}")
+        logger.info(f"on_message: {msg!s}")
+        ping_nickname = self._parse_ping_command(msg.text)
+        if ping_nickname is not None:
+            if not ping_nickname:
+                sender_info = self._senders.get(msg.instance_id)
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, "Usage: `/ping <nickname>`")
+                return
+
+            msg.text = f"@{ping_nickname}"
+            msg.mentions = [{"id": "", "name": ping_nickname}]
+
         # Handle internal commands
-        if msg.text.startswith("/bind"):
-            await self._handle_bind_command(msg)
-            return
-        if msg.text.startswith("/confirm"):
-            await self._handle_confirm_command(msg)
-            return
-        if msg.text.startswith("/rm"):
-            await self._handle_rm_command(msg)
-            return
-        if msg.text.startswith("/list"):
-            await self._handle_list_command(msg)
+        command = self._parse_internal_command(msg.text)
+        if command is not None:
+            action, args = command
+            sender_info = self._senders.get(msg.instance_id)
+            if action in ("", "help"):
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, self._get_command_help())
+                return
+
+            if action != "bind":
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, self._get_command_help())
+                return
+
+            subcommand = args[0].lower() if args else ""
+            match subcommand:
+                case "setup":
+                    await self._handle_bind_setup_command(msg)
+                    return
+                case "confirm":
+                    await self._handle_bind_confirm_command(
+                        msg, args[1] if len(args) > 1 else None
+                    )
+                    return
+                case "rm":
+                    await self._handle_bind_rm_command(
+                        msg, args[1] if len(args) > 1 else None
+                    )
+                    return
+                case "list":
+                    await self._handle_bind_list_command(msg)
+                    return
+
+            if sender_info:
+                _, sender = sender_info
+                await sender(msg.channel, self._get_command_help())
             return
 
         # Save sender's user mapping
         if msg.user_id:
-            msg_db().save_user(msg.instance_id, msg.user_id, msg.user)
+            if msg.instance_id == "qq":
+                # QQ users are better addressed by qid; fallback to QQ number.
+                display_name = (msg.username or msg.user_id).strip() or msg.user_id
+            else:
+                # Default ping target matching prefers stable username over nickname.
+                display_name = (msg.username or msg.user).strip() or msg.user_id
+            msg_db().save_user(msg.instance_id, msg.user_id, display_name)
 
         reply_bridge_id = None
         if msg.reply_parent:
@@ -338,6 +437,14 @@ class Bridge:
                 "msg_format",
                 '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}',
             )
+        # Format username with @ prefix if it exists
+        username_value = getattr(msg, "username", "")
+        if username_value and not username_value.startswith("@"):
+            username_value = f"@{username_value}"
+        # If username is empty, fallback to user_id
+        if not username_value:
+            username_value = msg.user_id
+
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
@@ -347,6 +454,9 @@ class Bridge:
             "user_avatar": msg.user_avatar,
             "msg": msg.text,
             "time": msg.time,
+            "username": username_value,
+            "nickname": getattr(msg, "nickname", ""),
+            "source_mentioned_self": getattr(msg, "source_mentioned_self", None),
         }
         try:
             formatted = fmt.format(**ctx)
@@ -380,6 +490,44 @@ class Bridge:
     def _is_sensitive(self, text: str) -> bool:
         return bool(self._sensitive) and any(s in text for s in self._sensitive)
 
+    def _normalize_target_cqface(
+        self, target_platform: str | None, text: str, extra: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
+        if target_platform == "discord":
+            return text, dict(extra)
+
+        return cqface.replace_cqface_tokens(text), cqface.replace_cqface_tokens_in_obj(
+            extra
+        )
+
+    def _resolve_target_mention_user_id(
+        self, msg: NormalizedMessage, mention: dict[str, Any], target_instance: str
+    ) -> str | None:
+        mention_id = str(mention.get("id", "") or "")
+        mention_name = str(mention.get("name", "") or "").strip()
+
+        if mention_id:
+            target_uid = msg_db().get_bound_user_id(
+                msg.instance_id, mention_id, target_instance
+            )
+            if target_uid:
+                return target_uid
+
+        if target_instance == "qq":
+            # QQ target addressing uses numeric QQ id or qid alias.
+            if mention_id.isdigit():
+                return mention_id
+            if mention_name.isdigit():
+                return mention_name
+            if mention_name:
+                return msg_db().get_user_id_by_name(target_instance, mention_name)
+            return None
+
+        if mention_name:
+            return msg_db().get_user_id_by_name(target_instance, mention_name)
+
+        return None
+
     async def _dispatch(
         self,
         msg: NormalizedMessage,
@@ -405,10 +553,15 @@ class Bridge:
                 )
                 continue
 
-            sender = self._senders.get(target_id)
-            if sender is None:
+            sender_info = self._senders.get(target_id)
+            if sender_info is None:
                 logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
+            target_platform, sender = sender_info
+
+            formatted_out, extra_out = self._normalize_target_cqface(
+                target_platform, formatted, extra
+            )
 
             # Resolve target reply ID
             target_reply_id = None
@@ -417,7 +570,7 @@ class Bridge:
                     reply_bridge_id, target_id, target_channel
                 )
                 if target_reply_id:
-                    extra["reply_to_id"] = target_reply_id
+                    extra_out["reply_to_id"] = target_reply_id
                     logger.debug(
                         f"Reply mapping resolved for {target_id}: "
                         f"bridge_id={reply_bridge_id} -> {target_reply_id}"
@@ -430,23 +583,33 @@ class Bridge:
 
             # Resolve target mentions
             target_mentions = []
+            source_self_mention_names: list[str] = []
+            source_self_id = str(getattr(msg, "source_self_id", "") or "")
             for m in msg.mentions:
-                # 1. Try explicit binding first
-                target_uid = msg_db().get_bound_user_id(
-                    msg.instance_id, m["id"], target_id
-                )
-                # 2. Fall back to display name match
-                if not target_uid:
-                    target_uid = msg_db().get_user_id_by_name(target_id, m["name"])
-
+                target_uid = self._resolve_target_mention_user_id(msg, m, target_id)
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
+                    continue
+
+                # Fallback: source @self_id (bot) mention can be converted by
+                # target drivers that know their own bot account id.
+                m_id = str(m.get("id", "") or "")
+                m_name = str(m.get("name", "") or "").strip()
+                if source_self_id and m_id == source_self_id and m_name:
+                    source_self_mention_names.append(m_name)
             if target_mentions:
-                extra["mentions"] = target_mentions
+                extra_out["mentions"] = target_mentions
+            if source_self_mention_names:
+                extra_out["source_self_mention_names"] = list(
+                    dict.fromkeys(source_self_mention_names)
+                )
 
             try:
                 new_msg_id = await sender(
-                    target_channel, formatted, attachments=msg.attachments, **extra
+                    target_channel,
+                    formatted_out,
+                    attachments=msg.attachments,
+                    **extra_out,
                 )
                 if new_msg_id:
                     msg_db().save_mapping(
@@ -495,10 +658,15 @@ class Bridge:
                 )
                 continue
 
-            sender = self._senders.get(target_id)
-            if sender is None:
+            sender_info = self._senders.get(target_id)
+            if sender_info is None:
                 logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
+            target_platform, sender = sender_info
+
+            formatted_out, extra_out = self._normalize_target_cqface(
+                target_platform, formatted, extra
+            )
 
             # Resolve target reply ID
             target_reply_id = None
@@ -507,7 +675,7 @@ class Bridge:
                     reply_bridge_id, target_id, target_channel
                 )
                 if target_reply_id:
-                    extra["reply_to_id"] = target_reply_id
+                    extra_out["reply_to_id"] = target_reply_id
                     logger.debug(
                         f"Reply mapping resolved for {target_id}: "
                         f"bridge_id={reply_bridge_id} -> {target_reply_id}"
@@ -520,23 +688,33 @@ class Bridge:
 
             # Resolve target mentions
             target_mentions = []
+            source_self_mention_names: list[str] = []
+            source_self_id = str(getattr(msg, "source_self_id", "") or "")
             for m in msg.mentions:
-                # 1. Try explicit binding first
-                target_uid = msg_db().get_bound_user_id(
-                    msg.instance_id, m["id"], target_id
-                )
-                # 2. Fall back to display name match
-                if not target_uid:
-                    target_uid = msg_db().get_user_id_by_name(target_id, m["name"])
-
+                target_uid = self._resolve_target_mention_user_id(msg, m, target_id)
                 if target_uid:
                     target_mentions.append({"id": target_uid, "name": m["name"]})
+                    continue
+
+                # Fallback: source @self_id (bot) mention can be converted by
+                # target drivers that know their own bot account id.
+                m_id = str(m.get("id", "") or "")
+                m_name = str(m.get("name", "") or "").strip()
+                if source_self_id and m_id == source_self_id and m_name:
+                    source_self_mention_names.append(m_name)
             if target_mentions:
-                extra["mentions"] = target_mentions
+                extra_out["mentions"] = target_mentions
+            if source_self_mention_names:
+                extra_out["source_self_mention_names"] = list(
+                    dict.fromkeys(source_self_mention_names)
+                )
 
             try:
                 new_msg_id = await sender(
-                    target_channel, formatted, attachments=msg.attachments, **extra
+                    target_channel,
+                    formatted_out,
+                    attachments=msg.attachments,
+                    **extra_out,
                 )
                 if new_msg_id:
                     msg_db().save_mapping(

@@ -8,6 +8,8 @@
 #       data, content_type = result
 
 import mimetypes
+import asyncio
+import shutil
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
@@ -19,6 +21,64 @@ logger = log.get_logger()
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
 _sessions: dict[str | None, aiohttp.ClientSession] = {}
+_ffmpeg_available: bool | None = None
+
+
+def _looks_like_amr(data: bytes) -> bool:
+    # AMR-NB/AMR-WB magic headers
+    return data.startswith(b"#!AMR\n") or data.startswith(b"#!AMR-WB\n")
+
+
+def _is_amr_attachment(att, mime: str, data: bytes) -> bool:
+    if mime == "audio/amr":
+        return True
+    if att.name.lower().endswith(".amr"):
+        return True
+    return _looks_like_amr(data)
+
+
+async def _convert_amr_to_ogg(data: bytes) -> tuple[bytes, str] | None:
+    global _ffmpeg_available
+
+    if _ffmpeg_available is False:
+        return None
+    if _ffmpeg_available is None:
+        _ffmpeg_available = shutil.which("ffmpeg") is not None
+        if not _ffmpeg_available:
+            logger.warning("media: ffmpeg not found; AMR audio will be forwarded as-is")
+            return None
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-c:a",
+            "libopus",
+            "-f",
+            "ogg",
+            "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(data), timeout=25)
+        if proc.returncode != 0 or not stdout:
+            err = stderr.decode(errors="ignore").strip()
+            logger.warning(
+                f"media: ffmpeg AMR->OGG conversion failed: {err or proc.returncode}"
+            )
+            return None
+        return stdout, "audio/ogg"
+    except TimeoutError:
+        logger.warning("media: ffmpeg AMR->OGG conversion timed out")
+        return None
+    except Exception as e:
+        logger.warning(f"media: ffmpeg AMR->OGG conversion error: {e}")
+        return None
 
 
 def _get_session(proxy: str | None = None) -> aiohttp.ClientSession:
@@ -132,8 +192,19 @@ async def fetch_attachment(
             )
             return None
         mime = mimetypes.guess_type(att.name)[0] or "application/octet-stream"
-        return att.data, mime
-    return await fetch(att.url, max_bytes, proxy)
+        data = att.data
+    else:
+        result = await fetch(att.url, max_bytes, proxy)
+        if not result:
+            return None
+        data, mime = result
+
+    if att.type == "voice" and _is_amr_attachment(att, mime, data):
+        converted = await _convert_amr_to_ogg(data)
+        if converted:
+            return converted
+
+    return data, mime
 
 
 def filename_for(name: str, content_type: str) -> str:
@@ -158,6 +229,10 @@ def filename_for(name: str, content_type: str) -> str:
             ext = _mime_ext.get(content_type)
             if ext:
                 return name[:-4] + "." + ext
+        # If AMR voice has been transcoded to OGG, keep filename extension aligned
+        # so target platforms won't treat it as unsupported AMR.
+        if content_type == "audio/ogg" and name.lower().endswith(".amr"):
+            return name[:-4] + ".ogg"
         return name
     _fallback = {
         "image/jpeg": "photo.jpg",

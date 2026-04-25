@@ -18,9 +18,16 @@
 # Rule channel keys:
 #   room_id – Matrix room ID, e.g. "!abc123:matrix.org"
 
-from drivers.registry import register
+from pathlib import Path
+from typing import cast
+
+import fresholm.import_hook  # noqa: F401
+from aiohttp import ClientSession, TCPConnector
+from aiohttp_socks import ProxyConnector
+from mautrix.api import HTTPAPI
 from mautrix.client import Client
 from mautrix.client.syncer import EventHandler
+from mautrix.crypto import OlmMachine
 from mautrix.types import (
     AudioInfo,
     ContentURI,
@@ -38,21 +45,15 @@ from mautrix.types import (
     UserID,
     VideoInfo,
 )
-from mautrix.api import HTTPAPI
-from mautrix.crypto import OlmMachine
-from typing import cast
-from aiohttp import ClientSession, TCPConnector
-from aiohttp_socks import ProxyConnector
-from pathlib import Path
-
 from pydantic import model_validator
 
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class MatrixConfig(_DriverConfig):
@@ -152,9 +153,10 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         if self.config.enable_e2e:
             try:
                 from contextlib import asynccontextmanager
+
+                from mautrix.client.state_store import MemoryStateStore
                 from mautrix.crypto import StateStore
                 from mautrix.crypto.store import MemoryCryptoStore
-                from mautrix.client.state_store import MemoryStateStore
 
                 # Create a custom CryptoStore that overrides the transaction() method
                 class CustomCryptoStore(MemoryCryptoStore):
@@ -311,21 +313,27 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
 
             # Convert to a regular MessageEvent and process
             if decrypted_event:
-                # Create a mock MessageEvent with the decrypted content
-                from mautrix.types import MessageEvent, RoomID, UserID
+                # Create a mock MessageEvent with the decrypted message content.
+                decrypted_content = getattr(decrypted_event, "content", None)
+                if isinstance(
+                    decrypted_content,
+                    (TextMessageEventContent, MediaMessageEventContent),
+                ):
+                    from mautrix.types import MessageEvent, RoomID, UserID
 
-                # Create a new event with decrypted content
-                decrypted_msg_event = MessageEvent(
-                    content=decrypted_event,  # type: ignore
-                    type=EventType.ROOM_MESSAGE,
-                    room_id=RoomID(event.room_id),
-                    event_id=event.event_id,
-                    sender=UserID(event.sender),
-                    timestamp=event.timestamp,
-                )
-
-                # Process the decrypted message
-                await self._on_message(decrypted_msg_event)
+                    decrypted_msg_event = MessageEvent(
+                        content=decrypted_content,
+                        type=EventType.ROOM_MESSAGE,
+                        room_id=RoomID(event.room_id),
+                        event_id=event.event_id,
+                        sender=UserID(event.sender),
+                        timestamp=event.timestamp,
+                    )
+                    await self._on_message(decrypted_msg_event)
+                else:
+                    logger.warning(
+                        f"Matrix [{self.instance_id}] unsupported decrypted content type"
+                    )
             else:
                 logger.warning(f"Matrix [{self.instance_id}] Failed to decrypt event")
         except Exception as e:
@@ -362,25 +370,25 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     platform="matrix",
                     instance_id=self.instance_id,
                     channel={"room_id": str(event.room_id)},
-                    user=display_name,
+                    nickname=display_name,
                     user_id=str(event.sender),
                     user_avatar=avatar,
                     text=text,
                     mentions=mentions,
-                    source_proxy=self._proxy,
+                    source_proxy=self._media_proxy,
                 )
             )
 
         elif isinstance(content, MediaMessageEventContent):
-            msgtype = content.msgtype
-            if msgtype == MessageType.IMAGE:
-                att_type = "image"
-            elif msgtype == MessageType.VIDEO:
-                att_type = "video"
-            elif msgtype == MessageType.AUDIO:
-                att_type = "voice"
-            else:
-                att_type = "file"
+            match content.msgtype:
+                case MessageType.IMAGE:
+                    att_type = "image"
+                case MessageType.VIDEO:
+                    att_type = "video"
+                case MessageType.AUDIO:
+                    att_type = "voice"
+                case _:
+                    att_type = "file"
 
             # Honour declared size before downloading
             declared = getattr(content.info, "size", None) if content.info else None
@@ -416,7 +424,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     platform="matrix",
                     instance_id=self.instance_id,
                     channel={"room_id": str(event.room_id)},
-                    user=display_name,
+                    nickname=display_name,
                     user_id=str(event.sender),
                     user_avatar=avatar,
                     text="",
@@ -425,7 +433,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                             type=att_type, url=att_url, name=fname, data=att_data
                         )
                     ],
-                    source_proxy=self._proxy,
+                    source_proxy=self._media_proxy,
                 )
             )
 
@@ -505,7 +513,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             except Exception as e:
                 logger.error(f"Matrix [{self.instance_id}] send text failed: {e}")
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue

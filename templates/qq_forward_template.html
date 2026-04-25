@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>$title</title>
+  <link rel="icon" href="https://icons.siiway.org/nextbridge/favicon/favicon.ico" />
+  <link rel="shortcut icon" href="https://icons.siiway.org/nextbridge/favicon/favicon.ico" />
+  <style>
+    :root {
+      --bg-1: #0e141f;
+      --bg-2: #1a2233;
+      --paper: rgba(22, 31, 48, .78);
+      --paper-strong: rgba(28, 40, 62, .9);
+      --ink: #e9f1ff;
+      --muted: #9ab0cf;
+      --line: rgba(126, 171, 237, .24);
+      --accent: #7de2ff;
+      --chip: rgba(118, 231, 252, .12);
+      --danger: #ff9c92;
+      --danger-bg: rgba(255, 122, 104, .16);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      background-color: var(--bg-1);
+      background-image:
+        radial-gradient(1200px 500px at 20% -10%, rgba(78, 148, 255, .22), transparent 62%),
+        radial-gradient(900px 440px at 100% 0%, rgba(125, 226, 255, .16), transparent 60%),
+        linear-gradient(145deg, var(--bg-1) 0%, var(--bg-2) 100%);
+      background-repeat: no-repeat, no-repeat, no-repeat;
+      background-size: 1500px 700px, 1100px 560px, 100% 100%;
+      background-position: 16% -12%, 100% 0%, 0 0;
+      color: var(--ink);
+      font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .page {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px 18px 42px;
+    }
+    .head {
+      background: linear-gradient(180deg, rgba(26, 38, 59, .95), rgba(17, 28, 46, .92));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px 20px;
+      margin-bottom: 14px;
+      box-shadow: 0 14px 40px rgba(0, 0, 0, .35);
+    }
+    h1 {
+      margin: 0;
+      font-size: 31px;
+      letter-spacing: .35px;
+    }
+    .meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .meta.sub {
+      margin-top: 3px;
+      font-size: 12px;
+      opacity: .95;
+    }
+    .status-chip {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(125, 226, 255, .12);
+      color: #bdefff;
+      font-size: 12px;
+      vertical-align: middle;
+    }
+    .status-chip.is-destroyed {
+      color: var(--danger);
+      background: var(--danger-bg);
+      border-color: #e1beb7;
+    }
+    .msg {
+      background: linear-gradient(180deg, var(--paper), var(--paper-strong));
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin: 11px 0;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, .2);
+    }
+    .sender {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 9px;
+    }
+    .avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      object-fit: cover;
+      background: rgba(255, 255, 255, .08);
+      flex: 0 0 auto;
+    }
+    .sender-meta {
+      min-width: 0;
+    }
+    .sender-main {
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--accent);
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .sender-sub {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+      margin-top: 1px;
+      word-break: break-word;
+    }
+    .content {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .cqface {
+      height: 1.25em;
+      width: 1.25em;
+      vertical-align: -0.18em;
+      object-fit: contain;
+    }
+    .fwd-image {
+      display: block;
+      max-width: 100%;
+      max-height: 480px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      margin: 8px 0;
+      background: #fff;
+      object-fit: contain;
+    }
+    .fwd-image-open {
+      cursor: zoom-in;
+    }
+    .fwd-image-placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 84px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px dashed rgba(159, 220, 241, .35);
+      margin: 8px 0;
+      background: rgba(255, 255, 255, .04);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      text-align: center;
+    }
+    .chip {
+      display: inline-block;
+      font-size: 12px;
+      color: #9fdcf1;
+      background: var(--chip);
+      border: 1px solid rgba(123, 194, 255, .33);
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    a.asset {
+      color: #9fdcf1;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(159, 220, 241, .55);
+    }
+    a.asset:hover {
+      color: #d4f7ff;
+      border-bottom-color: #d4f7ff;
+    }
+    .media-block {
+      margin: 8px 0;
+    }
+    .media-player {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      margin: 8px 0;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .04);
+    }
+    .media-video {
+      max-width: 100%;
+    }
+    .file-block {
+      margin: 8px 0;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(123, 194, 255, .2);
+      background: rgba(24, 36, 56, .52);
+    }
+    .file-name {
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+      margin: 2px 0 4px;
+      word-break: break-word;
+    }
+    .file-meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0 0 8px;
+      word-break: break-all;
+    }
+    .asset.disabled {
+      color: #7f97b9;
+      border-bottom: 1px dashed rgba(127, 151, 185, .45);
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+    .nested-forward {
+      margin: 10px 0 6px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(123, 194, 255, .22);
+      background: rgba(15, 24, 39, .55);
+    }
+    .nested-forward-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #bdefff;
+      letter-spacing: .2px;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      margin: 0;
+    }
+    .nested-forward-title::-webkit-details-marker {
+      display: none;
+    }
+    .nested-forward-title::before {
+      content: '▸';
+      display: inline-block;
+      margin-right: 6px;
+      color: #9fdcf1;
+      transition: transform .18s ease;
+    }
+    .nested-forward[open] .nested-forward-title {
+      margin-bottom: 8px;
+    }
+    .nested-forward[open] .nested-forward-title::before {
+      transform: rotate(90deg);
+    }
+    .nested-forward-body .msg {
+      margin: 8px 0;
+      box-shadow: none;
+    }
+    .forward-state {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(123, 194, 255, .22);
+      background: rgba(17, 28, 45, .78);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    .forward-state.is-destroyed {
+      border-color: rgba(255, 140, 131, .45);
+      background: rgba(48, 23, 23, .72);
+      color: #ffbdb5;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="head">
+      <h1>$title<span class="status-chip $page_state">$page_state_text</span></h1>
+      <div class="meta">$meta_primary</div>
+      <div class="meta sub">$meta_secondary</div>
+    </section>
+    <section>$body</section>
+    <section class="forward-state $page_state">
+      <strong>$page_state_banner</strong><br />
+      $page_state_detail
+    </section>
+  </main>
+</body>
+</html>

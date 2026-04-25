@@ -49,8 +49,26 @@ function hostAllowed(hostname, allowlist) {
   return allowlist.some(suffix => hostname === suffix.slice(1) || hostname.endsWith(suffix));
 }
 
+async function fetchWithRetry(url, init, maxAttempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const resp = await fetch(url, init);
+      // Retry on transient upstream errors only.
+      if (resp.status >= 500 && resp.status <= 599 && attempt < maxAttempts) {
+        continue;
+      }
+      return resp;
+    } catch (err) {
+      lastError = err;
+      if (attempt >= maxAttempts) throw err;
+    }
+  }
+  throw lastError ?? new Error('fetchWithRetry failed');
+}
+
 async function proxyUrl(url, extraHeaders = {}) {
-  const upstream = await fetch(url, {
+  const upstream = await fetchWithRetry(url, {
     headers: { 'User-Agent': 'Mozilla/5.0', 'X-Robots-Tag': 'none', ...extraHeaders },
   });
 

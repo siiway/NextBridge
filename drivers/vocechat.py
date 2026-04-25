@@ -14,7 +14,6 @@
 #   server_url    – Base URL of the VoceChat server (required),
 #                   e.g. "https://chat.example.com"
 #   api_key       – Bot API key shown in the bot settings page (required)
-#   listen_port   – HTTP port for the webhook endpoint (default: 8091)
 #   listen_path   – HTTP path for the webhook endpoint
 #                   (default: "/vocechat/webhook")
 #   max_file_size – Max bytes per attachment (default: 50 MB)
@@ -23,26 +22,26 @@
 #   gid – VoceChat group/channel ID  (integer or string)
 #   uid – VoceChat user ID for DMs   (integer or string)
 
-from drivers.registry import register
 import asyncio
 import json
 
 import aiohttp
-from aiohttp import web
 from aiohttp_socks import ProxyConnector
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config import get_proxy, UNSET
-from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class VoceChatConfig(_DriverConfig):
     server_url: str
     api_key: str
-    listen_port: int = 8091
     listen_path: str = "/vocechat/webhook"
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
@@ -85,21 +84,21 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         )
         self.bridge.register_sender(self.instance_id, self.send)
 
-        app = web.Application()
-        app.router.add_get(self.config.listen_path, self._handle_health)
-        app.router.add_post(self.config.listen_path, self._handle_event)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", self.config.listen_port)
-        await site.start()
+        app = FastAPI()
+        app.add_api_route("/", self._handle_health, methods=["GET"])
+        app.add_api_route("/", self._handle_event, methods=["POST"])
+        if self.http_server is None:
+            logger.error(
+                f"VoceChat [{self.instance_id}] shared HTTP server unavailable"
+            )
+            return
+        self.http_server.mount(self.instance_id, self.config.listen_path, app)
         logger.info(
-            f"VoceChat [{self.instance_id}] webhook listening on "
-            f"0.0.0.0:{self.config.listen_port}{self.config.listen_path}"
+            f"VoceChat [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
         try:
             await asyncio.Event().wait()
         finally:
-            await runner.cleanup()
             await self._session.close()
             self._session = None
 
@@ -108,19 +107,21 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _handle_health(_: web.Request) -> web.Response:
+    async def _handle_health(_: Request) -> PlainTextResponse:
         """Health-check: VoceChat verifies the URL with a GET before saving it."""
-        return web.Response(status=200, text="ok")
+        return PlainTextResponse("ok", status_code=200)
 
-    async def _handle_event(self, request: web.Request) -> web.Response:
+    async def _handle_event(self, request: Request) -> PlainTextResponse:
         try:
-            body = await request.read()
+            body = await request.body()
             event = json.loads(body)
+        except json.JSONDecodeError:
+            return PlainTextResponse("Bad JSON", status_code=400)
         except Exception:
-            return web.Response(status=400, text="Bad JSON")
+            return PlainTextResponse("Handle failed", status_code=500)
 
         asyncio.create_task(self._dispatch(event))
-        return web.Response(status=200, text="ok")
+        return PlainTextResponse("ok", status_code=200)
 
     async def _dispatch(self, event: dict) -> None:
         detail = event.get("detail", {})
@@ -166,7 +167,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             platform="vocechat",
             instance_id=self.instance_id,
             channel=channel,
-            user=display_name,
+            nickname=display_name,
             user_id=str(from_uid),
             user_avatar=avatar,
             text=text,
@@ -175,7 +176,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             reply_parent=str(detail.get("parent_mid", ""))
             if detail.get("parent_mid")
             else None,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
         )
         await self.bridge.on_message(normalized)
 
@@ -299,7 +300,9 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 if name:
                     text = text.replace(f"@{m['name']}", f"@{name}")
             except Exception:
-                pass
+                logger.debug(
+                    f"VoceChat [{self.instance_id}] get user info for mention {m} failed"
+                )
 
         if text.strip():
             # Use markdown if rich_header was applied; plain text otherwise
@@ -308,7 +311,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             if not first_msg_id:
                 first_msg_id = mid
 
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue

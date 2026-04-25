@@ -2,7 +2,7 @@
 #
 # Receive: aiohttp HTTP server that accepts POST requests from the Bot
 #          Framework connector.  Point your Azure bot's messaging endpoint at
-#          http(s)://<host>:<listen_port><listen_path>.
+#          http(s)://<host>:<global.http.port><listen_path>.
 #
 # Send:    Bot Connector REST API.  An OAuth2 client-credentials token is
 #          obtained from Microsoft identity and cached until it expires.
@@ -10,7 +10,6 @@
 # Config keys (under teams.<instance_id>):
 #   app_id        – Azure bot application (client) ID     (required)
 #   app_secret    – Azure bot client secret               (required)
-#   listen_port   – HTTP port for the messaging endpoint  (default: 3978)
 #   listen_path   – HTTP path for the messaging endpoint  (default: "/api/messages")
 #   max_file_size – Max bytes per attachment when sending (default 20 MB)
 #
@@ -19,27 +18,27 @@
 #                     (e.g. "https://smba.trafficmanager.net/amer/")
 #   conversation_id – Value of activity.conversation.id
 
-from drivers.registry import register
 import asyncio
 import json
 import time
 
 import aiohttp
-from aiohttp import web
 from aiohttp_socks import ProxyConnector
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
-from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config import UNSET, get_proxy
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class TeamsConfig(_DriverConfig):
     app_id: str
     app_secret: str
-    listen_port: int = 3978
     listen_path: str = "/api/messages"
     max_file_size: int = 20 * 1024 * 1024
     proxy: str | None = UNSET
@@ -73,20 +72,18 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
-        app = web.Application()
-        app.router.add_post(self.config.listen_path, self._handle_activity)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", self.config.listen_port)
-        await site.start()
+        app = FastAPI()
+        app.add_api_route("/", self._handle_activity, methods=["POST"])
+        if self.http_server is None:
+            logger.error(f"Teams [{self.instance_id}] shared HTTP server unavailable")
+            return
+        self.http_server.mount(self.instance_id, self.config.listen_path, app)
         logger.info(
-            f"Teams [{self.instance_id}] listening on "
-            f"0.0.0.0:{self.config.listen_port}{self.config.listen_path}"
+            f"Teams [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
         try:
             await asyncio.Event().wait()
         finally:
-            await runner.cleanup()
             await self._session.close()
             self._session = None
 
@@ -126,22 +123,24 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
     # Receive
     # ------------------------------------------------------------------
 
-    async def _handle_activity(self, request: web.Request) -> web.Response:
+    async def _handle_activity(self, request: Request) -> PlainTextResponse:
         try:
-            body = await request.read()
+            body = await request.body()
             activity = json.loads(body)
+        except json.JSONDecodeError:
+            return PlainTextResponse("Bad JSON", status_code=400)
         except Exception:
-            return web.Response(status=400, text="Bad JSON")
+            return PlainTextResponse("Handle failed", status_code=500)
 
         if activity.get("type") != "message":
-            return web.Response(status=200, text="ok")
+            return PlainTextResponse("ok", status_code=200)
         if activity.get("channelId") != "msteams":
-            return web.Response(status=200, text="ok")
+            return PlainTextResponse("ok", status_code=200)
 
         # Skip messages sent by the bot itself (from.id starts with "28:")
         from_id: str = (activity.get("from") or {}).get("id", "")
         if from_id.startswith("28:"):
-            return web.Response(status=200, text="ok")
+            return PlainTextResponse("ok", status_code=200)
 
         text: str = activity.get("text") or ""
         # Strip @-mention of the bot from text (Teams prepends it)
@@ -186,7 +185,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             )
 
         if not text.strip() and not attachments:
-            return web.Response(status=200, text="ok")
+            return PlainTextResponse("ok", status_code=200)
 
         from_name: str = (activity.get("from") or {}).get("name", from_id)
         service_url: str = activity.get("serviceUrl", "").rstrip("/")
@@ -196,16 +195,16 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             platform="teams",
             instance_id=self.instance_id,
             channel={"service_url": service_url, "conversation_id": conv_id},
-            user=from_name,
+            nickname=from_name,
             user_id=from_id,
             user_avatar="",
             text=text,
             attachments=attachments,
             mentions=mentions,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
-        return web.Response(status=200, text="ok")
+        return PlainTextResponse("ok", status_code=200)
 
     # ------------------------------------------------------------------
     # Send
@@ -279,12 +278,14 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
                 activity["entities"] = entities
             await self._post_activity(url, headers, activity)
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         # Send attachments
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if not result:
                 label = att.name or att.url or ""

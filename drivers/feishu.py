@@ -22,13 +22,11 @@
 #   use_long_connection  – true = WebSocket mode; false = HTTP webhook mode  (default: true)
 #   verification_token   – Event verification token  (HTTP mode only)
 #   encrypt_key          – Event encryption key  (HTTP mode; leave "" to disable)
-#   listen_port          – HTTP port to listen on  (HTTP mode; default: 8080)
 #   listen_path          – HTTP path for events    (HTTP mode; default: "/event")
 #
 # Rule channel keys:
 #   chat_id – Feishu open chat ID, e.g. "oc_xxxxxxxxxxxxxxxxxx"
 
-from drivers.registry import register
 import asyncio
 import io
 import json
@@ -36,26 +34,27 @@ import logging
 import re
 import threading
 
-from aiohttp import web
 import lark_oapi as lark
+from fastapi import FastAPI, Request, Response
 from lark_oapi.api.contact.v3 import GetUserRequest
 from lark_oapi.api.im.v1 import (
-    CreateMessageRequest,
-    CreateMessageRequestBody,
-    CreateImageRequest,
-    CreateImageRequestBody,
     CreateFileRequest,
     CreateFileRequestBody,
+    CreateImageRequest,
+    CreateImageRequestBody,
+    CreateMessageRequest,
+    CreateMessageRequestBody,
     GetMessageResourceRequest,
     ReplyMessageRequest,
     ReplyMessageRequestBody,
 )
 
 import services.logger as log
-import services.media as media
-from services.message import Attachment, NormalizedMessage
-from services.config_schema import _DriverConfig
 from drivers import BaseDriver
+from drivers.registry import register
+from services import media
+from services.config_schema import _DriverConfig
+from services.message import Attachment, NormalizedMessage
 
 
 class FeishuConfig(_DriverConfig):
@@ -64,7 +63,6 @@ class FeishuConfig(_DriverConfig):
     use_long_connection: bool = True
     verification_token: str = ""
     encrypt_key: str = ""
-    listen_port: int = 8080
     listen_path: str = "/event"
     max_file_size: int = 50 * 1024 * 1024
 
@@ -188,42 +186,36 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
     # ------------------------------------------------------------------
 
     async def _start_http_server(self) -> None:
-        port = self.config.listen_port
         path = self.config.listen_path
 
-        web_app = web.Application()
-        web_app.router.add_post(path, self._handle_http)
+        app = FastAPI()
+        app.add_api_route("/", self._handle_http, methods=["POST"])
+        if self.http_server is None:
+            logger.error(f"Feishu [{self.instance_id}] shared HTTP server unavailable")
+            return
 
-        runner = web.AppRunner(web_app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", port)
-        await site.start()
-        logger.info(
-            f"Feishu [{self.instance_id}] HTTP server listening on 0.0.0.0:{port}{path}"
-        )
+        self.http_server.mount(self.instance_id, path, app)
+        logger.info(f"Feishu [{self.instance_id}] HTTP webhook mounted at {path}")
 
-        try:
-            await asyncio.Event().wait()
-        finally:
-            await runner.cleanup()
+        await asyncio.Event().wait()
 
-    async def _handle_http(self, request: web.Request) -> web.Response:
+    async def _handle_http(self, request: Request) -> Response:
         assert self._handler is not None  # Type narrowing - handler is set in start()
         handler = self._handler
-        body = await request.read()
+        body = await request.body()
         # Create RawRequest with correct parameter names for lark-oapi
         raw_req = lark.RawRequest()
-        raw_req.uri = request.path
+        raw_req.uri = request.url.path
         raw_req.headers = dict(request.headers)
         raw_req.body = body
 
         # lark-oapi's do() is synchronous; run in thread pool to avoid blocking
         loop = asyncio.get_running_loop()
         resp = await loop.run_in_executor(None, lambda: handler.do(raw_req))
-        return web.Response(
-            body=resp.content,
-            status=resp.status_code or 200,
-            content_type=getattr(resp, "content_type", "application/json")
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code or 200,
+            media_type=getattr(resp, "content_type", "application/json")
             or "application/json",
         )
 
@@ -279,15 +271,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             seg_text = ""
             for seg in segment_list:
                 tag = seg.get("tag")
-                if tag == "text":
-                    seg_text += seg.get("text", "")
-                elif tag == "at":
-                    user_name = seg.get("user_name", "User")
-                    seg_text += f"@{user_name}"
-                elif tag == "a":
-                    href = seg.get("href", "")
-                    text = seg.get("text", "")
-                    seg_text += f"[{text}]({href})" if text else href
+                match tag:
+                    case "text":
+                        seg_text += seg.get("text", "")
+                    case "at":
+                        user_name = seg.get("user_name", "User")
+                        seg_text += f"@{user_name}"
+                    case "a":
+                        href = seg.get("href", "")
+                        text = seg.get("text", "")
+                        seg_text += f"[{text}]({href})" if text else href
             if seg_text:
                 lines.append(seg_text)
 
@@ -332,45 +325,49 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             attachments = []
             mentions = []
 
-            if mtype == "text":
-                text = content_json.get("text", "").strip()
-                # Replace mentions placeholders like @_user_1 with @DisplayName
-                if hasattr(msg, "mentions") and msg.mentions:
-                    for m in msg.mentions:
-                        if m.key and m.name:
-                            text = text.replace(m.key, f"@{m.name}")
-                            mentions.append({"id": m.id, "name": m.name})
-            elif mtype == "post":
-                text = self._parse_post(content_json)
-            elif mtype == "image":
-                image_key = content_json.get("image_key")
-                if image_key:
-                    data_bytes = self._download_resource(
-                        msg.message_id, image_key, "image"
-                    )
-                    if data_bytes:
-                        attachments.append(
-                            Attachment(
-                                type="image",
-                                url="",
-                                data=data_bytes,
-                                name=f"{image_key}.png",
-                            )
+            match mtype:
+                case "text":
+                    text = content_json.get("text", "").strip()
+                    # Replace mentions placeholders like @_user_1 with @DisplayName
+                    if hasattr(msg, "mentions") and msg.mentions:
+                        for m in msg.mentions:
+                            if m.key and m.name:
+                                text = text.replace(m.key, f"@{m.name}")
+                                mentions.append({"id": m.id, "name": m.name})
+                case "post":
+                    text = self._parse_post(content_json)
+                case "image":
+                    image_key = content_json.get("image_key")
+                    if image_key:
+                        data_bytes = self._download_resource(
+                            msg.message_id, image_key, "image"
                         )
-            elif mtype in ("file", "audio", "video", "sticker"):
-                file_key = content_json.get("file_key")
-                file_name = content_json.get("file_name", f"{mtype}_attachment")
-                if file_key:
-                    data_bytes = self._download_resource(
-                        msg.message_id, file_key, "file"
-                    )
-                    if data_bytes:
-                        att_type = "image" if mtype == "sticker" else mtype
-                        attachments.append(
-                            Attachment(
-                                type=att_type, url="", data=data_bytes, name=file_name
+                        if data_bytes:
+                            attachments.append(
+                                Attachment(
+                                    type="image",
+                                    url="",
+                                    data=data_bytes,
+                                    name=f"{image_key}.png",
+                                )
                             )
+                case "file" | "audio" | "video" | "sticker":
+                    file_key = content_json.get("file_key")
+                    file_name = content_json.get("file_name", f"{mtype}_attachment")
+                    if file_key:
+                        data_bytes = self._download_resource(
+                            msg.message_id, file_key, "file"
                         )
+                        if data_bytes:
+                            att_type = "image" if mtype == "sticker" else mtype
+                            attachments.append(
+                                Attachment(
+                                    type=att_type,
+                                    url="",
+                                    data=data_bytes,
+                                    name=file_name,
+                                )
+                            )
 
             if not text and not attachments:
                 return
@@ -386,7 +383,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 platform="feishu",
                 instance_id=self.instance_id,
                 channel={"chat_id": chat_id},
-                user=display_name,
+                nickname=display_name,
                 user_id=open_id,
                 user_avatar=avatar,
                 text=text,
@@ -446,10 +443,14 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             if not first_msg_id:
                 first_msg_id = mid
 
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
+
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
-            result = await media.fetch_attachment(att, self.config.max_file_size)
+            result = await media.fetch_attachment(
+                att, self.config.max_file_size, source_proxy
+            )
             if not result:
                 label = att.name or att.url or ""
                 mid = await self._send_feishu_msg(

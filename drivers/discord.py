@@ -30,7 +30,10 @@ import aiohttp
 
 from typing import Literal
 
+from pydantic import field_validator
+
 import services.logger as log
+import services.cqface as cqface
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.util import get_data_path
@@ -43,9 +46,23 @@ class DiscordConfig(_DriverConfig):
     send_method: Literal["webhook", "bot"] = "webhook"
     bot_token: str = ""
     max_file_size: int = 8 * 1024 * 1024
-    send_as_bot_when_using_cqface_emoji: CoercedBool = False
+    cqface_webhook_fallback: Literal["bot", "unicode"] = "unicode"
     send_replies_as_bot: CoercedBool = True
+    allow_mentions_everyone: CoercedBool = False
+    allow_mentions_users: CoercedBool = True
+    allow_mentions_roles: CoercedBool = False
+    sanitize_mass_mentions: CoercedBool = True
     proxy: str | None = UNSET
+
+    @field_validator("cqface_webhook_fallback", mode="before")
+    def _normalize_cqface_webhook_fallback(cls, value):
+        if isinstance(value, bool):
+            return "bot" if value else "unicode"
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ("bot", "unicode"):
+                return normalized
+        return value
 
 
 logger = log.get_logger()
@@ -53,6 +70,7 @@ logger = log.get_logger()
 _CQFACE_RE = re.compile(r":cqface(\d+):")
 _RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
 _ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+_MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 
 
 def _parse_richheader(text: str) -> tuple[str, dict | None]:
@@ -62,6 +80,12 @@ def _parse_richheader(text: str) -> tuple[str, dict | None]:
     attrs = dict(_ATTR_RE.findall(m.group(1)))
     clean = (text[: m.start()] + text[m.end() :]).strip()
     return clean, attrs or None
+
+
+def _sanitize_mass_mentions(text: str) -> tuple[str, bool]:
+    """Neutralize @everyone/@here so they cannot trigger mass pings."""
+    sanitized, count = _MASS_MENTION_RE.subn(lambda m: f"@ {m.group(1)}", text)
+    return sanitized, count > 0
 
 
 class DiscordDriver(BaseDriver[DiscordConfig]):
@@ -77,6 +101,16 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._emoji_cache: dict[str, str] = {}
         # name → emoji_id index built lazily from discord_emojis.json
         self._emoji_db: dict[str, str] | None = None
+
+    def _allowed_mentions_parse(self) -> list[str]:
+        parse: list[str] = []
+        if self.config.allow_mentions_everyone:
+            parse.append("everyone")
+        if self.config.allow_mentions_users:
+            parse.append("users")
+        if self.config.allow_mentions_roles:
+            parse.append("roles")
+        return parse
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -174,7 +208,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             platform="discord",
             instance_id=self.instance_id,
             channel={"server_id": server_id, "channel_id": channel_id},
-            user=message.author.display_name,
+            nickname=message.author.display_name,
             user_id=str(message.author.id),
             user_avatar=avatar,
             text=text,
@@ -184,7 +218,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             if message.reference
             else None,
             mentions=mentions,
-            source_proxy=self._proxy,
+            source_proxy=self._media_proxy,
+            username=message.author.name,
         )
         await self.bridge.on_message(msg)
 
@@ -243,7 +278,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         2. ``data/discord_emojis.json`` indexed by emoji name ``cqface<id>``.
         3. Walk every guild the bot is connected to and search for a custom
            emoji whose name is ``cqface<id>``.
-        4. Fall back to the plain ``:cqface<id>:`` text token.
+                4. Fall back to the Unicode mapping in ``db/cqface-map.yaml``.
         """
         if face_id in self._emoji_cache:
             return self._emoji_cache[face_id]
@@ -266,7 +301,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     self._emoji_cache[face_id] = result
                     return result
 
-        return f":cqface{face_id}:"  # plain fallback
+        return cqface.resolve_cqface(face_id)
 
     def _expand_cqface_emojis(self, text: str) -> str:
         """Replace all ``:cqface<id>:`` tokens with Discord emoji strings."""
@@ -285,11 +320,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     ):
         has_cqface = bool(re.search(r":cqface\d+:", text))
         reply_to_id = kwargs.get("reply_to_id")
-        force_bot = (
-            has_cqface
-            and self.config.send_as_bot_when_using_cqface_emoji
-            and self._client is not None
-        )
+        force_bot = False
 
         # Discord webhook mode does not support specifying reply targets.
         # If bot client is available, prefer bot send for reply messages.
@@ -299,6 +330,17 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 f"Discord [{self.instance_id}] forcing bot send for reply "
                 f"reference={reply_to_id}"
             )
+
+        # If webhook fallback is set to bot, prefer bot send when cqface is present.
+        if has_cqface and self._send_method == "webhook":
+            if self.config.cqface_webhook_fallback == "bot":
+                if self._client is not None:
+                    force_bot = True
+                else:
+                    logger.warning(
+                        f"Discord [{self.instance_id}] cqface webhook fallback set to bot, "
+                        "but bot_token is unavailable; using unicode fallback"
+                    )
 
         # Get webhook_url from rule msg config (kwargs) or channel dict
         webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
@@ -314,11 +356,19 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         if force_bot and self._send_method == "webhook" and webhook_url is not None:
             fmt = kwargs.get("bot_msg_format") or kwargs.get("msg_format")
             if isinstance(fmt, str) and fmt:
+                username_value = kwargs.get("username", "")
+                if isinstance(username_value, str):
+                    username_value = username_value.strip()
+                else:
+                    username_value = str(username_value or "")
+                if not username_value:
+                    username_value = str(kwargs.get("user_id") or "")
                 ctx = {
                     "platform": kwargs.get("platform"),
                     "instance_id": kwargs.get("instance_id"),
                     "from": kwargs.get("from"),
                     "user": kwargs.get("user"),
+                    "username": username_value,
                     "user_id": kwargs.get("user_id"),
                     "user_avatar": kwargs.get("user_avatar"),
                     "msg": kwargs.get("msg"),
@@ -340,8 +390,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         # The 'text' parameter passed here is already formatted
 
         # Expand :cqface<id>: tokens into proper Discord custom emoji strings
-        if has_cqface:
+        # when sending via bot; webhook fallback can stay Unicode.
+        if has_cqface and (self._send_method == "bot" or force_bot):
             text = self._expand_cqface_emojis(text)
+        elif has_cqface and self._send_method == "webhook":
+            text = cqface.replace_cqface_tokens(text)
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -350,9 +403,33 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             text = f"{prefix}\n{text}" if text else prefix
 
         # Handle mentions: replace @Name with <@id>
-        mentions = kwargs.get("mentions", [])
+        mentions = list(kwargs.get("mentions", []))
+
+        # Fallback conversion for source "@self_id" mentions.
+        # Bridge passes source mention display names, and we map them to the
+        # current Discord bot account mention when available.
+        source_self_mention_names = kwargs.get("source_self_mention_names", [])
+        if source_self_mention_names and self._client and self._client.user:
+            bot_id = str(self._client.user.id)
+            existing_names = {
+                str(m.get("name", "")).strip() for m in mentions if isinstance(m, dict)
+            }
+            for raw_name in source_self_mention_names:
+                name = str(raw_name).strip()
+                if not name or name in existing_names:
+                    continue
+                mentions.append({"id": bot_id, "name": name})
+                existing_names.add(name)
+
         for m in mentions:
             text = text.replace(f"@{m['name']}", f"<@{m['id']}>")
+
+        if self.config.sanitize_mass_mentions:
+            text, had_mass_mentions = _sanitize_mass_mentions(text)
+            if had_mass_mentions:
+                logger.warning(
+                    f"Discord [{self.instance_id}] blocked @everyone/@here mention in outgoing message"
+                )
 
         if is_webhook_send:
             assert webhook_url is not None  # Type narrowing for type checker
@@ -384,7 +461,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         if self._session is None or not webhook_url:
             return None
 
-        payload: dict = {"content": text}
+        payload: dict = {
+            "content": text,
+            "allowed_mentions": {"parse": self._allowed_mentions_parse()},
+        }
 
         # Format webhook_title and webhook_avatar if they are format strings
         ctx = {
@@ -420,7 +500,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         # Download each attachment; collect as (bytes, mime, filename) triples
         files: list[tuple[bytes, str, str]] = []
-        source_proxy = kwargs.get("source_proxy") or self._proxy
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
@@ -516,11 +596,12 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return None
 
         discord_files: list[discord.File] = []
+        source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
             if not att.url and att.data is None:
                 continue
             result = await media.fetch_attachment(
-                att, self.config.max_file_size, self._proxy
+                att, self.config.max_file_size, source_proxy
             )
             if result:
                 data_bytes, mime = result
@@ -553,6 +634,18 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 send_kwargs["files"] = discord_files
             if reference is not None:
                 send_kwargs["reference"] = reference
+
+            replied_user = True
+            source_mentioned_self = kwargs.get("source_mentioned_self")
+            if source_mentioned_self is not None:
+                replied_user = bool(source_mentioned_self)
+
+            send_kwargs["allowed_mentions"] = discord.AllowedMentions(
+                everyone=self.config.allow_mentions_everyone,
+                users=self.config.allow_mentions_users,
+                roles=self.config.allow_mentions_roles,
+                replied_user=replied_user,
+            )
 
             sent = await ch.send(**send_kwargs)
             return str(sent.id)

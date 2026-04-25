@@ -1,6 +1,6 @@
 [project]
 name = "nextbridge"
-version = "0.2.0"
+version = "0.3.0"
 description = "The chat bridge that links up all the major chat platforms!"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -28,6 +28,11 @@ dependencies = [
     "sqlalchemy>=2.0.48",
     "loguru>=0.7",
     "neonize>=0.3.15",
+    "pillow>=12.2.0",
+    "fastapi>=0.135.3",
+    "uvicorn>=0.43.0",
+    "fresholm>=0.2.4",
+    "tzlocal>=5.3.1",
 ]
 
 [[tool.uv.index]]
