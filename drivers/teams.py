@@ -202,7 +202,6 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             attachments=attachments,
             mentions=mentions,
             source_proxy=self._media_proxy,
-            username=from_name,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return PlainTextResponse("ok", status_code=200)

@@ -86,7 +86,7 @@ class KookDriver(BaseDriver[KookConfig]):
         author = msg.author  # GuildUser
         user_id = str(author.id)
         # Prefer the per-guild nickname over the global username
-        username = author.nickname or author.username or user_id
+        username = author.username or ""
         avatar = author.avatar or ""
         text = msg.content or ""
 

@@ -270,7 +270,6 @@ class SlackDriver(BaseDriver[SlackConfig]):
             if event.get("thread_ts")
             else None,
             source_proxy=self._media_proxy,
-            username=display_name,
         )
         await self.bridge.on_message(normalized)
 

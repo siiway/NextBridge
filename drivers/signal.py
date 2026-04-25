@@ -199,7 +199,6 @@ class SignalDriver(BaseDriver[SignalConfig]):
             attachments=attachments,
             source_proxy=self._media_proxy,
             mentions=mentions,
-            username=sender,
         )
         await self.bridge.on_message(normalized)
 

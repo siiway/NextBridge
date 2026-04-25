@@ -531,7 +531,7 @@ class QqDriver(BaseDriver[QqConfig]):
             f"group={group_id} message_id={message_id} seq={message_seq}"
         )
         time = event.get("time")
-        # Use qid for username when available; fallback to QQ number.
+        # Use qid for username when available
         qid = (await self._get_qid(user_id, group_id)).strip()
 
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
@@ -567,7 +567,7 @@ class QqDriver(BaseDriver[QqConfig]):
             source_mentioned_self=source_mentioned_self,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
             source_proxy=self._media_proxy,
-            username=qid or user_id,
+            username=qid,
         )
         await self.bridge.on_message(msg)
 

@@ -160,7 +160,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
 
         text: str = body.get("text", "").strip()
         room_id: str = body.get("channel_id") or body.get("rid", "")
-        username: str = body.get("user_name", sender_id)
+        username: str = body.get("user_name", "")
         avatar: str = body.get("user_avatar", "")
         server: str = self.config.server_url.rstrip("/")
 
@@ -194,7 +194,6 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             attachments=attachments,
             mentions=mentions,
             source_proxy=self._media_proxy,
-            username=username,
         )
         asyncio.create_task(self.bridge.on_message(normalized))
         return JSONResponse({})

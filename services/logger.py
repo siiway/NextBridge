@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 import loguru
-from loguru import logger, Logger
+from loguru import logger
 
 # Global log configuration
 LOG_DIR = None  # Set to a directory path to enable file logging, or None to disable file logging
@@ -98,7 +98,7 @@ _console_id: int = logger.add(
 # File sink will be added when set_log_dir() is called with a valid directory
 
 
-def get_logger() -> Logger:
+def get_logger() -> "loguru.Logger":
     return logger
 
 
