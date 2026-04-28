@@ -1613,12 +1613,6 @@ class QqDriver(BaseDriver[QqConfig]):
         meta_secondary_html = html.escape(meta_secondary_text)
         page_state = "destroyed" if destroyed_at is not None else "active"
         page_state_text = "已销毁" if destroyed_at is not None else "有效"
-        page_state_banner = "已销毁" if destroyed_at is not None else "当前页面有效"
-        page_state_detail = (
-            "当前页面已超过有效期"
-            if destroyed_at is not None
-            else "页面将在到期后自动切换为已销毁"
-        )
         return _get_forward_page_template().substitute(
             title=title_html,
             meta_primary=meta_primary_html,
@@ -1630,8 +1624,6 @@ class QqDriver(BaseDriver[QqConfig]):
             else "",
             page_state=page_state,
             page_state_text=page_state_text,
-            page_state_banner=page_state_banner,
-            page_state_detail=page_state_detail,
             body=body_html,
         )
 

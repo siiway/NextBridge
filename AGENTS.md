@@ -2,7 +2,7 @@
 
 1. 请忽略本文档语言，跟随用户的语言回答
 2. 项目使用 `uv` 作为包管理器，依赖须写入 `pyproject.toml` 而非 `requirements.txt` 或 `uv.lock`
-3. 项目可用 lint: `ruff check --fix` & `ruff format` (未在虚拟环境可能需要 `uv run ...`)
+3. 项目可用 lint/type check: `ruff check --fix` & `ruff format` & `ty check` (未在虚拟环境可能需要 `uv run ...`)
 4. 在 增/删/改 功能时，同步修改对应的中文 & 英文文档部分 (`docs/` 下)
 5. 在增加新 driver 时，需要在 `README.md` 的 `Special Thanks` 部分增加 driver 使用的库 (没有则不管)
 6. 在达到 1.0 版本之前，不需要考虑代码的旧版本兼容性 (但是需要记忆下破坏性修改，以便在 release notes 中提及)
@@ -16,9 +16,9 @@
 
 https://s.apifox.cn/apidoc/docs-site/5348325/llms.txt
 
-## QQ (Lagrange) API Docs
+## QQ (Lagrange.OneBot) API Docs
 
-Lagrange.OneBot: https://lagrange-onebot.apifox.cn/llms.txt
+https://lagrange-onebot.apifox.cn/llms.txt
 
 ## QQ (OneBot v11) API Docs
 

@@ -15,9 +15,8 @@ logs/
 # Configs
 data/
 
-# Docs
+# Document related
 docs/
-node_modules/
 
 # claude
 .claude/

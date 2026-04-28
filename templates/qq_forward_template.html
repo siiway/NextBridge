@@ -257,21 +257,6 @@
       margin: 8px 0;
       box-shadow: none;
     }
-    .forward-state {
-      margin-top: 14px;
-      padding: 12px 14px;
-      border-radius: 12px;
-      border: 1px solid rgba(123, 194, 255, .22);
-      background: rgba(17, 28, 45, .78);
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.7;
-    }
-    .forward-state.is-destroyed {
-      border-color: rgba(255, 140, 131, .45);
-      background: rgba(48, 23, 23, .72);
-      color: #ffbdb5;
-    }
   </style>
 </head>
 <body>
@@ -282,10 +267,6 @@
       <div class="meta sub">$meta_secondary</div>
     </section>
     <section>$body</section>
-    <section class="forward-state $page_state">
-      <strong>$page_state_banner</strong><br />
-      $page_state_detail
-    </section>
   </main>
 </body>
 </html>
