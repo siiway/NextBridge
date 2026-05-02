@@ -64,6 +64,12 @@
       font-size: 12px;
       opacity: .95;
     }
+    .meta.sub:empty {
+      display: none;
+    }
+    .destroy-countdown {
+      color: #c5d8f6;
+    }
     .status-chip {
       display: inline-block;
       margin-left: 8px;
@@ -126,6 +132,32 @@
       font-size: 14px;
       line-height: 1.7;
     }
+    .reply-preview {
+      margin: 0 0 10px;
+      padding: 6px 10px;
+      border: 1px solid rgba(123, 194, 255, .2);
+      border-left: 3px solid rgba(157, 214, 255, .75);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .03);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .reply-preview::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(157, 214, 255, .95);
+      flex: 0 0 auto;
+    }
+    .reply-preview-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #c8d9f2;
+      line-height: 1.3;
+      letter-spacing: .2px;
+    }
     .cqface {
       height: 1.25em;
       width: 1.25em;
@@ -141,6 +173,18 @@
       margin: 8px 0;
       background: #fff;
       object-fit: contain;
+    }
+    .fwd-image-link {
+      display: inline-block;
+      width: fit-content;
+      max-width: 100%;
+      line-height: 0;
+      border-bottom: none;
+      text-decoration: none;
+      vertical-align: top;
+    }
+    .fwd-image-link:hover {
+      border-bottom: none;
     }
     .fwd-image-open {
       cursor: zoom-in;
@@ -264,9 +308,68 @@
     <section class="head">
       <h1>$title<span class="status-chip $page_state">$page_state_text</span></h1>
       <div class="meta">$meta_primary</div>
-      <div class="meta sub">$meta_secondary</div>
+      <div class="meta sub">$meta_secondary<span id="destroy-countdown" class="destroy-countdown" data-created-at="$created_at_epoch" data-expires-at="$expires_at_epoch" data-destroyed-at="$destroyed_at_epoch"></span></div>
+      <div class="meta sub">$meta_attachment</div>
     </section>
     <section>$body</section>
   </main>
+  <script>
+    (function () {
+      var countdown = document.getElementById("destroy-countdown");
+      if (!countdown) return;
+      var expiresAt = parseInt(countdown.getAttribute("data-expires-at") || "", 10);
+      if (!Number.isFinite(expiresAt) || expiresAt <= 0) return;
+      var destroyedAt = parseInt(
+        countdown.getAttribute("data-destroyed-at") || "",
+        10
+      );
+      var statusChip = document.querySelector(".status-chip");
+      var timer = null;
+
+      function formatDuration(seconds) {
+        var remain = Math.max(0, Math.floor(seconds));
+        var days = Math.floor(remain / 86400);
+        remain = remain % 86400;
+        var hours = Math.floor(remain / 3600);
+        remain = remain % 3600;
+        var minutes = Math.floor(remain / 60);
+        var secs = remain % 60;
+        var parts = [];
+        if (days > 0) parts.push(days + "天");
+        if (hours > 0 || parts.length > 0) parts.push(hours + "小时");
+        if (minutes > 0 || parts.length > 0) parts.push(minutes + "分钟");
+        parts.push(secs + "秒");
+        return parts.join("");
+      }
+
+      function setDestroyed() {
+        countdown.textContent = " · 已销毁";
+        if (statusChip) {
+          statusChip.textContent = "已销毁";
+          statusChip.classList.add("is-destroyed");
+          statusChip.classList.remove("active");
+        }
+      }
+
+      if (Number.isFinite(destroyedAt) && destroyedAt > 0) {
+        setDestroyed();
+        return;
+      }
+
+      function tick() {
+        var now = Math.floor(Date.now() / 1000);
+        var remain = expiresAt - now;
+        if (remain <= 0) {
+          setDestroyed();
+          if (timer) clearInterval(timer);
+          return;
+        }
+        countdown.textContent = " · 距离销毁约 " + formatDuration(remain);
+      }
+
+      tick();
+      timer = setInterval(tick, 1000);
+    })();
+  </script>
 </body>
 </html>

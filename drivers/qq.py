@@ -1001,7 +1001,7 @@ class QqDriver(BaseDriver[QqConfig]):
 
         asset_url = html.escape(self._build_forward_asset_url(asset_id))
         return (
-            f"<a href='{asset_url}' target='_blank' rel='noopener noreferrer'>"
+            f"<a class='fwd-image-link' href='{asset_url}' target='_blank' rel='noopener noreferrer'>"
             f"<img class='fwd-image' src='{asset_url}' "
             "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
             f"</a>"
@@ -1603,6 +1603,7 @@ class QqDriver(BaseDriver[QqConfig]):
         body_html: str,
         meta_primary_text: str,
         meta_secondary_text: str,
+        meta_attachment_text: str,
         *,
         created_at: datetime.datetime,
         expires_at: datetime.datetime,
@@ -1611,12 +1612,14 @@ class QqDriver(BaseDriver[QqConfig]):
         title_html = html.escape(title)
         meta_primary_html = html.escape(meta_primary_text)
         meta_secondary_html = html.escape(meta_secondary_text)
+        meta_attachment_html = html.escape(meta_attachment_text)
         page_state = "destroyed" if destroyed_at is not None else "active"
         page_state_text = "已销毁" if destroyed_at is not None else "有效"
         return _get_forward_page_template().substitute(
             title=title_html,
             meta_primary=meta_primary_html,
             meta_secondary=meta_secondary_html,
+            meta_attachment=meta_attachment_html,
             created_at_epoch=str(int(created_at.timestamp())),
             expires_at_epoch=str(int(expires_at.timestamp())),
             destroyed_at_epoch=str(int(destroyed_at.timestamp()))
@@ -1681,14 +1684,23 @@ class QqDriver(BaseDriver[QqConfig]):
             f"生成于 {created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
         )
         meta_secondary_text = (
-            f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} · "
-            f"距离销毁约 {self._format_duration_cn(ttl)}"
+            f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
         )
+        asset_ttl = self._effective_forward_asset_ttl()
+        if asset_ttl > 0:
+            asset_expires_at = created_at + datetime.timedelta(seconds=asset_ttl)
+            meta_attachment_text = (
+                f"附件有效期至 {asset_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} "
+                f"（约 {self._format_duration_cn(asset_ttl)}）"
+            )
+        else:
+            meta_attachment_text = ""
         page_html = self._render_forward_page_html(
             title="QQ 合并转发消息",
             body_html=body_html,
             meta_primary_text=meta_primary_text,
             meta_secondary_text=meta_secondary_text,
+            meta_attachment_text=meta_attachment_text,
             created_at=created_at,
             expires_at=expires_at,
         )
