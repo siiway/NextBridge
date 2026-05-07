@@ -65,7 +65,7 @@ def _richheader_html(title: str, content: str) -> str:
     """Render a rich header as a Telegram HTML snippet."""
     t = html.escape(title)
     c = html.escape(content)
-    return f"<b>{t}</b>" + (f" · <i>{c}</i>" if c else "")
+    return f"<b><code>{t}</code></b>" + (f" · <i><code>{c}</code></i>" if c else "")
 
 
 def _prepare_photo_for_telegram(
