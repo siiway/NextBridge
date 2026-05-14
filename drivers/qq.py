@@ -2074,7 +2074,7 @@ class QqDriver(BaseDriver[QqConfig]):
                     if result:
                         data_bytes, _ = result
                         fname = att.name or "file"
-                        
+
                         async def _do_upload(d=data_bytes, fn=fname, gid=group_id):
                             if self._supports_stream_file_upload():
                                 mode = self._resolve_send_mode(len(d))
@@ -2089,9 +2089,7 @@ class QqDriver(BaseDriver[QqConfig]):
                                         },
                                     )
                                 else:  # stream (default)
-                                    file_path = await self._upload_file_stream(
-                                        d, fn
-                                    )
+                                    file_path = await self._upload_file_stream(d, fn)
                                     if file_path:
                                         await self._call(
                                             "upload_group_file",
@@ -2102,15 +2100,41 @@ class QqDriver(BaseDriver[QqConfig]):
                                             },
                                         )
                                     else:
-                                        await self._call("send_group_msg", {"group_id": int(gid), "message": [{"type": "text", "data": {"text": f"\n[文件发送失败: {fn}]"}}]})
+                                        await self._call(
+                                            "send_group_msg",
+                                            {
+                                                "group_id": int(gid),
+                                                "message": [
+                                                    {
+                                                        "type": "text",
+                                                        "data": {
+                                                            "text": f"\n[文件发送失败: {fn}]"
+                                                        },
+                                                    }
+                                                ],
+                                            },
+                                        )
                             else:
                                 if not await self._upload_group_file_from_bytes(
                                     d,
                                     fn,
                                     str(gid),
                                 ):
-                                    await self._call("send_group_msg", {"group_id": int(gid), "message": [{"type": "text", "data": {"text": f"\n[文件发送失败: {fn}]"}}]})
-                        
+                                    await self._call(
+                                        "send_group_msg",
+                                        {
+                                            "group_id": int(gid),
+                                            "message": [
+                                                {
+                                                    "type": "text",
+                                                    "data": {
+                                                        "text": f"\n[文件发送失败: {fn}]"
+                                                    },
+                                                }
+                                            ],
+                                        },
+                                    )
+
                         deferred_file_uploads.append(_do_upload)
                     else:
                         segments.append(
