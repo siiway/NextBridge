@@ -281,7 +281,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         )
 
         reply_to_id = kwargs.get("reply_to_id")
-        first_msg_id = None
+        msg_ids = []
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -308,8 +308,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             # Use markdown if rich_header was applied; plain text otherwise
             ct = "text/markdown" if rich_header else "text/plain"
             mid = await self._post_message(endpoint, text.encode(), ct, reply_to_id)
-            if not first_msg_id:
-                first_msg_id = mid
+            if mid:
+                msg_ids.append(mid)
 
         source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
@@ -326,8 +326,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     "text/plain",
                     reply_to_id,
                 )
-                if not first_msg_id:
-                    first_msg_id = mid
+                if mid:
+                    msg_ids.append(mid)
                 continue
 
             data_bytes, mime = result
@@ -338,8 +338,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 mid = await self._post_message(
                     endpoint, body, "vocechat/file", reply_to_id
                 )
-                if not first_msg_id:
-                    first_msg_id = mid
+                if mid:
+                    msg_ids.append(mid)
             else:
                 label = att.name or fname
                 mid = await self._post_message(
@@ -348,10 +348,10 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     "text/plain",
                     reply_to_id,
                 )
-                if not first_msg_id:
-                    first_msg_id = mid
+                if mid:
+                    msg_ids.append(mid)
 
-        return first_msg_id
+        return msg_ids if msg_ids else None
 
     async def _post_message(
         self, url: str, body: bytes, content_type: str, reply_to_id: str | None = None

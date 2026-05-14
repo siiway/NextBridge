@@ -40,5 +40,5 @@ class BaseDriver(ABC, Generic[T]):
         Long-running drivers should loop indefinitely here."""
 
     @abstractmethod
-    async def send(self, channel: dict, text: str, **kwargs) -> str | None:
+    async def send(self, channel: dict, text: str, **kwargs) -> str | list[str] | None:
         """Send *text* to the given *channel* on this platform."""

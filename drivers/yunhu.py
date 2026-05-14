@@ -286,7 +286,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
 
         chat_type: str = channel.get("chat_type", "group")
         reply_to_id = kwargs.get("reply_to_id")
-        first_msg_id = None
+        msg_ids = []
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -411,8 +411,8 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                                 or d.get("messageInfo", {}).get("messageId")
                             )
 
-                            if mid and not first_msg_id:
-                                first_msg_id = str(mid)
+                            if mid:
+                                msg_ids.append(str(mid))
                         else:
                             logger.error(
                                 f"Yunhu [{self.instance_id}] send failed API error: {data}"
@@ -426,7 +426,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             except Exception as e:
                 logger.error(f"Yunhu [{self.instance_id}] send failed: {e}")
 
-        return first_msg_id
+        return msg_ids if msg_ids else None
 
 
 register("yunhu", YunhuConfig, YunhuDriver)

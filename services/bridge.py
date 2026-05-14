@@ -612,9 +612,16 @@ class Bridge:
                     **extra_out,
                 )
                 if new_msg_id:
-                    msg_db().save_mapping(
-                        bridge_id, target_id, target_channel, str(new_msg_id)
-                    )
+                    if isinstance(new_msg_id, list):
+                        for m_id in new_msg_id:
+                            if m_id:
+                                msg_db().save_mapping(
+                                    bridge_id, target_id, target_channel, str(m_id)
+                                )
+                    else:
+                        msg_db().save_mapping(
+                            bridge_id, target_id, target_channel, str(new_msg_id)
+                        )
             except Exception as e:
                 logger.error(f"Failed to send to '{target_id}': {e}")
 
@@ -717,9 +724,16 @@ class Bridge:
                     **extra_out,
                 )
                 if new_msg_id:
-                    msg_db().save_mapping(
-                        bridge_id, target_id, target_channel, str(new_msg_id)
-                    )
+                    if isinstance(new_msg_id, list):
+                        for m_id in new_msg_id:
+                            if m_id:
+                                msg_db().save_mapping(
+                                    bridge_id, target_id, target_channel, str(m_id)
+                                )
+                    else:
+                        msg_db().save_mapping(
+                            bridge_id, target_id, target_channel, str(new_msg_id)
+                        )
             except asyncio.CancelledError:
                 logger.info(f"Message dispatch cancelled during send to {target_id}")
                 # Don't return - continue to process other targets

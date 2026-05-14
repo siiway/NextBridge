@@ -422,7 +422,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             return None
 
         reply_to_id = kwargs.get("reply_to_id")
-        first_msg_id = None
+        msg_ids = []
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -440,8 +440,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             mid = await self._send_feishu_msg(
                 chat_id, "text", json.dumps({"text": text}), reply_to_id
             )
-            if not first_msg_id:
-                first_msg_id = mid
+            if mid:
+                msg_ids.append(mid)
 
         source_proxy = self._source_proxy_from_kwargs(kwargs)
 
@@ -459,8 +459,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                     json.dumps({"text": f"[{att.type.capitalize()}: {label}]"}),
                     reply_to_id,
                 )
-                if not first_msg_id:
-                    first_msg_id = mid
+                if mid:
+                    msg_ids.append(mid)
                 continue
 
             data_bytes, mime = result
@@ -472,8 +472,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                     mid = await self._send_feishu_msg(
                         chat_id, "image", json.dumps({"image_key": key}), reply_to_id
                     )
-                    if not first_msg_id:
-                        first_msg_id = mid
+                    if mid:
+                        msg_ids.append(mid)
                 else:
                     mid = await self._send_feishu_msg(
                         chat_id,
@@ -481,16 +481,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                         json.dumps({"text": f"[Image: {fname}]"}),
                         reply_to_id,
                     )
-                    if not first_msg_id:
-                        first_msg_id = mid
+                    if mid:
+                        msg_ids.append(mid)
             else:
                 key = await self._upload_file(data_bytes, fname)
                 if key:
                     mid = await self._send_feishu_msg(
                         chat_id, "file", json.dumps({"file_key": key}), reply_to_id
                     )
-                    if not first_msg_id:
-                        first_msg_id = mid
+                    if mid:
+                        msg_ids.append(mid)
                 else:
                     mid = await self._send_feishu_msg(
                         chat_id,
@@ -498,10 +498,10 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                         json.dumps({"text": f"[{att.type.capitalize()}: {fname}]"}),
                         reply_to_id,
                     )
-                    if not first_msg_id:
-                        first_msg_id = mid
+                    if mid:
+                        msg_ids.append(mid)
 
-        return first_msg_id
+        return msg_ids if msg_ids else None
 
     async def _send_feishu_msg(
         self, chat_id: str, msg_type: str, content: str, reply_to_id: str | None = None

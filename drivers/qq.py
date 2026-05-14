@@ -1913,12 +1913,19 @@ class QqDriver(BaseDriver[QqConfig]):
             return None
 
         segments: list[dict] = []
+        msg_ids: list[str] = []
+        deferred_file_uploads = []
 
         reply_to_id = kwargs.get("reply_to_id")
         if reply_to_id:
             segments.append({"type": "reply", "data": {"id": str(reply_to_id)}})
 
         rich_header = kwargs.get("rich_header")
+        # Video/Record cannot be mixed with text in QQ, so if there are such attachments,
+        # we still want to make sure the header goes with the text, but the whole text
+        # message must be sent separately from the video/record message.
+        # We will handle the separation later, so we just prepend the header to the text if there is text.
+        # If there is NO text but there ARE non-image attachments, we send the header separately.
         has_non_image_attachments = any(
             att.type != "image"
             for att in (attachments or [])
@@ -1947,6 +1954,10 @@ class QqDriver(BaseDriver[QqConfig]):
                         f"NapCat [{self.instance_id}] failed to send standalone rich header "
                         f"before media message: {header_resp}"
                     )
+                else:
+                    data = header_resp.get("data") or {}
+                    if "message_id" in data:
+                        msg_ids.append(str(data["message_id"]))
 
         # Process mentions: replace @Name with at segments
         mentions = kwargs.get("mentions", [])
@@ -2063,50 +2074,44 @@ class QqDriver(BaseDriver[QqConfig]):
                     if result:
                         data_bytes, _ = result
                         fname = att.name or "file"
-                        if self._supports_stream_file_upload():
-                            mode = self._resolve_send_mode(len(data_bytes))
-                            if mode == "base64":
-                                b64 = base64.b64encode(data_bytes).decode()
-                                await self._call(
-                                    "upload_group_file",
-                                    {
-                                        "group_id": int(group_id),
-                                        "file": f"base64://{b64}",
-                                        "name": fname,
-                                    },
-                                )
-                            else:  # stream (default)
-                                file_path = await self._upload_file_stream(
-                                    data_bytes, fname
-                                )
-                                if file_path:
+                        
+                        async def _do_upload(d=data_bytes, fn=fname, gid=group_id):
+                            if self._supports_stream_file_upload():
+                                mode = self._resolve_send_mode(len(d))
+                                if mode == "base64":
+                                    b64 = base64.b64encode(d).decode()
                                     await self._call(
                                         "upload_group_file",
                                         {
-                                            "group_id": int(group_id),
-                                            "file": file_path,
-                                            "name": fname,
+                                            "group_id": int(gid),
+                                            "file": f"base64://{b64}",
+                                            "name": fn,
                                         },
                                     )
-                                else:
-                                    segments.append(
-                                        {
-                                            "type": "text",
-                                            "data": {"text": f"\n[文件: {att.name}]"},
-                                        }
+                                else:  # stream (default)
+                                    file_path = await self._upload_file_stream(
+                                        d, fn
                                     )
-                        else:
-                            if not await self._upload_group_file_from_bytes(
-                                data_bytes,
-                                fname,
-                                str(group_id),
-                            ):
-                                segments.append(
-                                    {
-                                        "type": "text",
-                                        "data": {"text": f"\n[文件: {att.name}]"},
-                                    }
-                                )
+                                    if file_path:
+                                        await self._call(
+                                            "upload_group_file",
+                                            {
+                                                "group_id": int(gid),
+                                                "file": file_path,
+                                                "name": fn,
+                                            },
+                                        )
+                                    else:
+                                        await self._call("send_group_msg", {"group_id": int(gid), "message": [{"type": "text", "data": {"text": f"\n[文件发送失败: {fn}]"}}]})
+                            else:
+                                if not await self._upload_group_file_from_bytes(
+                                    d,
+                                    fn,
+                                    str(gid),
+                                ):
+                                    await self._call("send_group_msg", {"group_id": int(gid), "message": [{"type": "text", "data": {"text": f"\n[文件发送失败: {fn}]"}}]})
+                        
+                        deferred_file_uploads.append(_do_upload)
                     else:
                         segments.append(
                             {
@@ -2115,20 +2120,54 @@ class QqDriver(BaseDriver[QqConfig]):
                             }
                         )
 
-        if not segments:
-            return None
+        main_segments = []
+        standalone_segments = []
+        for seg in segments:
+            if seg["type"] in ("video", "record"):
+                standalone_segments.append(seg)
+            else:
+                main_segments.append(seg)
 
-        resp = await self._call(
-            "send_group_msg",
-            {
-                "group_id": int(group_id),
-                "message": segments,
-            },
-        )
-        if resp and resp.get("status") == "ok":
-            data = resp.get("data") or {}
-            return str(data.get("message_id", ""))
-        return None
+        if main_segments:
+            if (
+                len(main_segments) == 1
+                and main_segments[0]["type"] == "reply"
+                and standalone_segments
+            ):
+                # If only reply segment remains, attach it to the first standalone segment
+                standalone_segments[0] = [main_segments[0], standalone_segments[0]]
+                main_segments = []
+            else:
+                resp = await self._call(
+                    "send_group_msg",
+                    {
+                        "group_id": int(group_id),
+                        "message": main_segments,
+                    },
+                )
+                if resp and resp.get("status") == "ok":
+                    data = resp.get("data") or {}
+                    if "message_id" in data:
+                        msg_ids.append(str(data["message_id"]))
+
+        for seg in standalone_segments:
+            msg_to_send = seg if isinstance(seg, list) else [seg]
+            resp = await self._call(
+                "send_group_msg",
+                {
+                    "group_id": int(group_id),
+                    "message": msg_to_send,
+                },
+            )
+            if resp and resp.get("status") == "ok":
+                data = resp.get("data") or {}
+                if "message_id" in data:
+                    msg_ids.append(str(data["message_id"]))
+
+        for upload_func in deferred_file_uploads:
+            await upload_func()
+
+        return msg_ids if msg_ids else None
 
 
 register("qq", QqConfig, QqDriver)

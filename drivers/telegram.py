@@ -542,7 +542,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             except (ValueError, TypeError):
                 pass
 
-        first_msg_id = None
+        msg_ids = []
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -668,8 +668,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                                 reply_parameters=reply_params,
                             )
 
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
+                    if sent and sent.message_id:
+                        msg_ids.append(str(sent.message_id))
                     caption_used = True
                 except Exception as e:
                     label = att.name or att.url or fname
@@ -688,10 +688,10 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     link_preview_options=link_preview_opts,
                     reply_parameters=reply_params,
                 )
-                if not first_msg_id:
-                    first_msg_id = str(sent.message_id)
+                if sent and sent.message_id:
+                    msg_ids.append(str(sent.message_id))
 
-            return first_msg_id
+            return msg_ids if msg_ids else None
 
         except Exception as e:
             logger.error(f"Telegram [{self.instance_id}] send failed: {e}")
