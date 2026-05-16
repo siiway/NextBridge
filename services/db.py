@@ -1,6 +1,5 @@
-import json
-import importlib
 import importlib.util
+import json
 import time
 import uuid
 from functools import lru_cache
@@ -24,8 +23,7 @@ from sqlalchemy.orm import DeclarativeBase, Session
 
 import services.logger as log
 import services.util as u
-from services import config
-from services import db_migrations
+from services import config, db_migrations
 from services.db_migrations import MigrationStep
 
 logger = log.get_logger()
@@ -195,7 +193,7 @@ class MessageDB:
             value = int(raw)
         except (TypeError, ValueError):
             return 0
-        return value if value >= 0 else 0
+        return max(value, 0)
 
     @classmethod
     def _read_schema_version(cls) -> int:
@@ -500,6 +498,49 @@ class MessageDB:
                 )
             ).all()
             return [(r[0], r[1]) for r in rows]
+
+    def list_binding_groups(
+        self,
+        instance_id: str | None = None,
+        platform_user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return binding groups, optionally filtered to one account."""
+        with self._session() as s:
+            rows = s.execute(
+                select(
+                    UserBinding.global_user_id,
+                    UserBinding.instance_id,
+                    UserBinding.platform_user_id,
+                )
+            ).all()
+
+        groups: dict[str, list[dict[str, str]]] = {}
+        for global_user_id, bound_instance_id, bound_platform_user_id in rows:
+            groups.setdefault(global_user_id, []).append(
+                {
+                    "instance_id": bound_instance_id,
+                    "platform_user_id": bound_platform_user_id,
+                }
+            )
+
+        result: list[dict[str, Any]] = []
+        for global_user_id, members in groups.items():
+            if instance_id is not None and platform_user_id is not None:
+                if not any(
+                    member["instance_id"] == instance_id
+                    and member["platform_user_id"] == platform_user_id
+                    for member in members
+                ):
+                    continue
+
+            result.append(
+                {
+                    "global_user_id": global_user_id,
+                    "members": members,
+                }
+            )
+
+        return result
 
     # ------------------------------------------------------------------
     # User mappings

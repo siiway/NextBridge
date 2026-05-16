@@ -192,6 +192,21 @@ class Bridge:
         args = parts[2:] if len(parts) > 2 else []
         return action, args
 
+    def _is_allowed_command_source(self, msg: NormalizedMessage) -> bool:
+        """Return True when message source exists in any configured rule source."""
+        for rule in self._rules:
+            if rule.get("type") == "connect":
+                channels = rule.get("channels", {})
+                if isinstance(channels, dict) and self._matches_channel(msg, channels):
+                    return True
+                continue
+
+            from_cfg = rule.get("from", {})
+            if isinstance(from_cfg, dict) and self._matches_from(msg, from_cfg):
+                return True
+
+        return False
+
     async def _handle_bind_setup_command(self, msg: NormalizedMessage):
         """Generate a 6-digit binding code for the user."""
         import random
@@ -312,6 +327,13 @@ class Bridge:
         # Handle internal commands
         command = self._parse_internal_command(msg.text)
         if command is not None:
+            if not self._is_allowed_command_source(msg):
+                logger.debug(
+                    f"Ignored command from non-configured channel: "
+                    f"instance={msg.instance_id} channel={msg.channel}"
+                )
+                return
+
             action, args = command
             sender_info = self._senders.get(msg.instance_id)
             if action in ("", "help"):
