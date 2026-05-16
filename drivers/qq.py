@@ -354,7 +354,7 @@ class QqDriver(BaseDriver[QqConfig]):
         return f"{self._forward_public_prefix()}/{page_id}"
 
     def _build_forward_asset_url(self, asset_id: str) -> str:
-        return f"{self._forward_public_prefix()}/asset/{asset_id}"
+        return f"./asset/{asset_id}"
 
     def _ensure_forward_http_mount(self) -> None:
         if not self.config.forward_render_enabled:
@@ -1562,15 +1562,15 @@ class QqDriver(BaseDriver[QqConfig]):
 
             rendered.append(
                 "<article class='msg'>"
-                "<div class='sender'>"
                 f"{item.get('avatar_html', '')}"
                 "<div class='sender-meta'>"
                 f"<div class='sender-main'>{item.get('header_title', '')}</div>"
                 f"{item.get('header_content_html', '')}"
-                "</div>"
-                "</div>"
+                "<div class='content-wrapper'>"
                 f"{reply_html}"
                 f"<div class='content'>{item.get('message_html', '')}</div>"
+                "</div>"
+                "</div>"
                 "</article>"
             )
 
