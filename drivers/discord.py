@@ -68,7 +68,7 @@ class DiscordConfig(_DriverConfig):
 logger = log.get_logger()
 
 _CQFACE_RE = re.compile(r":cqface(\d+):")
-_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
+_RICHHEADER_RE = re.compile(r"<richheader\b(.*?)/>", re.IGNORECASE | re.DOTALL)
 _ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 _MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 

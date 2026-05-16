@@ -55,7 +55,8 @@ class NormalizedMessage:
             "user_avatar",
             "text",
             "reply_parent",
-            "time, source_proxy",
+            "time",
+            "source_proxy",
         ):
             if hasattr(self, i):
                 l.append(f"{i}: {getattr(self, i)!r}")

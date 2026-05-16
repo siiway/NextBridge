@@ -80,7 +80,7 @@ _DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface
 _FORWARD_TEMPLATE_PATH: Path = (
     Path(__file__).resolve().parent.parent / "templates" / "qq_forward_template.html"
 )
-_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
+_RICHHEADER_RE = re.compile(r"<richheader\b(.*?)/>", re.IGNORECASE | re.DOTALL)
 _RICHHEADER_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 
 _FORWARD_PAGE_TEMPLATE = Template(
