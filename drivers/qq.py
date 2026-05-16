@@ -87,7 +87,7 @@ _FORWARD_PAGE_TEMPLATE = Template(
     """<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>$title</title></head>
-<body><main><h1>$title</h1><div>$meta_primary</div><div>$meta_secondary</div>$body</main></body>
+<body><main><h1>$title</h1><div class="meta">$meta_primary</div><div class="meta sub">$meta_secondary</div>$body</main></body>
 </html>"""
 )
 
@@ -591,8 +591,19 @@ class QqDriver(BaseDriver[QqConfig]):
 
         text_parts: list[str] = []
         attachments: list[Attachment] = []
-        reply_id: str | None = None
+        reply_id: str | None = next(
+            (
+                str(seg.get("data", {}).get("id", ""))
+                for seg in segments
+                if seg.get("type") == "reply"
+            ),
+            None,
+        )
         mentions: list[dict] = []
+
+        self_id = str(event.get("self_id", ""))
+        strip_next_space = False
+        is_first_text = True
 
         for seg in segments:
             t = seg.get("type", "")
@@ -600,7 +611,13 @@ class QqDriver(BaseDriver[QqConfig]):
 
             match t:
                 case "text":
-                    text_parts.append(d.get("text", ""))
+                    t_str = d.get("text", "")
+                    if strip_next_space and t_str.startswith(" "):
+                        t_str = t_str[1:]
+                    strip_next_space = False
+                    if t_str:
+                        is_first_text = False
+                        text_parts.append(t_str)
 
                 case "at":
                     qq = str(d.get("qq", ""))
@@ -611,6 +628,14 @@ class QqDriver(BaseDriver[QqConfig]):
                     if not name:
                         name = qq
 
+                    # Strip auto-mention of self when replying
+                    if qq == self_id and reply_id and is_first_text:
+                        strip_next_space = True
+                        if qq and qq != "all":
+                            mentions.append({"id": qq, "name": name})
+                        continue
+
+                    is_first_text = False
                     text_parts.append(f"@{name}")
                     if qq and qq != "all":
                         mentions.append({"id": qq, "name": name})
@@ -694,8 +719,8 @@ class QqDriver(BaseDriver[QqConfig]):
                         text_parts.append("[App message]")
 
                 case "reply":
-                    # Quote/reply — mention the replied-to message ID if available
-                    reply_id = str(d.get("id", ""))
+                    # Quote/reply handled in pre-pass
+                    pass
 
                 case "forward":
                     # Merged forwarded message chain
@@ -1225,6 +1250,29 @@ class QqDriver(BaseDriver[QqConfig]):
         return ""
 
     @staticmethod
+    def _forward_node_time(node: dict) -> int:
+        candidates = (
+            node.get("time"),
+            node.get("time_stamp"),
+            node.get("timestamp"),
+        )
+        data = node.get("data")
+        if isinstance(data, dict):
+            candidates += (
+                data.get("time"),
+                data.get("time_stamp"),
+                data.get("timestamp"),
+            )
+        for candidate in candidates:
+            try:
+                val = int(candidate)
+                if val > 0:
+                    return val
+            except (TypeError, ValueError):
+                pass
+        return 0
+
+    @staticmethod
     def _forward_reply_target_id(seg_data: dict) -> str:
         candidates = (
             seg_data.get("id"),
@@ -1359,6 +1407,18 @@ class QqDriver(BaseDriver[QqConfig]):
             return f"{minutes}分{secs}秒"
         return f"{secs}秒"
 
+    @staticmethod
+    def _format_message_time(ts: int) -> str:
+        if not ts:
+            return ""
+        dt = datetime.datetime.fromtimestamp(ts)
+        now = datetime.datetime.now()
+
+        # simple formatting: MM-DD HH:MM
+        if dt.year == now.year:
+            return dt.strftime("%m-%d %H:%M")
+        return dt.strftime("%Y-%m-%d %H:%M")
+
     async def _render_forward_nodes_html(
         self,
         nodes: list[dict],
@@ -1377,6 +1437,14 @@ class QqDriver(BaseDriver[QqConfig]):
         for node in nodes:
             user_id, nickname = self._forward_node_sender_fields(node)
             message_id = self._forward_node_message_id(node)
+            msg_time = self._forward_node_time(node)
+            time_text = self._format_message_time(msg_time) if msg_time else ""
+            time_hover = (
+                datetime.datetime.fromtimestamp(msg_time).strftime("%Y-%m-%d %H:%M:%S")
+                if msg_time
+                else ""
+            )
+
             richheader: dict | None = None
             reply_to_id = ""
             user_id_reliable = user_id not in unreliable_user_ids
@@ -1527,8 +1595,31 @@ class QqDriver(BaseDriver[QqConfig]):
             avatar_html = ""
             if avatar_url.startswith(("http://", "https://")):
                 avatar_html = (
+                    "<div class='avatar-wrapper'>"
                     f"<img class='avatar' src='{html.escape(avatar_url)}' "
                     "alt='avatar' referrerpolicy='no-referrer' loading='lazy'/>"
+                    "</div>"
+                )
+            else:
+                avatar_html = "<div class='avatar-wrapper'></div>"
+
+            hover_parts = []
+            if user_id:
+                hover_parts.append(
+                    f"UID: {user_id}"
+                    if user_id_reliable
+                    else f"UID: {user_id} (不可信)"
+                )
+            if time_hover:
+                hover_parts.append(time_hover)
+            hover_text = " · ".join(hover_parts)
+            hover_html = f" title='{html.escape(hover_text)}'" if hover_text else ""
+
+            # Use span with title inside header_title for hover
+            header_title_html = f"<span{hover_html}>{header_title}</span>"
+            if time_text:
+                header_title_html += (
+                    f"<span class='msg-time'>{html.escape(time_text)}</span>"
                 )
 
             header_content_html = (
@@ -1540,7 +1631,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 "message_id": message_id,
                 "reply_to_id": reply_to_id,
                 "default_sender": default_sender,
-                "header_title": header_title,
+                "header_title": header_title_html,
                 "message_text": message_text,
                 "avatar_html": avatar_html,
                 "header_content_html": header_content_html,
