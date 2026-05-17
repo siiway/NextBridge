@@ -29,6 +29,7 @@
 import asyncio
 import html
 import io
+import re
 from urllib.parse import urlencode
 
 from PIL import Image, UnidentifiedImageError
@@ -42,7 +43,7 @@ from drivers import BaseDriver
 from drivers.registry import register
 from services import media
 from services.config import UNSET, get_proxy
-from services.config_schema import _DriverConfig
+from services.config_schema import _DriverConfig, CoercedBool
 from services.message import Attachment, NormalizedMessage
 
 
@@ -52,6 +53,7 @@ class TelegramConfig(_DriverConfig):
     rich_header_host: str = "https://richheader.siiway.top"
     avatar_proxy_host: str = ""  # Base URL for avatar proxy (e.g. "https://avatarproxy.yourname.workers.dev")
     photo_padding_color: str | None = "#000000"
+    sanitize_accidental_mentions: CoercedBool = True
     proxy: str | None = UNSET
 
 
@@ -592,6 +594,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         f'<a href="tg://user?id={m["id"]}">{html.escape(m["name"])}</a>'
                     )
                     text = text.replace(f"@{html.escape(m['name'])}", link)
+
+        if self.config.sanitize_accidental_mentions:
+            text = re.sub(r"(^|\s)@([A-Za-z0-9_]+)", r"\1@" + "\u200b" + r"\2", text)
 
         source_proxy = self._source_proxy_from_kwargs(kwargs)
         try:

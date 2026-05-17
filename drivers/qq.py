@@ -625,6 +625,28 @@ class QqDriver(BaseDriver[QqConfig]):
                     if not name and qq != "all":
                         # Try to look up name in our DB
                         name = msg_db().get_user_name(self.instance_id, qq)
+
+                    if not name and qq != "all" and source_group_id:
+                        # Try to fetch from API
+                        try:
+                            resp = await self._call(
+                                "get_group_member_info",
+                                {
+                                    "group_id": int(source_group_id),
+                                    "user_id": int(qq),
+                                    "no_cache": False,
+                                },
+                            )
+                            if resp and resp.get("status") == "ok":
+                                data = resp.get("data") or {}
+                                name = data.get("card") or data.get("nickname")
+                                if name:
+                                    msg_db().save_user(self.instance_id, qq, name)
+                        except Exception as e:
+                            logger.debug(
+                                f"NapCat [{self.instance_id}] failed to fetch member info for {qq}: {e}"
+                            )
+
                     if not name:
                         name = qq
 
