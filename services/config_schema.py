@@ -174,6 +174,14 @@ class GlobalConfig(BaseModel):
 
     Default is False to maximize echo prevention."""
 
+    fuzzy_mention_match: CoercedBool = False
+    """Controls whether mentions without exact bind mapping should fall back to fuzzy nickname matching.
+
+    When True: Attempts to match mentioned user's name against known display names in the target platform.
+    When False (default): Only exact ID bounds or native platform mentions work.
+
+    Default is False."""
+
     log: LoggingConfig = LoggingConfig()
     """Logging configuration for controlling log output and rotation."""
 

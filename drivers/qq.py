@@ -1264,6 +1264,8 @@ class QqDriver(BaseDriver[QqConfig]):
                 data.get("timestamp"),
             )
         for candidate in candidates:
+            if candidate is None:
+                continue
             try:
                 val = int(candidate)
                 if val > 0:

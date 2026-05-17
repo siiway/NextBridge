@@ -74,6 +74,7 @@ class Bridge:
         self._senders: dict[str, tuple[str | None, Callable]] = {}
         self._sensitive: frozenset[str] = frozenset()
         self.strict_echo_match: bool = False
+        self.fuzzy_mention_match: bool = False
         self.command_prefix: str = "nb"
 
     # ------------------------------------------------------------------
@@ -535,18 +536,24 @@ class Bridge:
             if target_uid:
                 return target_uid
 
-        if target_instance == "qq":
-            # QQ target addressing uses numeric QQ id or qid alias.
-            if mention_id.isdigit():
-                return mention_id
-            if mention_name.isdigit():
-                return mention_name
-            if mention_name:
-                return msg_db().get_user_id_by_name(target_instance, mention_name)
-            return None
+        if self.fuzzy_mention_match and mention_name:
+            fuzzy_target_uid = msg_db().get_user_id_by_name(
+                target_instance, mention_name
+            )
+            if fuzzy_target_uid:
+                return fuzzy_target_uid
 
-        if mention_name:
-            return msg_db().get_user_id_by_name(target_instance, mention_name)
+        target_platform = target_instance
+        if target_instance in self._senders:
+            target_platform = self._senders[target_instance][0]
+
+        if target_platform == "qq":
+            # QQ target addressing uses numeric QQ id or qid alias.
+            if msg.platform == "qq" and mention_id.isdigit():
+                return mention_id
+            if msg.platform == "qq" and mention_name.isdigit():
+                return mention_name
+            return None
 
         return None
 

@@ -111,6 +111,7 @@ async def main():
     # Load global configuration
     global_config = raw.get("global", {})
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
+    bridge.fuzzy_mention_match = global_config.get("fuzzy_mention_match", False)
 
     # Validate database configuration
 
