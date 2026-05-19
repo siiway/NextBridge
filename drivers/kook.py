@@ -29,6 +29,7 @@ from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header
 
 
 class KookConfig(_DriverConfig):
@@ -150,10 +151,7 @@ class KookDriver(BaseDriver[KookConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            # KOOK uses KMarkdown — same bold/italic syntax as Discord Markdown
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         has_mention = False
         mentions = kwargs.get("mentions", [])

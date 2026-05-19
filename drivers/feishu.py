@@ -54,6 +54,7 @@ from drivers import BaseDriver
 from drivers.registry import register
 from services import media
 from services.config_schema import _DriverConfig
+from services.message_format import apply_rich_header
 from services.message import Attachment, NormalizedMessage
 
 
@@ -426,9 +427,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         # Handle mentions in outgoing text
         mentions = kwargs.get("mentions", [])

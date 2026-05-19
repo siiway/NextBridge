@@ -28,6 +28,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.message_format import apply_rich_header
 from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
@@ -290,9 +291,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         # Build the list of payloads to send: text first, then each attachment
         # as its native Yunhu content type.

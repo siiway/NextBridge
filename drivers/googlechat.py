@@ -47,6 +47,7 @@ from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header
 
 
 class GoogleChatConfig(_DriverConfig):
@@ -70,16 +71,6 @@ logger = log.get_logger()
 
 _SCOPES = ["https://www.googleapis.com/auth/chat.bot"]
 _API_BASE = "https://chat.googleapis.com/v1"
-
-
-def _mime_to_att_type(mime: str) -> str:
-    if mime.startswith("image/"):
-        return "image"
-    if mime.startswith("video/"):
-        return "video"
-    if mime.startswith("audio/"):
-        return "voice"
-    return "file"
 
 
 class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
@@ -288,7 +279,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         download_uri = att_raw.get("downloadUri", "")
         ct = att_raw.get("contentType", "application/octet-stream")
         name = att_raw.get("contentName", "attachment")
-        att_type = _mime_to_att_type(ct)
+        att_type = media.mime_to_attachment_type(ct)
 
         if not download_uri or self._session is None:
             return Attachment(
@@ -371,9 +362,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"*{t}*" + (f" · _{c}_" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="google_chat")
 
         if reply_to_id:
             text = f"> [Reply]\n{text}"

@@ -18,7 +18,6 @@ import datetime
 import html
 import json
 import math
-import re
 import ssl
 import tempfile
 import uuid
@@ -42,6 +41,7 @@ from services.config import get as get_config
 from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
+from services.message_format import parse_richheader_tag
 
 
 class QqConfig(_DriverConfig):
@@ -80,8 +80,6 @@ _DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface
 _FORWARD_TEMPLATE_PATH: Path = (
     Path(__file__).resolve().parent.parent / "templates" / "qq_forward_template.html"
 )
-_RICHHEADER_RE = re.compile(r"<richheader\b(.*?)/>", re.IGNORECASE | re.DOTALL)
-_RICHHEADER_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 
 _FORWARD_PAGE_TEMPLATE = Template(
     """<!doctype html>
@@ -629,16 +627,10 @@ class QqDriver(BaseDriver[QqConfig]):
                     if not name and qq != "all" and source_group_id:
                         # Try to fetch from API
                         try:
-                            resp = await self._call(
-                                "get_group_member_info",
-                                {
-                                    "group_id": int(source_group_id),
-                                    "user_id": int(qq),
-                                    "no_cache": False,
-                                },
+                            data = await self._api_get_group_member_info(
+                                source_group_id, qq
                             )
-                            if resp and resp.get("status") == "ok":
-                                data = resp.get("data") or {}
+                            if data:
                                 name = data.get("card") or data.get("nickname")
                                 if name:
                                     msg_db().save_user(self.instance_id, qq, name)
@@ -1185,13 +1177,7 @@ class QqDriver(BaseDriver[QqConfig]):
 
     @staticmethod
     def _extract_richheader(text: str) -> tuple[str, dict | None]:
-        match = _RICHHEADER_RE.search(text)
-        if not match:
-            return text, None
-
-        attrs = dict(_RICHHEADER_ATTR_RE.findall(match.group(1)))
-        clean = (text[: match.start()] + text[match.end() :]).strip()
-        return clean, attrs or None
+        return parse_richheader_tag(text)
 
     @staticmethod
     def _forward_node_sender_fields(node: dict) -> tuple[str, str]:
@@ -1762,19 +1748,13 @@ class QqDriver(BaseDriver[QqConfig]):
             f"NapCat [{self.instance_id}] rendering forward segment id={forward_id}"
         )
 
-        response = await self._call(
-            "get_forward_msg",
-            {"id": forward_id},
-            timeout=30.0,
-            retries=2,
-        )
-        if not response or response.get("status") != "ok":
+        payload = await self._api_get_forward_msg(forward_id)
+        if not payload:
             logger.warning(
-                f"NapCat [{self.instance_id}] get_forward_msg failed for id={forward_id}: {response}"
+                f"NapCat [{self.instance_id}] get_forward_msg failed for id={forward_id}"
             )
             return "[Forwarded messages]"
 
-        payload = response.get("data") or {}
         nodes = payload.get("messages")
         if nodes is None:
             nodes = payload.get("message")
@@ -1899,35 +1879,96 @@ class QqDriver(BaseDriver[QqConfig]):
 
         return None
 
+    async def _api_send_group_msg(
+        self, group_id, message, *, timeout: float = 30.0
+    ) -> str | None:
+        """Send a group message via OneBot. Returns ``message_id`` on success or ``None``."""
+        resp = await self._call(
+            "send_group_msg",
+            {"group_id": int(group_id), "message": message},
+            timeout=timeout,
+        )
+        if resp and resp.get("status") == "ok":
+            data = resp.get("data") or {}
+            if "message_id" in data:
+                return str(data["message_id"])
+        return None
+
+    async def _api_get_group_member_info(
+        self, group_id, user_id, *, no_cache: bool = False
+    ) -> dict | None:
+        """Fetch group member info via OneBot. Returns the ``data`` dict or ``None``."""
+        resp = await self._call(
+            "get_group_member_info",
+            {"group_id": int(group_id), "user_id": int(user_id), "no_cache": no_cache},
+        )
+        if resp and resp.get("status") == "ok":
+            return resp.get("data") or {}
+        return None
+
+    async def _api_get_stranger_info(self, user_id) -> dict | None:
+        """Fetch stranger info via OneBot. Returns the ``data`` dict or ``None``."""
+        resp = await self._call(
+            "get_stranger_info",
+            {"user_id": user_id},
+            timeout=30.0,
+            retries=2,
+        )
+        if resp and resp.get("status") == "ok":
+            return resp.get("data") or {}
+        return None
+
+    async def _api_get_forward_msg(self, forward_id) -> dict | None:
+        """Fetch forward message chain via OneBot. Returns the ``data`` dict or ``None``."""
+        resp = await self._call(
+            "get_forward_msg",
+            {"id": forward_id},
+            timeout=30.0,
+            retries=2,
+        )
+        if resp and resp.get("status") == "ok":
+            return resp.get("data") or {}
+        return None
+
+    async def _api_get_group_file_url(self, group_id, file_id, busid) -> str | None:
+        """Resolve a group file download URL. Tries ``get_group_file_url`` and ``get_file``."""
+        resp = await self._call(
+            "get_group_file_url",
+            {"group_id": int(group_id), "file_id": str(file_id), "busid": busid},
+            timeout=20.0,
+        )
+        if resp and resp.get("status") == "ok":
+            data = resp.get("data") or {}
+            for key in ("url", "download_url", "file_url", "file"):
+                candidate = str(data.get(key, "")).strip()
+                if candidate.startswith(("http://", "https://")):
+                    return candidate
+        resp = await self._call(
+            "get_file",
+            {"file_id": str(file_id)},
+            timeout=20.0,
+        )
+        if resp and resp.get("status") == "ok":
+            data = resp.get("data") or {}
+            for key in ("url", "download_url", "file_url", "file"):
+                candidate = str(data.get(key, "")).strip()
+                if candidate.startswith(("http://", "https://")):
+                    return candidate
+        return None
+
     async def _get_qid(self, user_id: str, group_id: str | None = None) -> str:
         """Get user's qid using NapCat API with caching."""
-        # Check cache first
         if user_id in self._qid_cache:
             return self._qid_cache[user_id]
 
         try:
-            # Use get_stranger_info to get qid
-            result = await self._call(
-                "get_stranger_info",
-                {"user_id": user_id},
-                timeout=30.0,
-                retries=2,
-            )
-            # logger.debug(
-            #     f"NapCat [{self.instance_id}] get_stranger_info result for {user_id}: {result}"
-            # )
-            if result and result.get("status") == "ok" and result.get("data"):
-                data = result["data"]
+            data = await self._api_get_stranger_info(user_id)
+            if data:
                 qid = data.get("qid", "")
-                # Cache the result
                 if qid:
                     self._qid_cache[user_id] = qid
                 logger.debug(f"NapCat [{self.instance_id}] qid for {user_id}: {qid}")
                 return qid
-            else:
-                logger.warning(
-                    f"NapCat [{self.instance_id}] get_stranger_info failed for {user_id}: {result}"
-                )
         except Exception as e:
             logger.warning(
                 f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
@@ -2057,22 +2098,16 @@ class QqDriver(BaseDriver[QqConfig]):
             else:
                 t, c = rich_header.get("title", ""), rich_header.get("content", "")
                 prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-                header_resp = await self._call(
-                    "send_group_msg",
-                    {
-                        "group_id": int(group_id),
-                        "message": [{"type": "text", "data": {"text": prefix}}],
-                    },
+                msg_id = await self._api_send_group_msg(
+                    group_id, [{"type": "text", "data": {"text": prefix}}]
                 )
-                if not header_resp or header_resp.get("status") != "ok":
+                if not msg_id:
                     logger.warning(
                         f"NapCat [{self.instance_id}] failed to send standalone rich header "
-                        f"before media message: {header_resp}"
+                        f"before media message"
                     )
                 else:
-                    data = header_resp.get("data") or {}
-                    if "message_id" in data:
-                        msg_ids.append(str(data["message_id"]))
+                    msg_ids.append(msg_id)
 
         # Process mentions: replace @Name with at segments
         mentions = kwargs.get("mentions", [])
@@ -2215,31 +2250,9 @@ class QqDriver(BaseDriver[QqConfig]):
                                             },
                                         )
                                     else:
-                                        await self._call(
-                                            "send_group_msg",
-                                            {
-                                                "group_id": int(gid),
-                                                "message": [
-                                                    {
-                                                        "type": "text",
-                                                        "data": {
-                                                            "text": f"\n[文件发送失败: {fn}]"
-                                                        },
-                                                    }
-                                                ],
-                                            },
-                                        )
-                            else:
-                                if not await self._upload_group_file_from_bytes(
-                                    d,
-                                    fn,
-                                    str(gid),
-                                ):
-                                    await self._call(
-                                        "send_group_msg",
-                                        {
-                                            "group_id": int(gid),
-                                            "message": [
+                                        await self._api_send_group_msg(
+                                            gid,
+                                            [
                                                 {
                                                     "type": "text",
                                                     "data": {
@@ -2247,7 +2260,23 @@ class QqDriver(BaseDriver[QqConfig]):
                                                     },
                                                 }
                                             ],
-                                        },
+                                        )
+                            else:
+                                if not await self._upload_group_file_from_bytes(
+                                    d,
+                                    fn,
+                                    str(gid),
+                                ):
+                                    await self._api_send_group_msg(
+                                        gid,
+                                        [
+                                            {
+                                                "type": "text",
+                                                "data": {
+                                                    "text": f"\n[文件发送失败: {fn}]"
+                                                },
+                                            }
+                                        ],
                                     )
 
                         deferred_file_uploads.append(_do_upload)
@@ -2277,31 +2306,15 @@ class QqDriver(BaseDriver[QqConfig]):
                 standalone_segments[0] = [main_segments[0], standalone_segments[0]]
                 main_segments = []
             else:
-                resp = await self._call(
-                    "send_group_msg",
-                    {
-                        "group_id": int(group_id),
-                        "message": main_segments,
-                    },
-                )
-                if resp and resp.get("status") == "ok":
-                    data = resp.get("data") or {}
-                    if "message_id" in data:
-                        msg_ids.append(str(data["message_id"]))
+                msg_id = await self._api_send_group_msg(group_id, main_segments)
+                if msg_id:
+                    msg_ids.append(msg_id)
 
         for seg in standalone_segments:
             msg_to_send = seg if isinstance(seg, list) else [seg]
-            resp = await self._call(
-                "send_group_msg",
-                {
-                    "group_id": int(group_id),
-                    "message": msg_to_send,
-                },
-            )
-            if resp and resp.get("status") == "ok":
-                data = resp.get("data") or {}
-                if "message_id" in data:
-                    msg_ids.append(str(data["message_id"]))
+            msg_id = await self._api_send_group_msg(group_id, msg_to_send)
+            if msg_id:
+                msg_ids.append(msg_id)
 
         for upload_func in deferred_file_uploads:
             await upload_func()

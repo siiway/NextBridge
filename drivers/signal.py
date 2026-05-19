@@ -33,6 +33,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.message_format import apply_rich_header
 from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
@@ -45,16 +46,6 @@ class SignalConfig(_DriverConfig):
 
 
 logger = log.get_logger()
-
-
-def _content_type_to_att_type(ct: str) -> str:
-    if ct.startswith("image/"):
-        return "image"
-    if ct.startswith("video/"):
-        return "video"
-    if ct.startswith("audio/"):
-        return "voice"
-    return "file"
 
 
 class SignalDriver(BaseDriver[SignalConfig]):
@@ -171,7 +162,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             att_id = att_info.get("id", "")
             ct = att_info.get("contentType", "application/octet-stream")
             fname = att_info.get("filename") or self._fallback_name(ct)
-            att_type = _content_type_to_att_type(ct)
+            att_type = media.mime_to_attachment_type(ct)
             size = att_info.get("size", -1)
 
             att_url = f"{api_url}/v1/attachments/{att_id}"
@@ -235,9 +226,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         if reply_to_id:
             text = f"> [Reply]\n{text}"

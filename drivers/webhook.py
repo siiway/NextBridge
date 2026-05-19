@@ -34,6 +34,7 @@ import services.logger as log
 from services.message import Attachment
 from services.config_schema import _DriverConfig
 from services.config import get_proxy, UNSET
+from services.message_format import apply_rich_header
 from drivers import BaseDriver
 
 
@@ -89,9 +90,7 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
 
         rich_header = kwargs.pop("rich_header", None)
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         payload: dict = {
             "text": text,

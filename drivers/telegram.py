@@ -45,6 +45,7 @@ from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig, CoercedBool
 from services.message import Attachment, NormalizedMessage
+from services.message_format import telegram_richheader_html
 
 
 class TelegramConfig(_DriverConfig):
@@ -63,11 +64,6 @@ _TG_PHOTO_MAX_RATIO = 20
 
 
 # Catch all non-command message types that may carry content
-def _richheader_html(title: str, content: str) -> str:
-    """Render a rich header as a Telegram HTML snippet."""
-    t = html.escape(title)
-    c = html.escape(content)
-    return f"<b><code>{t}</code></b>" + (f" · <i><code>{c}</code></i>" if c else "")
 
 
 def _prepare_photo_for_telegram(
@@ -570,7 +566,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 # Fallback: embed the header as HTML bold text (used when
                 # rich_header_host is not configured or when there are media
                 # attachments, since captions cannot carry link previews).
-                header = _richheader_html(
+                header = telegram_richheader_html(
                     rich_header.get("title", ""),
                     rich_header.get("content", ""),
                 )

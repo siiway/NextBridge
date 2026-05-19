@@ -36,6 +36,7 @@ import services.logger as log
 import services.cqface as cqface
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header, parse_richheader_tag
 from services.util import get_data_path
 from services.config_schema import _DriverConfig, CoercedBool
 from services.config import get_proxy, UNSET
@@ -68,18 +69,7 @@ class DiscordConfig(_DriverConfig):
 logger = log.get_logger()
 
 _CQFACE_RE = re.compile(r":cqface(\d+):")
-_RICHHEADER_RE = re.compile(r"<richheader\b(.*?)/>", re.IGNORECASE | re.DOTALL)
-_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 _MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
-
-
-def _parse_richheader(text: str) -> tuple[str, dict | None]:
-    m = _RICHHEADER_RE.search(text)
-    if not m:
-        return text, None
-    attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[: m.start()] + text[m.end() :]).strip()
-    return clean, attrs or None
 
 
 def _sanitize_mass_mentions(text: str) -> tuple[str, bool]:
@@ -381,7 +371,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                         f"Discord [{self.instance_id}] bot format missing key {e}; using incoming text"
                     )
                 else:
-                    text, parsed_rich_header = _parse_richheader(text)
+                    text, parsed_rich_header = parse_richheader_tag(text)
                     if parsed_rich_header is not None:
                         parsed_rich_header["avatar"] = kwargs.get("user_avatar") or ""
                         kwargs["rich_header"] = parsed_rich_header
@@ -398,9 +388,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         # Handle mentions: replace @Name with <@id>
         mentions = list(kwargs.get("mentions", []))

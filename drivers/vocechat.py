@@ -37,6 +37,7 @@ from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header
 
 
 class VoceChatConfig(_DriverConfig):
@@ -48,16 +49,6 @@ class VoceChatConfig(_DriverConfig):
 
 
 logger = log.get_logger()
-
-
-def _mime_to_att_type(mime: str) -> str:
-    if mime.startswith("image/"):
-        return "image"
-    if mime.startswith("video/"):
-        return "video"
-    if mime.startswith("audio/"):
-        return "voice"
-    return "file"
 
 
 class VoceChatDriver(BaseDriver[VoceChatConfig]):
@@ -238,7 +229,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 ct = resp.content_type or "application/octet-stream"
                 name = path.rsplit("/", 1)[-1] or "attachment"
                 return Attachment(
-                    type=_mime_to_att_type(ct),
+                    type=media.mime_to_attachment_type(ct),
                     url="",
                     name=name,
                     size=len(data),
@@ -285,9 +276,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         # Handle mentions: replace @Name with @VoceChatName
         mentions = kwargs.get("mentions", [])

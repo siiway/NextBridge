@@ -28,6 +28,7 @@ import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.message_format import apply_rich_header
 from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
@@ -40,16 +41,6 @@ class MattermostConfig(_DriverConfig):
 
 
 logger = log.get_logger()
-
-
-def _mime_to_att_type(mime: str) -> str:
-    if mime.startswith("image/"):
-        return "image"
-    if mime.startswith("video/"):
-        return "video"
-    if mime.startswith("audio/"):
-        return "voice"
-    return "file"
 
 
 class MattermostDriver(BaseDriver[MattermostConfig]):
@@ -283,7 +274,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         if size > 0 and size > max_size:
             return None
 
-        att_type = _mime_to_att_type(ct)
+        att_type = media.mime_to_attachment_type(ct)
         try:
             async with self._session.get(f"{server}/api/v4/files/{file_id}") as resp:
                 if resp.status != 200:
@@ -329,9 +320,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         # Handle mentions: replace @Name with @username
         mentions = kwargs.get("mentions", [])

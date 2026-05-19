@@ -47,6 +47,7 @@ from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header
 
 
 class SlackConfig(_DriverConfig):
@@ -61,16 +62,6 @@ class SlackConfig(_DriverConfig):
 
 
 logger = log.get_logger()
-
-
-def _mime_to_att_type(mime: str) -> str:
-    if mime.startswith("image/"):
-        return "image"
-    if mime.startswith("video/"):
-        return "video"
-    if mime.startswith("audio/"):
-        return "voice"
-    return "file"
 
 
 def _verify_slack_signature(signing_secret: str, headers, body: bytes) -> bool:
@@ -324,7 +315,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             return None
 
         return Attachment(
-            type=_mime_to_att_type(mime),
+            type=media.mime_to_attachment_type(mime),
             url="",
             name=name,
             size=len(data),
@@ -344,9 +335,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
     ):
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         if self.config.send_method == "webhook":
             # Incoming Webhooks cannot customize username or icon (silently

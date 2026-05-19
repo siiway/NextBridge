@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import json
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -9,6 +8,7 @@ import services.logger as log
 from services import config, cqface
 from services.db import msg_db
 from services.message import NormalizedMessage
+from services.message_format import parse_richheader_tag
 
 logger = log.get_logger()
 
@@ -21,26 +21,6 @@ _SENSITIVE_KEY_PATTERNS = (
     "webhook_url",
     "access_token",
 )
-
-# Rich-header tag: <richheader title="..." content="..."/>
-_RICHHEADER_RE = re.compile(r"<richheader\b(.*?)/>", re.IGNORECASE | re.DOTALL)
-_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
-
-
-def _parse_richheader(text: str) -> tuple[str, dict | None]:
-    """
-    Extract a ``<richheader title="..." content="..."/>`` tag from *text*.
-
-    Returns ``(clean_text, attrs_dict)`` where *clean_text* has the tag
-    (and any directly adjacent whitespace) stripped.  *attrs_dict* is
-    ``None`` when no tag is found.
-    """
-    m = _RICHHEADER_RE.search(text)
-    if not m:
-        return text, None
-    attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[: m.start()] + text[m.end() :]).strip()
-    return clean, attrs or None
 
 
 def _collect_sensitive(obj, found: set[str]) -> None:
@@ -487,7 +467,7 @@ class Bridge:
             logger.warning(f"msg_format missing key {e}; using raw text")
             formatted = msg.text
 
-        formatted, rich_header = _parse_richheader(formatted)
+        formatted, rich_header = parse_richheader_tag(formatted)
 
         extra: dict = {}
         # Always pass the original message context to extra for drivers to use
