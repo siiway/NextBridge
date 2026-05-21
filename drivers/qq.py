@@ -851,7 +851,7 @@ class QqDriver(BaseDriver[QqConfig]):
     def _render_forward_face_segment_html(self, seg_data: dict) -> str:
         face_id = str(seg_data.get("id", "")).strip()
         if not face_id:
-            return html.escape("[表情]")
+            return self._bilingual("\u8868\u60c5", "Sticker")
 
         gif_host = self._forward_cqface_gif_host()
         if not gif_host:
@@ -907,13 +907,13 @@ class QqDriver(BaseDriver[QqConfig]):
         name = html.escape(self._segment_name(seg_data, fallback_name))
         url = self._segment_url(seg_data)
         if not url:
-            return html.escape(f"[{kind_label}: {name}]")
+            return f"[{kind_label}: {name}]"
 
         safe_url = html.escape(url)
         if kind_class == "voice":
             return (
                 f"<div class='media-block media-voice'>"
-                f"<span class='chip'>{html.escape(kind_label)}</span>"
+                f"<span class='chip'>{kind_label}</span>"
                 f"<audio class='media-player' controls preload='none' src='{safe_url}'></audio>"
                 f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
                 f"{name}</a>"
@@ -922,14 +922,14 @@ class QqDriver(BaseDriver[QqConfig]):
         if kind_class == "video":
             return (
                 f"<div class='media-block media-video'>"
-                f"<span class='chip'>{html.escape(kind_label)}</span>"
+                f"<span class='chip'>{kind_label}</span>"
                 f"<video class='media-player' controls preload='metadata' src='{safe_url}'></video>"
                 f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
                 f"{name}</a>"
                 f"</div>"
             )
         return (
-            f"<span class='chip'>{html.escape(kind_label)}</span>"
+            f"<span class='chip'>{kind_label}</span>"
             f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' "
             "target='_blank' rel='noopener noreferrer'>"
             f"{name}</a>"
@@ -939,7 +939,7 @@ class QqDriver(BaseDriver[QqConfig]):
         name = html.escape(self._segment_name(seg_data, "voice.amr"))
         url = self._segment_url(seg_data)
         if not url:
-            return html.escape(f"[语音: {name}]")
+            return self._bilingual(f"语音: {name}", f"Voice: {name}")
 
         attachment = Attachment(
             type="voice", url=url, name=self._segment_name(seg_data, "voice.amr")
@@ -952,11 +952,11 @@ class QqDriver(BaseDriver[QqConfig]):
         if not result:
             safe_url = html.escape(url)
             return (
-                f"<div class='media-block media-voice'>"
-                f"<span class='chip'>语音</span>"
+                "<div class='media-block media-voice'>"
+                "<span class='chip'>" + self._bilingual("语音", "Voice") + "</span>"
                 f"<a class='asset voice' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
                 f"{name}</a>"
-                f"</div>"
+                "</div>"
             )
 
         data, mime = result
@@ -964,12 +964,12 @@ class QqDriver(BaseDriver[QqConfig]):
         safe_data_url = html.escape(data_url)
         safe_url = html.escape(url)
         return (
-            f"<div class='media-block media-voice'>"
-            f"<span class='chip'>语音</span>"
+            "<div class='media-block media-voice'>"
+            "<span class='chip'>" + self._bilingual("语音", "Voice") + "</span>"
             f"<audio class='media-player' controls preload='none' src='{safe_data_url}'></audio>"
             f"<a class='asset voice' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
             f"{name}</a>"
-            f"</div>"
+            "</div>"
         )
 
     async def _render_forward_image_asset_html(
@@ -996,7 +996,7 @@ class QqDriver(BaseDriver[QqConfig]):
             safe_url = html.escape(url)
             return (
                 f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
-                "<div class='fwd-image-placeholder'>图片未缓存 / 已过期 / 超过大小限制</div>"
+                "<div class='fwd-image-placeholder'><span class='lang-zh'>图片未缓存 / 已过期 / 超过大小限制</span><span class='lang-en'>Image not cached / expired / too large</span></div>"
                 f"</a>"
             )
 
@@ -1007,7 +1007,8 @@ class QqDriver(BaseDriver[QqConfig]):
             return (
                 f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
                 "<div class='fwd-image-placeholder'>"
-                "图片 MIME 类型不安全，已阻止内嵌预览"
+                "<span class='lang-zh'>图片 MIME 类型不安全，已阻止内嵌预览</span>"
+                "<span class='lang-en'>Image MIME type unsafe, embed preview blocked</span>"
                 "</div>"
                 f"</a>"
             )
@@ -1017,7 +1018,7 @@ class QqDriver(BaseDriver[QqConfig]):
             safe_data_url = html.escape(data_url)
             return (
                 f"<img class='fwd-image fwd-image-open' src='{safe_data_url}' "
-                "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
+                "loading='lazy' referrerpolicy='no-referrer' alt='Image'/>"
             )
 
         asset_id = str(uuid.uuid4())
@@ -1042,7 +1043,7 @@ class QqDriver(BaseDriver[QqConfig]):
         return (
             f"<a class='fwd-image-link' href='{asset_url}' target='_blank' rel='noopener noreferrer'>"
             f"<img class='fwd-image' src='{asset_url}' "
-            "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
+            "loading='lazy' referrerpolicy='no-referrer' alt='Image'/>"
             f"</a>"
         )
 
@@ -1058,7 +1059,7 @@ class QqDriver(BaseDriver[QqConfig]):
     @staticmethod
     def _format_size_human(size_bytes: int | None) -> str:
         if size_bytes is None:
-            return "未知"
+            return "Unknown"
         units = ["B", "KB", "MB", "GB", "TB"]
         value = float(size_bytes)
         unit = units[0]
@@ -1138,8 +1139,8 @@ class QqDriver(BaseDriver[QqConfig]):
         name = html.escape(raw_name)
         file_id = str(seg_data.get("file_id", seg_data.get("id", ""))).strip()
         size_bytes = self._parse_forward_file_size(seg_data)
-        size_text = html.escape(self._format_size_human(size_bytes))
-        file_id_text = html.escape(file_id or "未知")
+        size_text = self._format_size_human(size_bytes)
+        file_id_text = html.escape(file_id or "Unknown")
 
         url = self._segment_url(seg_data)
         if not url and file_id:
@@ -1149,20 +1150,20 @@ class QqDriver(BaseDriver[QqConfig]):
                 busid=str(seg_data.get("busid", seg_data.get("bus_id", ""))).strip(),
             )
 
-        download_html = "<span class='asset file disabled'>暂无法下载</span>"
+        download_html = "<span class='asset file disabled'><span class='lang-zh'>暂无法下载</span><span class='lang-en'>Unavailable</span></span>"
         if url:
             safe_url = html.escape(url)
             download_html = (
                 f"<a class='asset file' href='{safe_url}' "
                 "target='_blank' rel='noopener noreferrer'>"
-                f"下载 {name}</a>"
+                f"<span class='lang-zh'>下载 {name}</span><span class='lang-en'>Download {name}</span></a>"
             )
 
         return (
             "<div class='file-block'>"
-            "<span class='chip'>文件</span>"
+            "<span class='chip'>" + self._bilingual("文件", "File") + "</span>"
             f"<div class='file-name'>{name}</div>"
-            f"<div class='file-meta'>大小: {size_text} · file_id: {file_id_text}</div>"
+            f"<div class='file-meta'><span class='lang-zh'>大小: {size_text} · file_id: {file_id_text}</span><span class='lang-en'>Size: {size_text} · file_id: {file_id_text}</span></div>"
             f"{download_html}"
             "</div>"
         )
@@ -1418,6 +1419,33 @@ class QqDriver(BaseDriver[QqConfig]):
         return f"{secs}秒"
 
     @staticmethod
+    def _format_duration_en(seconds: int) -> str:
+        seconds = max(0, int(seconds))
+        days, rem = divmod(seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, secs = divmod(rem, 60)
+
+        parts: list[str] = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        parts.append(f"{secs}s")
+        return " ".join(parts)
+
+    @staticmethod
+    def _bilingual(zh: str, en: str) -> str:
+        return (
+            "<span class='lang-zh'>"
+            + html.escape(zh)
+            + "</span><span class='lang-en'>"
+            + html.escape(en)
+            + "</span>"
+        )
+
+    @staticmethod
     def _format_message_time(ts: int) -> str:
         if not ts:
             return ""
@@ -1510,7 +1538,7 @@ class QqDriver(BaseDriver[QqConfig]):
                     content_parts.append(
                         self._render_forward_asset_html(
                             seg_data,
-                            kind_label="视频",
+                            kind_label=self._bilingual("视频", "Video"),
                             kind_class="video",
                             fallback_name="video.mp4",
                         )
@@ -1534,8 +1562,8 @@ class QqDriver(BaseDriver[QqConfig]):
                             )
                         )
                     else:
-                        plain_text_parts.append("[合并转发]")
-                        content_parts.append(html.escape("[合并转发]"))
+                        plain_text_parts.append("Forward")
+                        content_parts.append(self._bilingual("合并转发", "Forward"))
                 elif seg_type == "reply":
                     reply_to_id = self._forward_reply_target_id(seg_data)
                 elif seg_type == "face":
@@ -1556,8 +1584,8 @@ class QqDriver(BaseDriver[QqConfig]):
                         plain_text_parts.append(summary)
                         content_parts.append(html.escape(summary))
                     else:
-                        plain_text_parts.append("[表情]")
-                        content_parts.append(html.escape("[表情]"))
+                        plain_text_parts.append("Sticker")
+                        content_parts.append(self._bilingual("表情", "Sticker"))
 
             if richheader is None:
                 msg_text = "".join(plain_text_parts).strip()
@@ -1568,11 +1596,13 @@ class QqDriver(BaseDriver[QqConfig]):
                     msg_text=msg_text,
                 )
 
-            message_html = "".join(content_parts).strip() or html.escape("[空消息]")
+            message_html = "".join(content_parts).strip() or self._bilingual(
+                "空消息", "Empty"
+            )
             message_text = "".join(plain_text_parts).strip() or "[空消息]"
             default_sender = f"{nickname}" + (f" ({user_id})" if user_id else "")
             if user_id and not user_id_reliable:
-                default_sender += " [UID 不可信]"
+                default_sender += " [UID Unreliable]"
 
             header_title_raw = (
                 str(richheader.get("title", "")).strip() if richheader else ""
@@ -1588,9 +1618,9 @@ class QqDriver(BaseDriver[QqConfig]):
                         else f"QQ: {user_id}"
                     )
                 header_content_raw = (
-                    f"{header_content_raw} · UID 不可信"
+                    f"{header_content_raw} · UID Unreliable"
                     if header_content_raw
-                    else "UID 不可信"
+                    else "UID Unreliable"
                 )
 
             header_title = html.escape(header_title_raw) or html.escape(default_sender)
@@ -1618,7 +1648,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 hover_parts.append(
                     f"UID: {user_id}"
                     if user_id_reliable
-                    else f"UID: {user_id} (不可信)"
+                    else f"UID: {user_id} (Unreliable)"
                 )
             if time_hover:
                 hover_parts.append(time_hover)
@@ -1657,7 +1687,9 @@ class QqDriver(BaseDriver[QqConfig]):
             if reply_to_id:
                 reply_html = (
                     "<blockquote class='reply-preview'>"
-                    "<div class='reply-preview-title'>回复消息</div>"
+                    "<div class='reply-preview-title'>"
+                    + self._bilingual("回复消息", "Reply")
+                    + "</div>"
                     "</blockquote>"
                 )
 
@@ -1693,7 +1725,11 @@ class QqDriver(BaseDriver[QqConfig]):
         )
         return (
             "<details class='nested-forward'>"
-            "<summary class='nested-forward-title'>嵌套合并转发（点击展开）</summary>"
+            "<summary class='nested-forward-title'>"
+            + self._bilingual(
+                "展开嵌套合并转发", "Expand Nested Forward"
+            )
+            + "</summary>"
             f"<div class='nested-forward-body'>{nested_body}</div>"
             "</details>"
         )
@@ -1710,12 +1746,16 @@ class QqDriver(BaseDriver[QqConfig]):
         expires_at: datetime.datetime,
         destroyed_at: datetime.datetime | None = None,
     ) -> str:
-        title_html = html.escape(title)
-        meta_primary_html = html.escape(meta_primary_text)
-        meta_secondary_html = html.escape(meta_secondary_text)
-        meta_attachment_html = html.escape(meta_attachment_text)
+        title_html = self._bilingual("QQ 合并转发消息", "QQ Combined Forward")
+        meta_primary_html = meta_primary_text
+        meta_secondary_html = meta_secondary_text
+        meta_attachment_html = meta_attachment_text
         page_state = "destroyed" if destroyed_at is not None else "active"
-        page_state_text = "已销毁" if destroyed_at is not None else "有效"
+        page_state_text = (
+            self._bilingual("已销毁", "Destroyed")
+            if destroyed_at is not None
+            else self._bilingual("有效", "Active")
+        )
         return _get_forward_page_template().substitute(
             title=title_html,
             meta_primary=meta_primary_html,
@@ -1776,17 +1816,23 @@ class QqDriver(BaseDriver[QqConfig]):
         expires_at = created_at + datetime.timedelta(seconds=ttl)
         expires_at_ts = int(expires_at.timestamp())
         meta_primary_text = (
-            f"生成于 {created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
+            f"<span class='lang-zh'>生成于 {created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}</span>"
+            f"<span class='lang-en'>Generated at {created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}</span>"
         )
         meta_secondary_text = (
-            f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
+            f"<span class='lang-zh'>有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}</span>"
+            f"<span class='lang-en'>Expires at {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}</span>"
         )
         asset_ttl = self._effective_forward_asset_ttl()
         if asset_ttl > 0:
             asset_expires_at = created_at + datetime.timedelta(seconds=asset_ttl)
+            cn_dur = self._format_duration_cn(asset_ttl)
+            en_dur = self._format_duration_en(asset_ttl)
             meta_attachment_text = (
-                f"附件有效期至 {asset_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} "
-                f"（约 {self._format_duration_cn(asset_ttl)}）"
+                f"<span class='lang-zh'>附件有效期至 {asset_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} "
+                f"（约 {cn_dur}）</span>"
+                f"<span class='lang-en'>Attachments expire at {asset_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} "
+                f"(approx. {en_dur})</span>"
             )
         else:
             meta_attachment_text = ""

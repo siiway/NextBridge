@@ -30,11 +30,11 @@
       --content-text: #000000;
       --reply-title: #555555;
       --fwd-image-bg: #ffffff;
-      --asset-color: #0088cc;
-      --asset-hover: #005580;
+      --asset-color: var(--accent);
+      --asset-hover: #333333;
       --asset-disabled: #aaaaaa;
-      --nested-title: #333333;
-      --nested-arrow: #666666;
+      --nested-title: var(--ink);
+      --nested-arrow: var(--muted);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -60,11 +60,11 @@
         --content-text: #ffffff;
         --reply-title: #c8d9f2;
         --fwd-image-bg: #ffffff;
-        --asset-color: var(--asset-color);
-        --asset-hover: #d4f7ff;
-        --asset-disabled: #7f97b9;
-        --nested-title: #bdefff;
-        --nested-arrow: #9fdcf1;
+        --asset-color: var(--accent);
+        --asset-hover: var(--ink);
+        --asset-disabled: #888888;
+        --nested-title: var(--ink);
+        --nested-arrow: var(--muted);
       }
     }
     * { box-sizing: border-box; }
@@ -117,7 +117,7 @@
       display: inline-block;
       margin-left: 8px;
       padding: 2px 10px;
-      border-radius: 999px;
+      border-radius: 4px;
       border: 1px solid var(--line);
       background: var(--status-bg);
       color: var(--head-title);
@@ -193,10 +193,10 @@
     .reply-preview {
       margin: 0 0 10px;
       padding: 6px 10px;
-      border: 1px solid rgba(123, 194, 255, .2);
-      border-left: 3px solid rgba(157, 214, 255, .75);
-      border-radius: 9px;
-      background: rgba(255, 255, 255, .03);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--muted);
+      border-radius: 4px;
+      background: var(--chip);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -206,13 +206,13 @@
       width: 8px;
       height: 8px;
       border-radius: 999px;
-      background: rgba(157, 214, 255, .95);
+      background: var(--muted);
       flex: 0 0 auto;
     }
     .reply-preview-title {
       font-size: 12px;
       font-weight: 600;
-      color: var(--reply-title);
+      color: var(--muted);
       line-height: 1.3;
       letter-spacing: .2px;
     }
@@ -226,7 +226,7 @@
       display: block;
       max-width: 100%;
       max-height: 480px;
-      border-radius: 10px;
+      border-radius: 4px;
       border: 1px solid var(--line);
       margin: 8px 0;
       background: var(--fwd-image-bg);
@@ -253,10 +253,10 @@
       justify-content: center;
       min-height: 84px;
       padding: 12px 14px;
-      border-radius: 10px;
-      border: 1px dashed rgba(159, 220, 241, .35);
+      border-radius: 4px;
+      border: 1px dashed var(--line);
       margin: 8px 0;
-      background: rgba(255, 255, 255, .04);
+      background: var(--chip);
       color: var(--muted);
       font-size: 12px;
       line-height: 1.45;
@@ -267,8 +267,8 @@
       font-size: 12px;
       color: var(--asset-color);
       background: var(--chip);
-      border: 1px solid rgba(123, 194, 255, .33);
-      border-radius: 999px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
       padding: 2px 8px;
       margin-right: 6px;
       margin-bottom: 6px;
@@ -276,11 +276,11 @@
     a.asset {
       color: var(--asset-color);
       text-decoration: none;
-      border-bottom: 1px dashed rgba(159, 220, 241, .55);
+      border-bottom: 1px dashed var(--muted);
     }
     a.asset:hover {
       color: var(--asset-hover);
-      border-bottom-color: var(--asset-hover);
+      border-bottom-color: var(--ink);
     }
     .media-block {
       margin: 8px 0;
@@ -290,8 +290,8 @@
       width: 100%;
       max-width: 100%;
       margin: 8px 0;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, .04);
+      border-radius: 4px;
+      background: var(--chip);
     }
     .media-video {
       max-width: 100%;
@@ -299,9 +299,9 @@
     .file-block {
       margin: 8px 0;
       padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(123, 194, 255, .2);
-      background: rgba(24, 36, 56, .52);
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--chip);
     }
     .file-name {
       color: var(--ink);
@@ -318,16 +318,16 @@
     }
     .asset.disabled {
       color: var(--asset-disabled);
-      border-bottom: 1px dashed rgba(127, 151, 185, .45);
+      border-bottom: 1px dashed var(--muted);
       pointer-events: none;
       cursor: not-allowed;
     }
     .nested-forward {
       margin: 10px 0 6px;
       padding: 10px 12px;
-      border-radius: 14px;
-      border: 1px solid rgba(123, 194, 255, .22);
-      background: rgba(15, 24, 39, .55);
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--chip);
     }
     .nested-forward-title {
       font-size: 12px;
@@ -346,7 +346,7 @@
       content: '▸';
       display: inline-block;
       margin-right: 6px;
-      color: var(--asset-color);
+      color: var(--accent);
       transition: transform .18s ease;
     }
     .nested-forward[open] .nested-forward-title {
@@ -359,6 +359,11 @@
       margin: 8px 0;
       box-shadow: none;
     }
+
+    /* Language support */
+    .lang-zh, .lang-en { display: inline; }
+    html:not(.lang-en) .lang-en { display: none; }
+    html.lang-en .lang-zh { display: none; }
   </style>
 </head>
 <body>
@@ -373,6 +378,10 @@
   </main>
   <script>
     (function () {
+      var lang = (navigator.language || '').toLowerCase();
+      var langIsZh = lang.startsWith('zh');
+      if (!langIsZh) document.documentElement.classList.add('lang-en');
+
       var countdown = document.getElementById("destroy-countdown");
       if (!countdown) return;
       var expiresAt = parseInt(countdown.getAttribute("data-expires-at") || "", 10);
@@ -393,23 +402,29 @@
         var minutes = Math.floor(remain / 60);
         var secs = remain % 60;
         var parts = [];
-        if (days > 0) parts.push(days + "天");
-        if (hours > 0 || parts.length > 0) parts.push(hours + "小时");
-        if (minutes > 0 || parts.length > 0) parts.push(minutes + "分钟");
-        parts.push(secs + "秒");
-        return parts.join("");
+        if (langIsZh) {
+          if (days > 0) parts.push(days + "\u5929");
+          if (hours > 0 || parts.length > 0) parts.push(hours + "\u5c0f\u65f6");
+          if (minutes > 0 || parts.length > 0) parts.push(minutes + "\u5206\u949f");
+          parts.push(secs + "\u79d2");
+        } else {
+          if (days > 0) parts.push(days + "d");
+          if (hours > 0 || parts.length > 0) parts.push(hours + "h");
+          if (minutes > 0 || parts.length > 0) parts.push(minutes + "m");
+          parts.push(secs + "s");
+        }
+        return parts.join(langIsZh ? "" : " ");
       }
 
       function setDestroyed() {
-        countdown.textContent = " · 已销毁";
         if (statusChip) {
-          statusChip.textContent = "已销毁";
           statusChip.classList.add("is-destroyed");
           statusChip.classList.remove("active");
         }
       }
 
       if (Number.isFinite(destroyedAt) && destroyedAt > 0) {
+        countdown.textContent = langIsZh ? " · \u5df2\u9500\u6bc1" : " · Destroyed";
         setDestroyed();
         return;
       }
@@ -418,11 +433,15 @@
         var now = Math.floor(Date.now() / 1000);
         var remain = expiresAt - now;
         if (remain <= 0) {
+          countdown.textContent = langIsZh ? " · \u5df2\u9500\u6bc1" : " · Destroyed";
           setDestroyed();
           if (timer) clearInterval(timer);
           return;
         }
-        countdown.textContent = " · 距离销毁约 " + formatDuration(remain);
+        countdown.textContent = (
+          (langIsZh ? " · \u8ddd\u79bb\u9500\u6bc1\u7ea6 " : " · Destroy in approx. ")
+          + formatDuration(remain)
+        );
       }
 
       tick();
