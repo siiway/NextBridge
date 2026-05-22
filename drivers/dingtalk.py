@@ -40,7 +40,6 @@ from alibabacloud_dingtalk.robot_1_0 import models as robot_models
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
@@ -59,8 +58,6 @@ class DingTalkConfig(_DriverConfig):
     listen_path: str = "/dingtalk/event"
     max_file_size: int = 20 * 1024 * 1024
 
-
-logger = log.get_logger()
 
 _DINGTALK_ENDPOINT = "api.dingtalk.com"
 
@@ -89,12 +86,12 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         app = FastAPI()
         app.add_api_route("/", self._handle_http, methods=["POST"])
         if self.http_server is None:
-            logger.error(
+            self.logger.error(
                 f"DingTalk [{self.instance_id}] shared HTTP server unavailable"
             )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        logger.info(
+        self.logger.info(
             f"DingTalk [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
 
@@ -121,7 +118,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             sig = request.headers.get("sign", "")
             match, err = _verify_sign(ts, self.config.signing_secret, sig)
             if not match:
-                logger.warning(
+                self.logger.warning(
                     f"DingTalk [{self.instance_id}] webhook signature mismatch: {err}"
                     if err
                     else ""
@@ -178,7 +175,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         reply_to_id = kwargs.get("reply_to_id")
         open_conv_id = channel.get("open_conversation_id")
         if not open_conv_id:
-            logger.warning(
+            self.logger.warning(
                 f"DingTalk [{self.instance_id}] send: "
                 f"no open_conversation_id in channel {channel}"
             )
@@ -194,7 +191,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         try:
             token = await self._get_access_token()
         except Exception:
-            logger.exception(f"DingTalk [{self.instance_id}] access token error")
+            self.logger.exception("access token error")
             return
 
         # Handle mentions
@@ -292,7 +289,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 ),
             )
         except Exception:
-            logger.exception(
+            self.logger.exception(
                 f"DingTalk [{self.instance_id}] send failed (msg {msg_key})"
             )
 
@@ -320,12 +317,12 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                     js = await resp.json(content_type=None)
                     return js.get("mediaId")
                 body = await resp.text()
-                logger.error(
+                self.logger.error(
                     f"DingTalk [{self.instance_id}] media upload failed "
                     f"HTTP {resp.status}: {body[:200]}"
                 )
         except Exception:
-            logger.exception(f"DingTalk [{self.instance_id}] media upload error")
+            self.logger.exception("media upload error")
         return None
 
     # ------------------------------------------------------------------
@@ -348,7 +345,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         )
         self._access_token = resp.body.access_token or ""
         self._token_expires_at = time.monotonic() + (resp.body.expire_in or 7200)
-        logger.debug(f"DingTalk [{self.instance_id}] access token refreshed")
+        self.logger.debug("access token refreshed")
         return self._access_token
 
 

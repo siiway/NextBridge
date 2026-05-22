@@ -16,8 +16,9 @@ from services.bridge import bridge
 from services.config_schema import GlobalConfig
 from services.db import db_target_version, init_db
 from services.http_server import HttpServerManager
+from services.media import close_all_sessions
 
-logger = log.get_logger()
+logger = log.get_logger("__main__")
 
 
 def _load_project_version() -> str:
@@ -122,6 +123,7 @@ async def main():
         return
 
     # Logging configuration
+    log.set_show_source(validated_global.log.show_source)
     log.set_console_level(validated_global.log.level)
     log.set_log_dir(validated_global.log.dir)
     log.set_log_rotation(
@@ -234,11 +236,6 @@ async def main():
         # wait for all drivers to clean up
         await asyncio.gather(*all_tasks, return_exceptions=True)
 
-        # close all sessions to avoid connection leaks
-        from services.media import close_all_sessions
-
-        await close_all_sessions()
-
         logger.info("NextBridge stopped.")
 
 
@@ -264,3 +261,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+    finally:
+        # close all sessions to avoid connection leaks
+        asyncio.run(close_all_sessions())

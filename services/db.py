@@ -26,7 +26,7 @@ import services.util as u
 from services import config, db_migrations
 from services.db_migrations import MigrationStep
 
-logger = log.get_logger()
+logger = log.get_logger("db")
 
 
 class _Base(DeclarativeBase):

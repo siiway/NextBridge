@@ -8,7 +8,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 import services.logger as log
 
 UNSET = "unset"
-logger = log.get_logger()
+logger = log.get_logger("config_schema")
 
 # ---------------------------------------------------------------------------
 # Reusable bool coercion: "true" / "1" / "yes" → True
@@ -57,6 +57,14 @@ class DatabaseConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     """Logging configuration for controlling log output and rotation."""
+
+    show_source: Literal["auto", "always", "never"] = "always"
+    """Controls whether source file locations are shown in logs.
+
+    - ``auto``: show source only for DEBUG/TRACE level messages.
+    - ``always``: always show source.
+    - ``never``: never show source.
+    """
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     """Console log verbosity level.

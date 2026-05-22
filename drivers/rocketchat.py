@@ -49,7 +49,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import model_validator
 
-import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
@@ -86,9 +85,6 @@ class RocketChatConfig(_DriverConfig):
         return self
 
 
-logger = log.get_logger()
-
-
 class RocketChatDriver(BaseDriver[RocketChatConfig]):
     def __init__(self, instance_id: str, config: RocketChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
@@ -103,7 +99,9 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
     async def start(self):
         if self._proxy:
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
-            logger.info(f"Rocket.Chat [{self.instance_id}] use proxy {self._proxy}")
+            self.logger.info(
+                f"Rocket.Chat [{self.instance_id}] use proxy {self._proxy}"
+            )
         else:
             connector = aiohttp.TCPConnector(ssl=True)
 
@@ -113,12 +111,12 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         app = FastAPI()
         app.add_api_route("/", self._handle_webhook, methods=["POST"])
         if self.http_server is None:
-            logger.error(
+            self.logger.error(
                 f"Rocket.Chat [{self.instance_id}] shared HTTP server unavailable"
             )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        logger.info(
+        self.logger.info(
             f"Rocket.Chat [{self.instance_id}] webhook mounted at {self.config.listen_path} "
             f"(send_method={self.config.send_method})"
         )
@@ -149,7 +147,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
 
         if self.config.webhook_token:
             if body.get("token", "") != self.config.webhook_token:
-                logger.warning(
+                self.logger.warning(
                     f"Rocket.Chat [{self.instance_id}] webhook token mismatch"
                 )
                 return JSONResponse({"error": "forbidden"}, status_code=403)
@@ -232,7 +230,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                     )
                 data = await resp.read()
                 if len(data) > max_size:
-                    logger.debug(
+                    self.logger.debug(
                         f"Rocket.Chat [{self.instance_id}] attachment "
                         f"{title!r} exceeds size limit, skipping data"
                     )
@@ -243,7 +241,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                     type=att_type, url="", name=title, size=len(data), data=data
                 )
         except Exception as e:
-            logger.warning(
+            self.logger.warning(
                 f"Rocket.Chat [{self.instance_id}] attachment download failed: {e}"
             )
             return Attachment(type=att_type, url=url, name=title, size=-1, data=None)
@@ -266,7 +264,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
                     u = data.get("user", {})
                     username = u.get("username", "")
         except Exception:
-            logger.opt(exception=True).debug(
+            self.logger.opt(exception=True).debug(
                 f"Rocket.Chat [{self.instance_id}] get username for userid {user_id} failed"
             )
 
@@ -288,7 +286,9 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._session is None:
-            logger.warning(f"Rocket.Chat [{self.instance_id}] send: driver not started")
+            self.logger.warning(
+                f"Rocket.Chat [{self.instance_id}] send: driver not started"
+            )
             return
 
         alias = kwargs.get("rc_alias", "")
@@ -308,7 +308,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         else:
             room_id = channel.get("room_id", "")
             if not room_id:
-                logger.warning(
+                self.logger.warning(
                     f"Rocket.Chat [{self.instance_id}] send: "
                     f"no room_id in channel {channel}"
                 )
@@ -395,12 +395,12 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"Rocket.Chat [{self.instance_id}] post failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            logger.error(f"Rocket.Chat [{self.instance_id}] post error: {e}")
+            self.logger.error(f"Rocket.Chat [{self.instance_id}] post error: {e}")
 
     async def _api_upload_file(
         self,
@@ -424,12 +424,14 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"Rocket.Chat [{self.instance_id}] file upload failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            logger.error(f"Rocket.Chat [{self.instance_id}] file upload error: {e}")
+            self.logger.error(
+                f"Rocket.Chat [{self.instance_id}] file upload error: {e}"
+            )
 
     # ------------------------------------------------------------------
     # Send — Webhook mode
@@ -495,12 +497,14 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"Rocket.Chat [{self.instance_id}] webhook post failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            logger.error(f"Rocket.Chat [{self.instance_id}] webhook post error: {e}")
+            self.logger.error(
+                f"Rocket.Chat [{self.instance_id}] webhook post error: {e}"
+            )
 
 
 register("rocketchat", RocketChatConfig, RocketChatDriver)

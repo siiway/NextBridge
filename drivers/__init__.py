@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from pydantic import BaseModel
+
+import services.logger as log
 from services.config import UNSET, get_proxy
 
 if TYPE_CHECKING:
@@ -18,6 +20,8 @@ class BaseDriver(ABC, Generic[T]):
         self.config: T = config
         self.bridge = bridge
         self.http_server = None
+
+        self.logger = log.get_logger(f"[{instance_id}]", instance=True)
 
         # Media download proxy used by downstream attachment fetching.
         # Default follows driver-level proxy, but can be overridden by

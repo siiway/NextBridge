@@ -27,7 +27,6 @@ from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import media
@@ -44,8 +43,6 @@ class TeamsConfig(_DriverConfig):
     max_file_size: int = 20 * 1024 * 1024
     proxy: str | None = UNSET
 
-
-logger = log.get_logger()
 
 _TOKEN_URL = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
 _SCOPE = "https://api.botframework.com/.default"
@@ -66,7 +63,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
     async def start(self):
         if self._proxy:
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
-            logger.info(f"Teams [{self.instance_id}] use proxy {self._proxy}")
+            self.logger.info(f"use proxy {self._proxy}")
         else:
             connector = aiohttp.TCPConnector(ssl=True)
 
@@ -76,12 +73,10 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         app = FastAPI()
         app.add_api_route("/", self._handle_activity, methods=["POST"])
         if self.http_server is None:
-            logger.error(f"Teams [{self.instance_id}] shared HTTP server unavailable")
+            self.logger.error("shared HTTP server unavailable")
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        logger.info(
-            f"Teams [{self.instance_id}] webhook mounted at {self.config.listen_path}"
-        )
+        self.logger.info(f"webhook mounted at {self.config.listen_path}")
         try:
             await asyncio.Event().wait()
         finally:
@@ -107,17 +102,14 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             async with self._session.post(_TOKEN_URL, data=data) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    logger.error(
-                        f"Teams [{self.instance_id}] token fetch failed "
-                        f"HTTP {resp.status}: {body}"
-                    )
+                    self.logger.error(f"token fetch failed HTTP {resp.status}: {body}")
                     return ""
                 js = await resp.json()
                 self._access_token = js.get("access_token", "")
                 self._token_expires = time.time() + js.get("expires_in", 3600)
                 return self._access_token
         except Exception as e:
-            logger.error(f"Teams [{self.instance_id}] token fetch error: {e}")
+            self.logger.error(f"token fetch error: {e}")
             return ""
 
     # ------------------------------------------------------------------
@@ -221,23 +213,20 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._session is None:
-            logger.warning(f"Teams [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return
 
         service_url = channel.get("service_url", "").rstrip("/")
         conversation_id = channel.get("conversation_id", "")
         if not service_url or not conversation_id:
-            logger.warning(
-                f"Teams [{self.instance_id}] send: missing service_url or "
-                f"conversation_id in channel {channel}"
+            self.logger.warning(
+                f"send: missing service_url or conversation_id in channel {channel}"
             )
             return
 
         token = await self._get_token()
         if not token:
-            logger.error(
-                f"Teams [{self.instance_id}] send: could not obtain access token"
-            )
+            self.logger.error("send: could not obtain access token")
             return
 
         headers = {
@@ -345,12 +334,11 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             async with self._session.post(url, json=body, headers=headers) as resp:
                 if resp.status not in (200, 201):
                     text = await resp.text()
-                    logger.error(
-                        f"Teams [{self.instance_id}] post activity failed "
-                        f"HTTP {resp.status}: {text[:200]}"
+                    self.logger.error(
+                        f"post activity failed HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            logger.error(f"Teams [{self.instance_id}] post activity error: {e}")
+            self.logger.error(f"post activity error: {e}")
 
 
 register("teams", TeamsConfig, TeamsDriver)

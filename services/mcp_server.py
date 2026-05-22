@@ -6,7 +6,7 @@ from typing import Any
 import services.logger as log
 from services.db import msg_db
 
-logger = log.get_logger()
+logger = log.get_logger("mcp")
 
 try:
     FastMCP = import_module("mcp.server.fastmcp").FastMCP

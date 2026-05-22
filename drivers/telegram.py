@@ -58,9 +58,10 @@ class TelegramConfig(_DriverConfig):
     proxy: str | None = UNSET
 
 
-logger = log.get_logger()
 _TG_PHOTO_MAX_SIDE = 10000
 _TG_PHOTO_MAX_RATIO = 20
+
+_logger = log.get_logger("telegram")
 
 
 # Catch all non-command message types that may carry content
@@ -136,9 +137,7 @@ def _prepare_photo_for_telegram(
     except UnidentifiedImageError:
         return data, filename
     except Exception as e:
-        logger.debug(
-            f"Telegram [{__name__}] image preprocess skipped for {filename}: {e}"
-        )
+        _logger.debug(f"image preprocess skipped for {filename}: {e}")
         return data, filename
 
 
@@ -179,7 +178,7 @@ def _parse_padding_color(color: str | None, mode: str) -> tuple[int, ...]:
                 rgb = (r, g, b)
                 rgba = (r, g, b, a)
     except Exception as exc:
-        logger.warning(f"Parse padding color {color} failed: {exc}")
+        _logger.warning(f"Parse padding color {color} failed: {exc}")
 
     return rgba if mode == "RGBA" else rgb
 
@@ -235,7 +234,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app.add_handler(MessageHandler(_COMMAND_FILTER, self._on_command_message))
         self._app.add_error_handler(self._on_error)
 
-        logger.info(f"Telegram [{self.instance_id}] starting application and polling.")
+        self.logger.info("starting application and polling.")
 
         # ensure bot's get_me is retried on failure
         # error in start/start_polling shouldn't happen, so let it crash if it does
@@ -245,26 +244,26 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     await self._app.initialize()
                     break
                 except TelegramError as e:
-                    logger.error(
-                        f"Telegram [{self.instance_id}] initialization failed: {e}, retrying in 5 seconds..."
+                    self.logger.error(
+                        f"initialization failed: {e}, retrying in 5 seconds..."
                     )
                     await asyncio.sleep(5)
         except asyncio.CancelledError:
-            logger.info(f"Telegram [{self.instance_id}] initialization cancelled.")
+            self.logger.info("initialization cancelled.")
             return
         await self._app.start()
         assert self._app.updater is not None
-        logger.info(f"Telegram [{self.instance_id}] application started.")
+        self.logger.info("application started.")
         await self._app.updater.start_polling(
             allowed_updates=Update.ALL_TYPES,
             timeout=10,
             bootstrap_retries=10,
         )
-        logger.info(f"Telegram [{self.instance_id}] polling started.")
+        self.logger.info("polling started.")
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            logger.info(f"Telegram [{self.instance_id}] polling cancelled.")
+            self.logger.info("polling cancelled.")
         finally:
             await self.stop()
 
@@ -280,7 +279,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app = None
 
     async def _on_error(self, _: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logger.opt(exception=True).exception(
+        self.logger.opt(exception=True).exception(
             "Telegram [%s] handler error", self.instance_id
         )
 
@@ -371,42 +370,32 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         # file_path should be a relative path like 'photos/file_6.jpg'
                         # If it's a full URL, extract the photos/ or profile_photos/ part
                         file_path = f.file_path
-                        logger.debug(
-                            f"Telegram [{self.instance_id}] original file_path: {file_path}"
-                        )
+                        self.logger.debug(f"original file_path: {file_path}")
                         if file_path.startswith("http"):
                             from urllib.parse import urlparse
 
                             parsed = urlparse(file_path)
                             path = parsed.path.lstrip("/")
-                            logger.debug(
-                                f"Telegram [{self.instance_id}] parsed path: {path}"
-                            )
+                            self.logger.debug(f"parsed path: {path}")
                             # Extract the part after 'bot<token>/'
                             parts = path.split("/")
-                            logger.debug(
-                                f"Telegram [{self.instance_id}] path parts: {parts}"
-                            )
+                            self.logger.debug(f"path parts: {parts}")
                             if len(parts) >= 2:
                                 # Find the index of 'photos' or 'profile_photos'
                                 for i, part in enumerate(parts):
                                     if part in ("photos", "profile_photos"):
                                         file_path = "/".join(parts[i:])
-                                        logger.debug(
-                                            f"Telegram [{self.instance_id}] extracted file_path: {file_path}"
+                                        self.logger.debug(
+                                            f"extracted file_path: {file_path}"
                                         )
                                         break
-                        logger.debug(
-                            f"Telegram [{self.instance_id}] final avatar URL: {host}/file/{file_path}"
-                        )
+                        self.logger.debug(f"final avatar URL: {host}/file/{file_path}")
                         user_avatar = f"{host}/file/{file_path}"
                     elif f.file_path:
                         # Fallback: use direct Telegram API URL
                         user_avatar = f.file_path
             except Exception as e:
-                logger.warning(
-                    f"Telegram [{self.instance_id}] failed to fetch avatar for user {user_id}: {e}"
-                )
+                self.logger.warning(f"failed to fetch avatar for user {user_id}: {e}")
 
         attachments: list[Attachment] = []
 
@@ -479,7 +468,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     )
                 )
         except Exception as e:
-            logger.error(f"Telegram [{self.instance_id}] failed to resolve file: {e}")
+            self.logger.error(f"failed to resolve file: {e}")
 
         if not text.strip() and not attachments:
             return
@@ -517,12 +506,10 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     ):
         chat_id = channel.get("chat_id")
         if not chat_id:
-            logger.warning(
-                f"Telegram [{self.instance_id}] send: no chat_id in channel {channel}"
-            )
+            self.logger.warning(f"send: no chat_id in channel {channel}")
             return
         if self._app is None:
-            logger.warning(f"Telegram [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return
 
         cid = int(chat_id)
@@ -625,7 +612,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
                 # validate photo data
                 if not data_bytes or len(data_bytes) == 0:
-                    logger.warning(f"Empty image data for {fname}, skipping")
+                    self.logger.warning(f"Empty image data for {fname}, skipping")
                     label = att.name or att.url or ""
                     text += _attachment_fallback_label(att.type, label, parse_mode)
                     continue
@@ -675,9 +662,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 except Exception as e:
                     label = att.name or att.url or fname
                     text += _attachment_fallback_label(att.type, label, parse_mode)
-                    logger.warning(
-                        f"Telegram [{self.instance_id}] attachment send failed ({att.type}): {e}"
-                    )
+                    self.logger.warning(f"attachment send failed ({att.type}): {e}")
                     continue
 
             # Send text-only if no attachments consumed it
@@ -695,7 +680,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             return msg_ids if msg_ids else None
 
         except Exception as e:
-            logger.error(f"Telegram [{self.instance_id}] send failed: {e}")
+            self.logger.error(f"send failed: {e}")
             return None
 
 

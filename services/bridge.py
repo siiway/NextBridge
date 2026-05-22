@@ -10,7 +10,7 @@ from services.db import msg_db
 from services.message import NormalizedMessage
 from services.message_format import parse_richheader_tag
 
-logger = log.get_logger()
+logger = log.get_logger("bridge")
 
 # Config keys whose values are treated as credentials and must never appear in
 # outgoing messages.  Matched as substrings against lower-cased key names.

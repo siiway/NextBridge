@@ -30,7 +30,6 @@ from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import media
@@ -48,9 +47,6 @@ class VoceChatConfig(_DriverConfig):
     proxy: str | None = UNSET
 
 
-logger = log.get_logger()
-
-
 class VoceChatDriver(BaseDriver[VoceChatConfig]):
     def __init__(self, instance_id: str, config: VoceChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
@@ -65,7 +61,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
 
     async def start(self):
         if self._proxy:
-            logger.info(f"VoceChat [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.info(f"using proxy {self._proxy}")
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
         else:
             connector = aiohttp.TCPConnector(ssl=True)
@@ -79,12 +75,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         app.add_api_route("/", self._handle_health, methods=["GET"])
         app.add_api_route("/", self._handle_event, methods=["POST"])
         if self.http_server is None:
-            logger.error(
+            self.logger.error(
                 f"VoceChat [{self.instance_id}] shared HTTP server unavailable"
             )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        logger.info(
+        self.logger.info(
             f"VoceChat [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
         try:
@@ -189,12 +185,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     avatar = f"{server}/api/resource/avatar?uid={uid}"
                 else:
                     body = await resp.text()
-                    logger.warning(
+                    self.logger.warning(
                         f"VoceChat [{self.instance_id}] user lookup for uid={uid} "
                         f"failed HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            logger.warning(
+            self.logger.warning(
                 f"VoceChat [{self.instance_id}] user lookup for uid={uid} error: {e}"
             )
 
@@ -221,7 +217,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     return None
                 data = await resp.read()
                 if len(data) > max_size:
-                    logger.debug(
+                    self.logger.debug(
                         f"VoceChat [{self.instance_id}] file {path!r} "
                         f"exceeds size limit"
                     )
@@ -236,7 +232,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     data=data,
                 )
         except Exception as e:
-            logger.warning(f"VoceChat [{self.instance_id}] file download failed: {e}")
+            self.logger.warning(f"file download failed: {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -251,13 +247,13 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         **kwargs,
     ):
         if self._session is None:
-            logger.warning(f"VoceChat [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return None
 
         gid = channel.get("gid")
         uid = channel.get("uid")
         if gid is None and uid is None:
-            logger.warning(
+            self.logger.warning(
                 f"VoceChat [{self.instance_id}] send: "
                 f"no gid or uid in channel {channel}"
             )
@@ -289,7 +285,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 if name:
                     text = text.replace(f"@{m['name']}", f"@{name}")
             except Exception:
-                logger.debug(
+                self.logger.debug(
                     f"VoceChat [{self.instance_id}] get user info for mention {m} failed"
                 )
 
@@ -368,12 +364,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                         return res_text.strip().strip('"')
                 else:
                     text = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"VoceChat [{self.instance_id}] send failed "
                         f"HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            logger.error(f"VoceChat [{self.instance_id}] send error: {e}")
+            self.logger.error(f"send error: {e}")
         return None
 
     async def _upload_file(
@@ -395,14 +391,14 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"VoceChat [{self.instance_id}] file prepare failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
                     return None
                 file_id = (await resp.text()).strip().strip('"')
         except Exception as e:
-            logger.error(f"VoceChat [{self.instance_id}] file prepare error: {e}")
+            self.logger.error(f"file prepare error: {e}")
             return None
 
         # Step 2: upload — multipart with file_id, chunk_data, chunk_is_last
@@ -416,7 +412,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"VoceChat [{self.instance_id}] file upload failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
@@ -424,7 +420,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 js = await resp.json(content_type=None)
                 return js.get("path")
         except Exception as e:
-            logger.error(f"VoceChat [{self.instance_id}] file upload error: {e}")
+            self.logger.error(f"file upload error: {e}")
             return None
 
 

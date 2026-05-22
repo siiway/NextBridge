@@ -74,8 +74,6 @@ class QqConfig(_DriverConfig):
     proxy: str | None = UNSET
 
 
-logger = log.get_logger()
-
 _DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface-gif/"
 _FORWARD_TEMPLATE_PATH: Path = (
     Path(__file__).resolve().parent.parent / "templates" / "qq_forward_template.html"
@@ -90,13 +88,16 @@ _FORWARD_PAGE_TEMPLATE = Template(
 )
 
 
+_logger = log.get_logger("qq")
+
+
 @lru_cache(maxsize=1)
 def _get_forward_page_template() -> Template:
     try:
         text = _FORWARD_TEMPLATE_PATH.read_text(encoding="utf-8")
         return Template(text)
     except OSError as exc:
-        logger.warning(
+        _logger.warning(
             f"Failed to load forward template {_FORWARD_TEMPLATE_PATH}: {exc}"
         )
         return _FORWARD_PAGE_TEMPLATE
@@ -143,14 +144,14 @@ def _load_face_gif(face_id_raw) -> bytes | None:
         if face_id < 0:
             raise ValueError("negative id")
     except (TypeError, ValueError):
-        logger.warning(f"Invalid face ID {face_id_raw!r} — ignored")
+        _logger.warning(f"Invalid face ID {face_id_raw!r} — ignored")
         return None
 
     candidate = (_FACE_DB / f"{face_id}.gif").resolve()
 
     # Layer 2 path-traversal guard.
     if not candidate.is_relative_to(_FACE_DB):
-        logger.warning(f"Face path {candidate} escapes database dir — blocked")
+        _logger.warning(f"Face path {candidate} escapes database dir — blocked")
         return None
 
     if not candidate.is_file():
@@ -159,7 +160,7 @@ def _load_face_gif(face_id_raw) -> bytes | None:
     try:
         return candidate.read_bytes()
     except OSError as e:
-        logger.error(f"Failed to read face GIF {candidate}: {e}")
+        _logger.error(f"Failed to read face GIF {candidate}: {e}")
         return None
 
 
@@ -194,11 +195,11 @@ class QqDriver(BaseDriver[QqConfig]):
             sep = "&" if "?" in ws_url else "?"
             ws_url = f"{ws_url}{sep}access_token={self.config.ws_token}"
 
-        logger.info(f"NapCat [{self.instance_id}] connecting to {ws_url}")
+        self.logger.info(f"connecting to {ws_url}")
 
         connect_kwargs: dict
         if self._proxy:
-            logger.debug(f"NapCat [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {self._proxy}")
             connect_kwargs = {"proxy": self._proxy}
         else:
             connect_kwargs = {}
@@ -209,7 +210,7 @@ class QqDriver(BaseDriver[QqConfig]):
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
             connect_kwargs["ssl"] = ssl_context
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] TLS certificate verification is disabled for WebSocket"
             )
 
@@ -217,21 +218,21 @@ class QqDriver(BaseDriver[QqConfig]):
             try:
                 async with websockets.connect(ws_url, **connect_kwargs) as ws:
                     self._ws = ws
-                    logger.info(f"NapCat [{self.instance_id}] connected")
+                    self.logger.info("connected")
                     await self._listen(ws)
             except websockets.exceptions.ConnectionClosedOK:
-                logger.info(f"NapCat [{self.instance_id}] connection closed normally")
+                self.logger.info("connection closed normally")
             except ssl.SSLCertVerificationError as e:
-                logger.error(
+                self.logger.error(
                     f"NapCat [{self.instance_id}] TLS certificate verification failed: {e}. "
                     "If your server uses a self-signed cert, set qq.<instance_id>.ws_ssl_verify=false"
                 )
             except Exception as e:
-                logger.error(f"NapCat [{self.instance_id}] connection error: {e}")
+                self.logger.error(f"connection error: {e}")
             finally:
                 self._ws = None
 
-            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5s...")
+            self.logger.info("reconnecting in 5s...")
             await asyncio.sleep(5)
 
     def _normalize_mount_path(self, path: str) -> str:
@@ -358,7 +359,7 @@ class QqDriver(BaseDriver[QqConfig]):
         if not self.config.forward_render_enabled:
             return
         if self.http_server is None:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] forward renderer not mounted: shared HTTP server unavailable"
             )
             return
@@ -432,7 +433,7 @@ class QqDriver(BaseDriver[QqConfig]):
             app=app,
         )
         self._forward_mount_registered = True
-        logger.info(
+        self.logger.info(
             f"NapCat [{self.instance_id}] forward renderer mounted at {mount_path}"
         )
 
@@ -458,7 +459,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 self._forward_pages.pop(page_id, None)
             deleted_assets = msg_db().purge_expired_forward_assets(int(now.timestamp()))
             if deleted_assets:
-                logger.debug(
+                self.logger.debug(
                     f"NapCat [{self.instance_id}] purged {deleted_assets} expired forward asset(s)"
                 )
 
@@ -480,9 +481,9 @@ class QqDriver(BaseDriver[QqConfig]):
                     continue
                 self._spawn_event_task(data)
             except json.JSONDecodeError:
-                logger.warning(f"NapCat [{self.instance_id}] invalid JSON received")
+                self.logger.warning("invalid JSON received")
             except Exception as e:
-                logger.error(f"NapCat [{self.instance_id}] handler error: {e}")
+                self.logger.error(f"handler error: {e}")
 
     def _spawn_event_task(self, data: dict) -> None:
         task = asyncio.create_task(self._handle(data))
@@ -494,7 +495,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 return
             exc = done_task.exception()
             if exc is not None:
-                logger.error(f"NapCat [{self.instance_id}] async handler error: {exc}")
+                self.logger.error(f"async handler error: {exc}")
 
         task.add_done_callback(_on_done)
 
@@ -524,7 +525,7 @@ class QqDriver(BaseDriver[QqConfig]):
         sender = event.get("sender", {})
         # Prefer group card (nickname-in-group) over global nickname
         nickname = sender.get("card") or sender.get("nickname") or user_id
-        logger.debug(
+        self.logger.debug(
             f"NapCat [{self.instance_id}] message from {nickname}({user_id}) "
             f"group={group_id} message_id={message_id} seq={message_seq}"
         )
@@ -541,7 +542,7 @@ class QqDriver(BaseDriver[QqConfig]):
         self_id = str(event.get("self_id", ""))
         source_mentioned_self = any(str(m.get("id", "")) == self_id for m in mentions)
         if not text.strip() and not attachments:
-            logger.debug(
+            self.logger.debug(
                 f"NapCat [{self.instance_id}] ignoring empty message from {nickname}({user_id})"
             )
             return
@@ -635,7 +636,7 @@ class QqDriver(BaseDriver[QqConfig]):
                                 if name:
                                     msg_db().save_user(self.instance_id, qq, name)
                         except Exception as e:
-                            logger.debug(
+                            self.logger.debug(
                                 f"NapCat [{self.instance_id}] failed to fetch member info for {qq}: {e}"
                             )
 
@@ -838,7 +839,7 @@ class QqDriver(BaseDriver[QqConfig]):
             )
             if resp and resp.get("status") == "ok":
                 return True
-            logger.warning(
+            self.logger.warning(
                 f"QQ [{self.instance_id}] upload_group_file failed for '{filename}': {resp}"
             )
             return False
@@ -1123,7 +1124,7 @@ class QqDriver(BaseDriver[QqConfig]):
                     self._forward_file_url_cache[cache_key] = candidate
                     return candidate
 
-        logger.debug(
+        self.logger.debug(
             f"NapCat [{self.instance_id}] forward file download url unresolved for file_id={file_id}"
         )
         self._forward_file_url_cache[cache_key] = None
@@ -1370,7 +1371,7 @@ class QqDriver(BaseDriver[QqConfig]):
         try:
             formatted = msg_format.format(**ctx)
         except KeyError as exc:
-            logger.debug(
+            self.logger.debug(
                 f"NapCat [{self.instance_id}] forward header msg_format missing key: {exc}"
             )
             return None
@@ -1488,11 +1489,11 @@ class QqDriver(BaseDriver[QqConfig]):
             user_id_reliable = user_id not in unreliable_user_ids
 
             # if not user_id_reliable and user_id:
-            #     logger.debug(
+            #     self.logger.debug(
             #         f"NapCat [{self.instance_id}] forward node user_id marked unreliable: {user_id}"
             #     )
 
-            # logger.debug(
+            # self.logger.debug(
             #     f"NapCat [{self.instance_id}] forward node sender resolved "
             #     f"nickname={nickname!r} user_id={user_id!r} "
             #     f"raw_sender={node.get('sender')!r}"
@@ -1726,9 +1727,7 @@ class QqDriver(BaseDriver[QqConfig]):
         return (
             "<details class='nested-forward'>"
             "<summary class='nested-forward-title'>"
-            + self._bilingual(
-                "展开嵌套合并转发", "Expand Nested Forward"
-            )
+            + self._bilingual("展开嵌套合并转发", "Expand Nested Forward")
             + "</summary>"
             f"<div class='nested-forward-body'>{nested_body}</div>"
             "</details>"
@@ -1784,13 +1783,13 @@ class QqDriver(BaseDriver[QqConfig]):
         if not forward_id:
             return "[Forwarded messages]"
 
-        logger.debug(
+        self.logger.debug(
             f"NapCat [{self.instance_id}] rendering forward segment id={forward_id}"
         )
 
         payload = await self._api_get_forward_msg(forward_id)
         if not payload:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] get_forward_msg failed for id={forward_id}"
             )
             return "[Forwarded messages]"
@@ -1799,7 +1798,7 @@ class QqDriver(BaseDriver[QqConfig]):
         if nodes is None:
             nodes = payload.get("message")
         if not isinstance(nodes, list):
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] get_forward_msg no messages for id={forward_id}"
             )
             return "[Forwarded messages]"
@@ -1899,12 +1898,12 @@ class QqDriver(BaseDriver[QqConfig]):
             except TimeoutError:
                 self._pending.pop(echo, None)
                 if attempt >= max_attempts:
-                    logger.warning(
+                    self.logger.warning(
                         f"NapCat [{self.instance_id}] action '{action}' timed out "
                         f"after {attempt} attempt(s)"
                     )
                     return None
-                logger.warning(
+                self.logger.warning(
                     f"NapCat [{self.instance_id}] action '{action}' timed out, "
                     f"retrying ({attempt}/{max_attempts - 1})"
                 )
@@ -1912,12 +1911,12 @@ class QqDriver(BaseDriver[QqConfig]):
             except Exception as e:
                 self._pending.pop(echo, None)
                 if attempt >= max_attempts:
-                    logger.error(
+                    self.logger.error(
                         f"NapCat [{self.instance_id}] action '{action}' error "
                         f"after {attempt} attempt(s): {e}"
                     )
                     return None
-                logger.warning(
+                self.logger.warning(
                     f"NapCat [{self.instance_id}] action '{action}' error, "
                     f"retrying ({attempt}/{max_attempts - 1}): {e}"
                 )
@@ -2013,10 +2012,10 @@ class QqDriver(BaseDriver[QqConfig]):
                 qid = data.get("qid", "")
                 if qid:
                     self._qid_cache[user_id] = qid
-                logger.debug(f"NapCat [{self.instance_id}] qid for {user_id}: {qid}")
+                self.logger.debug(f"qid for {user_id}: {qid}")
                 return qid
         except Exception as e:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
             )
         return ""
@@ -2052,13 +2051,13 @@ class QqDriver(BaseDriver[QqConfig]):
                 },
             )
             if resp is None:
-                logger.warning(
+                self.logger.warning(
                     f"NapCat [{self.instance_id}] stream upload chunk {i}/{total_chunks} "
                     f"got no response for '{filename}'"
                 )
                 return None
             if resp.get("status") == "failed":
-                logger.warning(
+                self.logger.warning(
                     f"NapCat [{self.instance_id}] stream upload failed at chunk "
                     f"{i}/{total_chunks}: {resp.get('msg', '')}"
                 )
@@ -2073,7 +2072,7 @@ class QqDriver(BaseDriver[QqConfig]):
             },
         )
         if resp is None or resp.get("status") == "failed":
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] stream upload completion failed "
                 f"for '{filename}': {resp}"
             )
@@ -2082,7 +2081,7 @@ class QqDriver(BaseDriver[QqConfig]):
         data = resp.get("data") or {}
         file_path = data.get("file_path")
         if not file_path:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] stream upload complete but "
                 f"no file_path in response: {resp}"
             )
@@ -2103,13 +2102,13 @@ class QqDriver(BaseDriver[QqConfig]):
     ):
         group_id = channel.get("group_id")
         if not group_id:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] send: no group_id in channel {channel}"
             )
             return None
 
         if self._ws is None:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] send: not connected, message dropped"
             )
             return None
@@ -2148,7 +2147,7 @@ class QqDriver(BaseDriver[QqConfig]):
                     group_id, [{"type": "text", "data": {"text": prefix}}]
                 )
                 if not msg_id:
-                    logger.warning(
+                    self.logger.warning(
                         f"NapCat [{self.instance_id}] failed to send standalone rich header "
                         f"before media message"
                     )

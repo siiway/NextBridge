@@ -1,42 +1,67 @@
 from __future__ import annotations
-import sys
+
 import os
+import sys
+from contextlib import contextmanager
 from datetime import datetime
+from typing import Generator
 
 import loguru
 from loguru import logger
 
-# Global log configuration
-LOG_DIR = None  # Set to a directory path to enable file logging, or None to disable file logging
-LOG_FILE_PATH = None
+# ── ANSI colors (used by the custom console format function) ──
+_RESET = "\033[0m"
+_DIM = "\033[2m"
+_CYAN = "\033[36m"
+_YELLOW = "\033[33m"
+_RED = "\033[31m"
+_RED_BOLD = "\033[1;31m"
 
-# Log rotation configuration
-LOG_ROTATION_SIZE = "100 MB"  # Maximum size of a single log file before rotation
-LOG_RETENTION_DAYS = 7  # Number of days to keep log files
-LOG_COMPRESSION = "zip"  # Compression format for rotated log files (None to disable)
+_LEVEL_COLORS = {
+    "TRACE": _DIM,
+    "DEBUG": _DIM + _CYAN,
+    "INFO": "",
+    "WARNING": _YELLOW,
+    "ERROR": _RED,
+    "CRITICAL": _RED_BOLD,
+}
 
-# Log levels
-LOG_FILE_LEVEL = "DEBUG"  # File log level (default: DEBUG)
+_LEVEL_ICONS = {
+    "TRACE": "TRC",
+    "DEBUG": "DBG",
+    "INFO": "INF",
+    "WARNING": "WRN",
+    "ERROR": "ERR",
+    "CRITICAL": "CRT",
+}
 
-# File sink ID for dynamic management
+# ── Global state ──
+LOG_DIR: str | None = None
+LOG_FILE_PATH: str | None = None
+
+LOG_ROTATION_SIZE = "100 MB"
+LOG_RETENTION_DAYS = 7
+LOG_COMPRESSION = "zip"
+LOG_FILE_LEVEL = "DEBUG"
+
+_console_id: int | None = None
 _file_id: int | None = None
 
-
-# Sensitive strings to redact from all log output.
-# Populated by register_sensitive() after the config is loaded.
 _sensitive: set[str] = set()
+
+# "auto" → show source only for DEBUG/TRACE; "always" / "never"
+_show_source_mode: str = "always"
+
+
+# ── Sensitive value redaction ──
 
 
 def register_sensitive(values: frozenset[str]) -> None:
-    """Register secret strings that must never appear in log output."""
     _sensitive.clear()
-    # Skip values shorter than 8 chars to avoid masking common substrings
     _sensitive.update(v for v in values if len(v) >= 8)
 
 
-# this shouldn't be in log, move out if there's better place
 def replace_sensitive(msg: str) -> str:
-    """Return a redacted version of msg, with all registered secrets replaced."""
     if not _sensitive:
         return msg
     for secret in _sensitive:
@@ -45,17 +70,81 @@ def replace_sensitive(msg: str) -> str:
     return msg
 
 
+# ── Format callables ──
+
+
+def _console_format(record: "loguru.Record") -> str:
+    ts = record["time"].strftime("%Y-%m-%d %H:%M:%S")
+    lvl_name = record["level"].name
+    icon = _LEVEL_ICONS.get(lvl_name, lvl_name[:3].upper())
+    lvl_color = _LEVEL_COLORS.get(lvl_name, "")
+    msg = record["message"].replace("{", "{{").replace("}", "}}")
+
+    source = record["extra"].get("source", "")
+    show_source = record["extra"].get("_show_source", True)
+
+    name = record["extra"].get("name", "")
+    is_instance = record["extra"].get("_instance", False)
+    name_color = _YELLOW if is_instance else _CYAN
+
+    parts = [
+        f"{_DIM}[{ts}]{_RESET}",
+        f"{lvl_color}[{icon}]{_RESET}",
+    ]
+    if show_source and source:
+        parts.append(f"| {_DIM}{source}{_RESET}")
+    if name:
+        parts.append(f"| {name_color}{name}{_RESET}")
+    parts.append(f"| {msg}")
+
+    return " ".join(parts) + "\n"
+
+
+def _file_format(record: "loguru.Record") -> str:
+    ts = record["time"].strftime("%Y-%m-%d %H:%M:%S")
+    lvl_name = record["level"].name
+    icon = _LEVEL_ICONS.get(lvl_name, lvl_name[:3].upper())
+    msg = record["message"].replace("{", "{{").replace("}", "}}")
+    source = record["extra"].get("source", "")
+    name = record["extra"].get("name", "")
+    exc = record["exception"]
+    parts = [
+        f"[{ts}]",
+        f"[{icon}]",
+    ]
+    if source:
+        parts.append(f"| {source}")
+    if name:
+        parts.append(f"| {name}")
+    parts.append(f"| {msg}")
+    if exc:
+        parts.append(str(exc))
+    return " ".join(parts) + "\n"
+
+
 def _masking_filter(record: "loguru.Record") -> bool:
-    """Redact sensitive values from every log record before emission."""
-    # Set default source field (file:line format)
-    if "source" not in record.get("extra", {}):
-        record["extra"]["source"] = f"{record['file'].name}:{record['line']}"
+    if record.get("extra", {}).get("_uvicorn"):
+        record["extra"]["source"] = ""
+        record["extra"]["name"] = "uvicorn"
+    else:
+        if "source" not in record.get("extra", {}):
+            record["extra"]["source"] = f"{record['file'].name}:{record['line']}"
+        if "name" not in record.get("extra", {}):
+            record["extra"]["name"] = ""
 
-    # Override source if a custom 'name' is bound (e.g., uvicorn logs)
-    if record.get("extra", {}).get("name"):
-        record["extra"]["source"] = record["extra"]["name"]
+    # Determine whether to show source file location
+    if "source" in record.get("extra", {}):
+        override = record["extra"].get("_show_source_override")
+        mode = override if override is not None else _show_source_mode
+        if mode == "always":
+            record["extra"]["_show_source"] = True
+        elif mode == "never":
+            record["extra"]["_show_source"] = False
+        else:  # "auto"
+            record["extra"]["_show_source"] = (
+                record["level"].no <= logger.level("DEBUG").no
+            )
 
-    # Redact sensitive values
     if _sensitive:
         msg = record["message"]
         msg = replace_sensitive(msg)
@@ -64,7 +153,7 @@ def _masking_filter(record: "loguru.Record") -> bool:
     return True
 
 
-# Custom logging level icons
+# ── Level icons ──
 logger.level("TRACE", icon="TRC")
 logger.level("DEBUG", icon="DBG")
 logger.level("INFO", icon="INF")
@@ -72,47 +161,49 @@ logger.level("WARNING", icon="WRN")
 logger.level("ERROR", icon="ERR")
 logger.level("CRITICAL", icon="CRT")
 
-_CONSOLE_FORMAT = (
-    "<dim>[{time:YYYY-MM-DD HH:mm:ss}]</dim> "
-    "<level>[{level.icon}]</level> "
-    "| <dim>{extra[source]}</dim> | {message}"
-)
-
-_FILE_FORMAT = (
-    "[{time:YYYY-MM-DD HH:mm:ss}] [{level}] | {extra[source]} | {message}{exception}"
-)
-
-# Remove loguru's default stderr sink
+# ── Remove default sink ──
 logger.remove()
 
-# Console sink — level is configurable at runtime via set_console_level()
-_console_id: int = logger.add(
+# ── Console sink ──
+_console_id = logger.add(
     sys.stdout,
     level="INFO",
-    format=_CONSOLE_FORMAT,
-    colorize=True,
+    format=_console_format,
     filter=_masking_filter,
 )
 
-# File sink — always DEBUG so nothing is ever lost
-# File sink will be added when set_log_dir() is called with a valid directory
+
+# ── Public API ──
 
 
-def get_logger() -> "loguru.Logger":
+def get_logger(name: str = "", instance: bool = False) -> "loguru.Logger":
+    """Return a logger bound with *name* as the context prefix.
+
+    Args:
+        name: The prefix name to show in log output.
+        instance: If True, marks as a driver instance logger (yellow prefix).
+    """
+    if name:
+        return logger.bind(name=name, _instance=instance)
     return logger
 
 
-def set_log_dir(log_dir: str | None) -> None:
-    """Set the log directory at runtime.
+@contextmanager
+def log_context(ctx: str) -> Generator[None, None, None]:
+    """Temporarily add extra context to the current logger scope.
 
-    Args:
-        log_dir: Path to the log directory. If None or empty, file logging will be disabled.
+    Usage::
 
-    Call this once after the config is loaded.
+        with log_context("upload"):
+            logger.info("starting...")
     """
+    with logger.contextualize(_context=ctx):
+        yield
+
+
+def set_log_dir(log_dir: str | None) -> None:
     global LOG_DIR, LOG_FILE_PATH, _file_id
 
-    # Remove existing file sink if any
     if _file_id is not None:
         logger.remove(_file_id)
         _file_id = None
@@ -125,7 +216,7 @@ def set_log_dir(log_dir: str | None) -> None:
         _file_id = logger.add(
             LOG_FILE_PATH,
             level=LOG_FILE_LEVEL,
-            format=_FILE_FORMAT,
+            format=_file_format,
             encoding="utf-8",
             filter=_masking_filter,
             rotation=LOG_ROTATION_SIZE,
@@ -142,18 +233,6 @@ def set_log_rotation(
     compression: str | None = None,
     file_level: str | None = None,
 ) -> None:
-    """Set log rotation parameters at runtime.
-
-    Args:
-        rotation_size: Maximum size of a single log file before rotation (e.g., "100 MB").
-            If None, uses the current value.
-        retention_days: Number of days to keep log files. If None, uses the current value.
-        compression: Compression format for rotated log files (e.g., "zip", "gz", "tar.gz").
-            If None, uses the current value.
-        file_level: File log level (e.g., "DEBUG", "INFO"). If None, uses the current value.
-
-    Call this once after the config is loaded. Changes take effect on next rotation.
-    """
     global \
         LOG_ROTATION_SIZE, \
         LOG_RETENTION_DAYS, \
@@ -170,7 +249,6 @@ def set_log_rotation(
     if file_level is not None:
         LOG_FILE_LEVEL = file_level
 
-    # Reconfigure file sink if it exists
     if _file_id is not None and LOG_DIR is not None:
         logger.remove(_file_id)
         _file_id = None
@@ -179,7 +257,7 @@ def set_log_rotation(
         _file_id = logger.add(
             LOG_FILE_PATH,
             level="DEBUG",
-            format=_FILE_FORMAT,
+            format=_file_format,
             encoding="utf-8",
             filter=_masking_filter,
             rotation=LOG_ROTATION_SIZE,
@@ -189,19 +267,24 @@ def set_log_rotation(
 
 
 def set_console_level(level: str) -> None:
-    """Set the console handler's log level at runtime.
-
-    Accepts standard level names: DEBUG, INFO, WARNING, ERROR, CRITICAL.
-    The file sink always retains DEBUG so nothing is lost.
-    Call this once after the config is loaded.
-    """
     global _console_id
     logger.remove(_console_id)
     _console_id = logger.add(
         sys.stdout,
         level=level,
-        format=_CONSOLE_FORMAT,
-        colorize=True,
+        format=_console_format,
         filter=_masking_filter,
     )
     logger.debug(f"Console log level set to: {level}")
+
+
+def set_show_source(mode: str) -> None:
+    """Control whether the source file location is shown in log output.
+
+    Args:
+        mode: ``"auto"`` (show only for DEBUG/TRACE), ``"always"``, or ``"never"``.
+    """
+    global _show_source_mode
+    if mode not in ("auto", "always", "never"):
+        raise ValueError(f"Invalid show_source mode: {mode!r}")
+    _show_source_mode = mode

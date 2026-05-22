@@ -16,7 +16,7 @@ from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 
-logger = log.get_logger()
+logger = log.get_logger("media")
 
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 

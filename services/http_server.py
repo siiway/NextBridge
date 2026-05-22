@@ -7,11 +7,12 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+import loguru
 import uvicorn
 
 import services.logger as log
 
-logger = log.get_logger()
+logger = log.get_logger("http")
 
 
 class _UvicornLogHandler(logging.Handler):
@@ -19,7 +20,7 @@ class _UvicornLogHandler(logging.Handler):
 
     def __init__(self):
         super().__init__()
-        self.bound_logger = logger.bind(name="uvicorn")
+        self.bound_logger = loguru.logger.bind(_uvicorn=True)
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -134,7 +135,7 @@ class HttpServerManager:
 
         for mount in self._mounts:
             root.mount(mount.path, mount.app)
-            logger.info(f"HTTP mount registered: {mount.instance_id} -> {mount.path}")
+            logger.debug(f"HTTP mount registered: {mount.instance_id} -> {mount.path}")
 
         host = f"[{self.host}]" if ":" in self.host else self.host
         root_path = self.root_path if not self.root_path == "/" else ""

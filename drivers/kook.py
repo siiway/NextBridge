@@ -21,7 +21,6 @@ import khl
 from aiohttp import ClientSession
 from aiohttp_socks import ProxyConnector
 
-import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import media
@@ -36,9 +35,6 @@ class KookConfig(_DriverConfig):
     token: str
     max_file_size: int = 25 * 1024 * 1024
     proxy: str | None = UNSET
-
-
-logger = log.get_logger()
 
 
 class KookDriver(BaseDriver[KookConfig]):
@@ -58,7 +54,7 @@ class KookDriver(BaseDriver[KookConfig]):
 
         # handle proxy
         if self._proxy:
-            logger.debug(f"Kook [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {self._proxy}")
 
             requester = self._bot.client.gate.requester
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
@@ -75,7 +71,7 @@ class KookDriver(BaseDriver[KookConfig]):
         self._bot.client.register(khl.MessageTypes.TEXT, on_msg)
         self._bot.client.register(khl.MessageTypes.KMD, on_msg)
 
-        logger.info(f"Kook [{self.instance_id}] starting WebSocket connection")
+        self.logger.info("starting WebSocket connection")
         await self._bot.start()
 
     # ------------------------------------------------------------------
@@ -139,14 +135,12 @@ class KookDriver(BaseDriver[KookConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._bot is None:
-            logger.warning(f"Kook [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return
 
         channel_id = channel.get("channel_id")
         if not channel_id:
-            logger.warning(
-                f"Kook [{self.instance_id}] send: no channel_id in channel {channel}"
-            )
+            self.logger.warning(f"send: no channel_id in channel {channel}")
             return
 
         rich_header = kwargs.get("rich_header")
@@ -182,7 +176,7 @@ class KookDriver(BaseDriver[KookConfig]):
             try:
                 asset_url = await self._bot.client.create_asset(io.BytesIO(data_bytes))
             except Exception as e:
-                logger.error(f"Kook [{self.instance_id}] asset upload failed: {e}")
+                self.logger.error(f"asset upload failed: {e}")
                 label = att.name or att.url or fname
                 attachment_fragments.append(f"\n[{att.type.capitalize()}: {label}]")
                 continue
@@ -213,7 +207,7 @@ class KookDriver(BaseDriver[KookConfig]):
             else:
                 await ch.send(full_text, type=msg_type)
         except Exception as e:
-            logger.error(f"Kook [{self.instance_id}] send failed: {e}")
+            self.logger.error(f"send failed: {e}")
 
 
 register("kook", KookConfig, KookDriver)
