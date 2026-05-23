@@ -97,7 +97,12 @@ def _console_format(record: "loguru.Record") -> str:
         parts.append(f"| {name_color}{name}{_RESET}")
     parts.append(f"| {msg}")
 
-    return " ".join(parts) + "\n"
+    result = " ".join(parts) + "\n"
+    # Escape < to prevent loguru from parsing message content
+    # (e.g. Discord emoji <:neuro:xxx>, source file <string>:N) as markup tags.
+    # Two-step: protect existing \< first, then escape bare <.
+    result = result.replace("\\<", "\\\\<")
+    return result.replace("<", "\\<")
 
 
 def _file_format(record: "loguru.Record") -> str:
@@ -119,7 +124,9 @@ def _file_format(record: "loguru.Record") -> str:
     parts.append(f"| {msg}")
     if exc:
         parts.append(str(exc))
-    return " ".join(parts) + "\n"
+    result = " ".join(parts) + "\n"
+    result = result.replace("\\<", "\\\\<")
+    return result.replace("<", "\\<")
 
 
 def _masking_filter(record: "loguru.Record") -> bool:
