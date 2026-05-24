@@ -711,9 +711,9 @@ class MessageDB:
     def recent_mappings(self, limit: int = 50) -> list[dict]:
         """Return up to *limit* recent message mappings, newest first.
 
-        Note: MessageMapping has no insertion timestamp, so "recent" here means
-        the rows SQLite returns last (rowid desc). This is good enough for a
-        live tail in the Workbench UI.
+        Note: "recent" here means highest platform_msg_id first (platform_msg_id
+        desc). This assumes platform_msg_id increases over time for a given
+        bridge/channel, which is sufficient for a live tail in the Workbench UI.
         """
         limit = max(1, min(int(limit), 500))
         with self._session() as s:

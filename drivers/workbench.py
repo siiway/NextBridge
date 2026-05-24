@@ -147,9 +147,25 @@ def _drivers_list(driver: "WorkbenchDriver", _params: dict) -> dict:
     return {"drivers": driver.bridge.senders_snapshot()}
 
 
+_REDACTED_RULE_KEYS = {"webhook_url", "token", "secret", "password", "access_token"}
+
+
+def _redact_rule(rule: dict) -> dict:
+    """Deep-copy a rule dict, replacing sensitive values with '***'."""
+    out: dict = {}
+    for k, v in rule.items():
+        if isinstance(v, dict):
+            out[k] = _redact_rule(v)
+        elif k.lower() in _REDACTED_RULE_KEYS and isinstance(v, str) and v:
+            out[k] = "***"
+        else:
+            out[k] = v
+    return out
+
+
 @_rpc("rules.list")
 def _rules_list(driver: "WorkbenchDriver", _params: dict) -> dict:
-    return {"rules": driver.bridge.rules_snapshot()}
+    return {"rules": [_redact_rule(r) for r in driver.bridge.rules_snapshot()]}
 
 
 @_rpc("rules.reload")
@@ -161,6 +177,7 @@ def _rules_reload(driver: "WorkbenchDriver", _params: dict) -> dict:
     UI is ready to drive them. Until then, users edit rules.{yaml,json,toml}
     on the NextBridge host directly and call this to pick up changes.
     """
+    driver.check_rules_reload_cooldown()
     before = len(driver.bridge.rules_snapshot())
     driver.bridge.load_rules()
     after = len(driver.bridge.rules_snapshot())
@@ -203,6 +220,13 @@ def _normalize_channel_addr(ch: dict) -> dict:
     return {k: v for k, v in ch.items() if k not in _NON_ADDRESS_KEYS}
 
 
+def _safe_int(value: object, default: int = -1) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 def _serialise_attachments(raw) -> list[dict]:  # type: ignore[no-untyped-def]
     """Project the bridge's ``Attachment`` dataclasses into JSON-friendly dicts.
 
@@ -229,7 +253,7 @@ def _serialise_attachments(raw) -> list[dict]:  # type: ignore[no-untyped-def]
                     "type": str(att.get("type", "")),
                     "url": str(att.get("url", "")),
                     "name": str(att.get("name", "")),
-                    "size": int(att.get("size", -1) or -1),
+                    "size": _safe_int(att.get("size", -1), -1),
                 }
             )
     return out
@@ -309,16 +333,57 @@ async def _chat_send(driver: "WorkbenchDriver", params: dict) -> dict:
     """
     channel = params.get("channel") or {}
     text = (params.get("text") or "").strip()
-    user = (params.get("user") or "").strip() or "workbench-user"
-    user_id = (params.get("user_id") or "").strip()
-    user_avatar = (params.get("user_avatar") or "").strip()
+    raw_user = (params.get("user") or "").strip() or "workbench-user"
+    raw_user_id = (params.get("user_id") or "").strip()
+    raw_user_avatar = (params.get("user_avatar") or "").strip()
 
     if not text:
         raise ValueError("text is required")
     if not isinstance(channel, dict):
         raise ValueError("channel must be an object")
+    # Limit message size — keeps a chatty client from flooding downstream
+    # platforms with multi-MB payloads. 4 KB covers normal IM traffic with
+    # margin; oversize messages are dropped, not silently truncated.
+    if len(text.encode("utf-8")) > 4096:
+        raise ValueError("text too long (max 4096 bytes)")
+
+    # Workbench's `user` / `user_id` fields are caller-supplied and untrusted.
+    # The legitimate Workbench Worker route fills them from the OAuth session,
+    # but a leaked token would let anyone forge them by hitting NB directly.
+    # Counter-measures:
+    #   1. Always tag the display name with a "[WB]" prefix so downstream
+    #      platforms (and humans) can tell forwarded-from-Workbench at a glance.
+    #   2. Sanitise user_id — strip anything that looks like a platform-native
+    #      identifier so it can never collide with another platform's user
+    #      lookup (e.g. a numeric string passed here cannot pose as a QQ uin
+    #      in mention resolution).
+    #   3. Cap field lengths to defang display-name injection / log spam.
+    user = ("[WB] " + raw_user)[:120]
+    # Namespace the user id under "wb:" so cross-platform user mapping code
+    # (services/db.UserMapping etc.) treats it as a Workbench identity, not
+    # something to confuse with native QQ / Discord uids.
+    user_id = ("wb:" + raw_user_id[:80]) if raw_user_id else ""
+    # Only allow https:// avatar URLs to stop the WB caller from injecting
+    # data:, javascript: or file:// targets that downstream renderers might
+    # follow blindly. Empty falls through to driver-side defaults.
+    user_avatar = (
+        raw_user_avatar
+        if raw_user_avatar.startswith("https://") and len(raw_user_avatar) <= 2048
+        else ""
+    )
+
+    driver.check_chat_send_rate()
 
     addr = _normalize_channel_addr(channel)
+
+    # Validate that this channel belongs to a rule this Workbench instance
+    # participates in — prevent sending through arbitrary channels.
+    valid_channels = _chat_channels(driver, {}).get("channels", [])
+    if not any(
+        a.get("address") == addr
+        for a in valid_channels
+    ):
+        raise ValueError("channel does not match any rule for this instance")
     message_id = f"wb-{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
 
@@ -390,7 +455,23 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
     ``send`` fires a ``chat.inbound`` event so the Workbench UI can render
     it. Messages typed in the Workbench UI come back as ``chat.send`` RPCs
     that go through ``bridge.on_message`` for normal fan-out.
+
+    Security posture: assume the WS link is reachable but never trusted to
+    behave correctly. Per-instance rate limits and a verified hello.ack
+    handshake guard against a compromised Workbench (or a tampered DNS)
+    from DoSing or impersonating the control plane.
     """
+
+    # --- Rate limits (per-WorkbenchDriver instance, in-memory) ----------
+    # chat.send: token bucket, 10 messages per 10 seconds. Enough for human
+    # typing including bursts; cuts off scripted flooding that would otherwise
+    # fan out to every platform in the rule.
+    _CHAT_SEND_BUCKET_CAPACITY = 10
+    _CHAT_SEND_BUCKET_WINDOW = 10.0
+    # rules.reload: minimum 5s between calls. Disk I/O is cheap but reload
+    # also rebuilds bridge state and rule_id matching is hashed at reload
+    # time, so back-to-back calls have measurable cost.
+    _RULES_RELOAD_COOLDOWN = 5.0
 
     def __init__(self, instance_id: str, config: WorkbenchConfig, bridge):
         super().__init__(instance_id, config, bridge)
@@ -399,6 +480,44 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         self._stop = asyncio.Event()
         self._event_buffer: asyncio.Queue[dict] = asyncio.Queue(maxsize=512)
         self._version: str = "UNKNOWN"
+        # Sliding-window timestamps for chat.send token bucket.
+        self._chat_send_timestamps: list[float] = []
+        # Last rules.reload wall-clock time; 0 means never.
+        self._last_rules_reload: float = 0.0
+        # Set true after the WB hello.ack arrives and matches expectations.
+        # All non-handshake RPC handling is gated on this.
+        self._handshake_ok: bool = False
+
+    # ------------------------------------------------------------------
+    # Rate limiting
+    # ------------------------------------------------------------------
+
+    def check_chat_send_rate(self) -> None:
+        """Raise RuntimeError if the chat.send bucket is empty."""
+        now = time.monotonic()
+        window = self._CHAT_SEND_BUCKET_WINDOW
+        # Drop timestamps outside the rolling window.
+        self._chat_send_timestamps = [
+            ts for ts in self._chat_send_timestamps if now - ts < window
+        ]
+        if len(self._chat_send_timestamps) >= self._CHAT_SEND_BUCKET_CAPACITY:
+            raise RuntimeError(
+                f"chat.send rate limit: max "
+                f"{self._CHAT_SEND_BUCKET_CAPACITY} per "
+                f"{int(self._CHAT_SEND_BUCKET_WINDOW)}s"
+            )
+        self._chat_send_timestamps.append(now)
+
+    def check_rules_reload_cooldown(self) -> None:
+        """Raise RuntimeError if rules.reload was called too recently."""
+        now = time.monotonic()
+        elapsed = now - self._last_rules_reload
+        if elapsed < self._RULES_RELOAD_COOLDOWN:
+            wait = self._RULES_RELOAD_COOLDOWN - elapsed
+            raise RuntimeError(
+                f"rules.reload cooldown: retry in {wait:.1f}s"
+            )
+        self._last_rules_reload = now
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -531,6 +650,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
             max_size=2**20,
         ) as ws:
             self._ws = ws
+            self._handshake_ok = False
             logger.info(f"Workbench [{self.instance_id}] connected")
             await self._send_json(
                 {
@@ -540,6 +660,43 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                     "version": self._version,
                     "command_prefix": self.bridge.command_prefix,
                 }
+            )
+
+            # Wait for hello.ack with a short timeout. We do this BEFORE
+            # launching any background tasks or replaying the event buffer
+            # so a misconfigured (or impersonating) WB doesn't get to see
+            # bridge events. If anything other than a successful ack with
+            # the expected instance_id arrives, close and reconnect.
+            try:
+                raw_ack = await asyncio.wait_for(ws.recv(), timeout=10)
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"Workbench [{self.instance_id}] hello.ack timeout; "
+                    f"closing and retrying"
+                )
+                return
+            try:
+                ack = json.loads(
+                    raw_ack.decode("utf-8") if isinstance(raw_ack, bytes) else raw_ack
+                )
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                logger.error(
+                    f"Workbench [{self.instance_id}] malformed hello.ack frame"
+                )
+                return
+            if (
+                ack.get("kind") != "hello.ack"
+                or not ack.get("ok")
+                or ack.get("instance_id") != self.config.workbench_instance_id
+            ):
+                logger.error(
+                    f"Workbench [{self.instance_id}] hello.ack rejected: {ack!r}"
+                )
+                return
+            self._handshake_ok = True
+            logger.info(
+                f"Workbench [{self.instance_id}] handshake complete "
+                f"(team={ack.get('team_id', '?')})"
             )
 
             await self._flush_buffer()
@@ -572,7 +729,12 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         try:
             while True:
                 event = await self._event_buffer.get()
-                await self._send_json(event)
+                if not await self._send_json(event):
+                    try:
+                        self._event_buffer.put_nowait(event)
+                    except asyncio.QueueFull:
+                        pass
+                    break
         except asyncio.CancelledError:
             return
 
@@ -583,7 +745,12 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                 event = self._event_buffer.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            await self._send_json(event)
+            if not await self._send_json(event):
+                try:
+                    self._event_buffer.put_nowait(event)
+                except asyncio.QueueFull:
+                    pass
+                break
             sent += 1
         if sent:
             logger.debug(
@@ -595,6 +762,16 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
     # ------------------------------------------------------------------
 
     async def _handle_incoming(self, raw: str | bytes) -> None:
+        # Refuse to act on any frame before the hello.ack handshake completed.
+        # _session() blocks on the ack before invoking us, so this branch is
+        # belt-and-braces — protects against future refactors that might
+        # interleave incoming frames with the handshake.
+        if not self._handshake_ok:
+            logger.warning(
+                f"Workbench [{self.instance_id}] pre-handshake frame dropped"
+            )
+            return
+
         try:
             text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
             frame = json.loads(text)
@@ -659,14 +836,15 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
             payload["error"] = error or "unknown error"
         await self._send_json(payload)
 
-    async def _send_json(self, payload: dict[str, Any]) -> None:
+    async def _send_json(self, payload: dict[str, Any]) -> bool:
         if self._ws is None:
-            return
+            return False
         async with self._send_lock:
             try:
                 await self._ws.send(
                     json.dumps(payload, ensure_ascii=False, default=str)
                 )
+                return True
             except Exception as exc:
                 logger.debug(
                     f"Workbench [{self.instance_id}] send failed "
@@ -676,6 +854,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                     await self._ws.close()
                 except Exception:
                     pass
+                return False
 
     # ------------------------------------------------------------------
     # Event buffering (shared by observer + send + chat.send)
@@ -705,12 +884,15 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                 if k in _NON_ADDRESS_KEYS:
                     continue
                 if k not in source_channel:
-                    continue
+                    ok = False
+                    break
                 if str(source_channel[k]) != str(v):
                     ok = False
                     break
             if ok:
-                out.append(str(rule.get("id", "")))
+                rid = str(rule.get("id", ""))
+                if rid:
+                    out.append(rid)
         return out
 
     def _buffer_event(self, topic: str, data: dict) -> None:
@@ -765,7 +947,8 @@ def _http_base(url: str) -> str:
     netloc = parsed.netloc or parsed.path
     if not netloc:
         raise SystemExit(f"Invalid workbench URL: {url}")
-    return f"{scheme}://{netloc}"
+    path = parsed.path.rstrip("/") if parsed.netloc else ""
+    return f"{scheme}://{netloc}{path}"
 
 
 def cmd_pair(

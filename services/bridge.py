@@ -195,7 +195,16 @@ class Bridge:
                 continue
             if asyncio.iscoroutine(result):
                 try:
-                    asyncio.create_task(result)
+                    task = asyncio.create_task(result)
+                    task.add_done_callback(
+                        lambda t, o=obs, tp=topic: (
+                            logger.warning(
+                                f"Async observer {o!r} raised for {tp}: {t.exception()}"
+                            )
+                            if not t.cancelled() and t.exception()
+                            else None
+                        )
+                    )
                 except RuntimeError:
                     # No running loop — observer must be sync-compatible.
                     logger.debug(
