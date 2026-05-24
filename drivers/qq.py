@@ -1756,7 +1756,8 @@ class QqDriver(BaseDriver[QqConfig]):
             else self._bilingual("有效", "Active")
         )
         return _get_forward_page_template().substitute(
-            title=title_html,
+            title=title,
+            title_html=title_html,
             meta_primary=meta_primary_html,
             meta_secondary=meta_secondary_html,
             meta_attachment=meta_attachment_html,

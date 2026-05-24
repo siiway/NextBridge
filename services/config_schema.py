@@ -58,7 +58,7 @@ class DatabaseConfig(BaseModel):
 class LoggingConfig(BaseModel):
     """Logging configuration for controlling log output and rotation."""
 
-    show_source: Literal["auto", "always", "never"] = "always"
+    show_source: Literal["auto", "always", "never"] = "auto"
     """Controls whether source file locations are shown in logs.
 
     - ``auto``: show source only for DEBUG/TRACE level messages.
