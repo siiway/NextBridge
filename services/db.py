@@ -736,7 +736,13 @@ class MessageDB:
             ]
 
     def list_user_bindings(self, limit: int = 200) -> list[dict]:
-        """Return up to *limit* user bindings grouped by global_user_id."""
+        """Return up to *limit* user bindings grouped by global_user_id.
+
+        Ordered by ``(global_user_id, instance_id)`` so callers (the
+        Workbench bindings UI in particular) get a stable, paginable list
+        instead of whatever physical row order the backend happens to
+        return.
+        """
         limit = max(1, min(int(limit), 1000))
         with self._session() as s:
             rows = s.execute(
@@ -744,7 +750,12 @@ class MessageDB:
                     UserBinding.global_user_id,
                     UserBinding.instance_id,
                     UserBinding.platform_user_id,
-                ).limit(limit)
+                )
+                .order_by(
+                    UserBinding.global_user_id.asc(),
+                    UserBinding.instance_id.asc(),
+                )
+                .limit(limit)
             ).all()
         grouped: dict[str, list[dict]] = {}
         for global_id, inst, uid in rows:

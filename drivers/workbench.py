@@ -180,6 +180,9 @@ def _rules_reload(driver: "WorkbenchDriver", _params: dict) -> dict:
     driver.check_rules_reload_cooldown()
     before = len(driver.bridge.rules_snapshot())
     driver.bridge.load_rules()
+    # Bust the lookup cache so subsequent bridge.message events route
+    # against the fresh rule set instead of the snapshot taken on first use.
+    driver.invalidate_rule_index()
     after = len(driver.bridge.rules_snapshot())
     return {"before": before, "after": after}
 
@@ -487,6 +490,13 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         # Set true after the WB hello.ack arrives and matches expectations.
         # All non-handshake RPC handling is gated on this.
         self._handshake_ok: bool = False
+        # instance_id → list[(rule_id, address_spec_dict)]. Lazily built on
+        # first `_matching_rule_ids` call, invalidated by `rules.reload`.
+        # Avoids re-scanning every rule on every inbound bridge.message event.
+        self._rule_index: dict[str, list[tuple[str, dict]]] | None = None
+        # Throttled-log state for buffer-full drops.
+        self._drop_count: int = 0
+        self._last_drop_log: float = 0.0
 
     # ------------------------------------------------------------------
     # Rate limiting
@@ -684,6 +694,15 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                     f"Workbench [{self.instance_id}] malformed hello.ack frame"
                 )
                 return
+            # Valid JSON doesn't have to be an object — `[]`, `"x"`, `null`,
+            # numbers, etc. all parse but would AttributeError on `.get`.
+            # Treat non-dicts as a handshake failure rather than crash.
+            if not isinstance(ack, dict):
+                logger.error(
+                    f"Workbench [{self.instance_id}] hello.ack not an object: "
+                    f"{type(ack).__name__}"
+                )
+                return
             if (
                 ack.get("kind") != "hello.ack"
                 or not ack.get("ok")
@@ -860,6 +879,34 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
     # Event buffering (shared by observer + send + chat.send)
     # ------------------------------------------------------------------
 
+    def _build_rule_index(self) -> dict[str, list[tuple[str, dict]]]:
+        """Build the (instance_id) → [(rule_id, address_spec)] index.
+
+        For each rule, look at its source slot (``from`` for forward,
+        ``channels`` for connect) and append every instance reference.
+        At lookup time we only iterate the rules that mention the source
+        instance, which collapses the per-event cost from O(rules) to
+        O(rules-touching-this-instance) — usually 0-3 entries.
+        """
+        index: dict[str, list[tuple[str, dict]]] = {}
+        for rule in self.bridge.rules_snapshot():
+            slot = "channels" if rule.get("type") == "connect" else "from"
+            block = rule.get(slot)
+            if not isinstance(block, dict):
+                continue
+            rid = str(rule.get("id", ""))
+            if not rid:
+                continue
+            for inst_id, spec in block.items():
+                if not isinstance(spec, dict):
+                    continue
+                index.setdefault(inst_id, []).append((rid, spec))
+        return index
+
+    def invalidate_rule_index(self) -> None:
+        """Drop the cached rule index so the next lookup rebuilds it."""
+        self._rule_index = None
+
     def _matching_rule_ids(
         self, source_inst: str, source_channel: dict
     ) -> list[str]:
@@ -869,16 +916,15 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         Connect rules: match against ``rule.channels.<instance_id>``.
         Channel keys that aren't address fields (``msg``, ``webhook_url``)
         are ignored so format/webhook config doesn't break matching.
+
+        Uses ``self._rule_index`` for O(matching-rules) lookup; the index
+        is rebuilt lazily on first call after rules.reload invalidates it.
         """
+        if self._rule_index is None:
+            self._rule_index = self._build_rule_index()
+        candidates = self._rule_index.get(source_inst, ())
         out: list[str] = []
-        for rule in self.bridge.rules_snapshot():
-            slot = "channels" if rule.get("type") == "connect" else "from"
-            block = rule.get(slot)
-            if not isinstance(block, dict):
-                continue
-            spec = block.get(source_inst)
-            if not isinstance(spec, dict):
-                continue
+        for rid, spec in candidates:
             ok = True
             for k, v in spec.items():
                 if k in _NON_ADDRESS_KEYS:
@@ -890,16 +936,21 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                     ok = False
                     break
             if ok:
-                rid = str(rule.get("id", ""))
-                if rid:
-                    out.append(rid)
+                out.append(rid)
         return out
+
+    # Minimum seconds between successive drop-log emissions, so a sustained
+    # overflow doesn't spam the log file.
+    _DROP_LOG_INTERVAL = 30.0
 
     def _buffer_event(self, topic: str, data: dict) -> None:
         """Queue an event frame for delivery to the connected Workbench.
 
         Safe to call from sync or async contexts. If the queue is full
-        the oldest entry is dropped so the tail stays current under load.
+        the oldest entry is dropped so the tail stays current under load;
+        drops are counted and reported at most once per
+        ``_DROP_LOG_INTERVAL`` seconds so backpressure is observable
+        without spamming the logger.
         """
         event = {
             "kind": "event",
@@ -909,15 +960,34 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         }
         try:
             self._event_buffer.put_nowait(event)
+            return
         except asyncio.QueueFull:
-            try:
-                _ = self._event_buffer.get_nowait()
-            except asyncio.QueueEmpty:
-                return
-            try:
-                self._event_buffer.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
+            pass
+
+        # Buffer is full — drop oldest and replace.
+        try:
+            _ = self._event_buffer.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+        try:
+            self._event_buffer.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
+
+        # Record the drop and emit a throttled warning so an operator can
+        # spot persistent backpressure (slow / disconnected WB, queue too
+        # small) without searching for "silently dropped".
+        self._drop_count += 1
+        now = time.monotonic()
+        if now - self._last_drop_log >= self._DROP_LOG_INTERVAL:
+            logger.warning(
+                f"Workbench [{self.instance_id}] event buffer full; "
+                f"dropped {self._drop_count} oldest event(s) since last log "
+                f"(buffer maxsize={self._event_buffer.maxsize}, "
+                f"current={self._event_buffer.qsize()})"
+            )
+            self._drop_count = 0
+            self._last_drop_log = now
 
     def _on_bridge_event(self, topic: str, data: dict) -> Awaitable[None] | None:
         # Best-effort enrichment: tag bridge.message frames with the rule ids
