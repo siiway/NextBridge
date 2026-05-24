@@ -270,58 +270,12 @@ def _chat_channels(driver: "WorkbenchDriver", _params: dict) -> dict:
     instance — i.e. an interconnection group. The response carries the
     Workbench-side address plus the peer instances participating in the
     same group so the frontend can render the full group composition.
+
+    Computation lives on the driver (``_compute_chat_channels``) and is
+    cached + invalidated alongside the rule index. This handler is just
+    a thin accessor so the result is shared with ``chat.send`` validation.
     """
-    inst = driver.instance_id
-    senders = {
-        s["instance_id"]: s.get("platform") or ""
-        for s in driver.bridge.senders_snapshot()
-    }
-    seen_keys: set[str] = set()
-    out: list[dict] = []
-    for rule in driver.bridge.rules_snapshot():
-        for slot in ("to", "channels"):
-            block = rule.get(slot)
-            if not isinstance(block, dict):
-                continue
-            ch = block.get(inst)
-            if not isinstance(ch, dict):
-                continue
-
-            addr = _normalize_channel_addr(ch)
-            # Group identity is the (rule_id, workbench address) tuple so a
-            # single rule that lists Workbench in both `to` and `channels`
-            # (degenerate but possible) doesn't show up twice.
-            rule_id = str(rule.get("id", ""))
-            key = rule_id + "|" + json.dumps(
-                addr, sort_keys=True, ensure_ascii=True, default=str
-            )
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-
-            peers: list[dict] = []
-            for peer_inst, peer_ch in block.items():
-                if peer_inst == inst:
-                    continue
-                if not isinstance(peer_ch, dict):
-                    continue
-                peers.append(
-                    {
-                        "instance_id": peer_inst,
-                        "platform": senders.get(peer_inst, ""),
-                        "address": _normalize_channel_addr(peer_ch),
-                    }
-                )
-
-            out.append(
-                {
-                    "rule_id": rule_id,
-                    "rule_type": str(rule.get("type", "forward")),
-                    "address": addr,
-                    "peers": peers,
-                }
-            )
-    return {"channels": out}
+    return driver._get_chat_channels()
 
 
 @_rpc("chat.send")
@@ -381,11 +335,9 @@ async def _chat_send(driver: "WorkbenchDriver", params: dict) -> dict:
 
     # Validate that this channel belongs to a rule this Workbench instance
     # participates in — prevent sending through arbitrary channels.
-    valid_channels = _chat_channels(driver, {}).get("channels", [])
-    if not any(
-        a.get("address") == addr
-        for a in valid_channels
-    ):
+    # O(1) lookup against the cached chat-channels set (invalidated on
+    # rules.reload). Avoids rescanning all rules per send.
+    if not driver._is_valid_chat_channel(addr):
         raise ValueError("channel does not match any rule for this instance")
     message_id = f"wb-{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
@@ -494,6 +446,12 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         # first `_matching_rule_ids` call, invalidated by `rules.reload`.
         # Avoids re-scanning every rule on every inbound bridge.message event.
         self._rule_index: dict[str, list[tuple[str, dict]]] | None = None
+        # Cached `chat.channels` response (this instance's addressable groups
+        # + peers) plus a set of canonical address keys for O(1) chat.send
+        # validation. Both fall out of the same rules-snapshot scan, so we
+        # compute them together and bust them together on rules.reload.
+        self._chat_channels_cache: dict | None = None
+        self._chat_channel_keys: set[str] | None = None
         # Throttled-log state for buffer-full drops.
         self._drop_count: int = 0
         self._last_drop_log: float = 0.0
@@ -797,6 +755,15 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             logger.warning(f"Workbench [{self.instance_id}] bad frame ({exc})")
             return
+        # Valid JSON can be a list, string, number, null — none of which
+        # support `.get`. Treat non-objects as malformed instead of letting
+        # AttributeError leak out of the dispatch loop.
+        if not isinstance(frame, dict):
+            logger.warning(
+                f"Workbench [{self.instance_id}] frame not an object: "
+                f"{type(frame).__name__}"
+            )
+            return
 
         kind = frame.get("kind")
         if kind == "ping":
@@ -904,8 +871,95 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         return index
 
     def invalidate_rule_index(self) -> None:
-        """Drop the cached rule index so the next lookup rebuilds it."""
+        """Drop everything derived from the rules snapshot so the next
+        lookup rebuilds it. Called from the ``rules.reload`` RPC."""
         self._rule_index = None
+        self._chat_channels_cache = None
+        self._chat_channel_keys = None
+
+    def _compute_chat_channels(self) -> tuple[dict, set[str]]:
+        """Compute the chat.channels payload + the set of canonical
+        address keys eligible as chat.send targets.
+
+        Both fall out of the same scan over the rule snapshot: a workbench
+        channel is any block under ``rule.to`` (forward) or
+        ``rule.channels`` (connect) keyed by this driver's instance_id,
+        with the peers being the other instances in that same block.
+        """
+        inst = self.instance_id
+        senders = {
+            s["instance_id"]: s.get("platform") or ""
+            for s in self.bridge.senders_snapshot()
+        }
+        seen_keys: set[str] = set()
+        out: list[dict] = []
+        for rule in self.bridge.rules_snapshot():
+            for slot in ("to", "channels"):
+                block = rule.get(slot)
+                if not isinstance(block, dict):
+                    continue
+                ch = block.get(inst)
+                if not isinstance(ch, dict):
+                    continue
+
+                addr = _normalize_channel_addr(ch)
+                rule_id = str(rule.get("id", ""))
+                dedupe_key = rule_id + "|" + json.dumps(
+                    addr, sort_keys=True, ensure_ascii=True, default=str
+                )
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+
+                peers: list[dict] = []
+                for peer_inst, peer_ch in block.items():
+                    if peer_inst == inst:
+                        continue
+                    if not isinstance(peer_ch, dict):
+                        continue
+                    peers.append(
+                        {
+                            "instance_id": peer_inst,
+                            "platform": senders.get(peer_inst, ""),
+                            "address": _normalize_channel_addr(peer_ch),
+                        }
+                    )
+
+                out.append(
+                    {
+                        "rule_id": rule_id,
+                        "rule_type": str(rule.get("type", "forward")),
+                        "address": addr,
+                        "peers": peers,
+                    }
+                )
+        # Address-only canonical key set for chat.send validation.
+        keys = {
+            json.dumps(
+                entry["address"], sort_keys=True, ensure_ascii=True, default=str
+            )
+            for entry in out
+        }
+        return {"channels": out}, keys
+
+    def _get_chat_channels(self) -> dict:
+        """Cached form of `_compute_chat_channels` — the channels payload."""
+        if self._chat_channels_cache is None:
+            payload, keys = self._compute_chat_channels()
+            self._chat_channels_cache = payload
+            self._chat_channel_keys = keys
+        return self._chat_channels_cache
+
+    def _is_valid_chat_channel(self, addr: dict) -> bool:
+        """O(1) test that *addr* is among the cached chat channels."""
+        if self._chat_channel_keys is None:
+            # Force a build via the cached accessor.
+            self._get_chat_channels()
+        assert self._chat_channel_keys is not None  # for type narrowing
+        key = json.dumps(
+            addr, sort_keys=True, ensure_ascii=True, default=str
+        )
+        return key in self._chat_channel_keys
 
     def _matching_rule_ids(
         self, source_inst: str, source_channel: dict
@@ -1010,14 +1064,37 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
 
 
 def _http_base(url: str) -> str:
-    parsed = urlparse(url.strip())
-    scheme = parsed.scheme.lower() or "https"
+    """Normalise a user-typed Workbench URL into ``scheme://host[:port][/path]``.
+
+    Without a scheme prefix, ``urlparse`` misclassifies inputs like
+    ``host:8080/path`` (it interprets ``host`` as the scheme name) and
+    ``host/path`` (the whole thing lands in ``parsed.path`` with empty
+    netloc). We force an ``https://`` prefix when no ``://`` is present
+    so the parser produces the host / path split the user actually meant.
+    """
+    raw = url.strip()
+    if not raw:
+        raise SystemExit(f"Invalid workbench URL: {url}")
+    if "://" not in raw:
+        # Schemeless input — prepend https before parsing so urlparse can
+        # split host:port and path correctly.
+        raw = "https://" + raw
+
+    parsed = urlparse(raw)
+    scheme = parsed.scheme.lower()
     if scheme not in ("http", "https"):
+        # Coerce odd schemes (file:, javascript:, ftp:, ...) to https and
+        # re-parse so the rest of the URL is interpreted against the safe
+        # scheme — the cmd_pair output is written to config.yaml and used
+        # by the runtime client, we don't want exotic schemes flowing on.
+        netloc_or_path = parsed.netloc or parsed.path
+        parsed = urlparse("https://" + netloc_or_path)
         scheme = "https"
-    netloc = parsed.netloc or parsed.path
+
+    netloc = parsed.netloc
     if not netloc:
         raise SystemExit(f"Invalid workbench URL: {url}")
-    path = parsed.path.rstrip("/") if parsed.netloc else ""
+    path = parsed.path.rstrip("/")
     return f"{scheme}://{netloc}{path}"
 
 

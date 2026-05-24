@@ -742,6 +742,13 @@ class MessageDB:
         Workbench bindings UI in particular) get a stable, paginable list
         instead of whatever physical row order the backend happens to
         return.
+
+        The result list is built in row order — we append a new entry the
+        first time each ``global_user_id`` shows up, then attach further
+        ``(instance_id, platform_user_id)`` pairs to that same entry's
+        ``accounts`` list. This way the SQL ORDER BY is honoured by the
+        returned list directly, without relying on dict insertion-order
+        semantics for the outer iteration.
         """
         limit = max(1, min(int(limit), 1000))
         with self._session() as s:
@@ -757,15 +764,18 @@ class MessageDB:
                 )
                 .limit(limit)
             ).all()
-        grouped: dict[str, list[dict]] = {}
+        result: list[dict] = []
+        by_global: dict[str, dict] = {}
         for global_id, inst, uid in rows:
-            grouped.setdefault(global_id, []).append(
+            entry = by_global.get(global_id)
+            if entry is None:
+                entry = {"global_user_id": global_id, "accounts": []}
+                by_global[global_id] = entry
+                result.append(entry)
+            entry["accounts"].append(
                 {"instance_id": inst, "platform_user_id": uid}
             )
-        return [
-            {"global_user_id": gid, "accounts": accs}
-            for gid, accs in grouped.items()
-        ]
+        return result
 
     def get_bridge_id(self, instance_id: str, platform_msg_id: str) -> str | None:
         """Find the bridge ID for a given platform-specific message ID."""
