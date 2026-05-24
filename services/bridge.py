@@ -75,6 +75,11 @@ class Bridge:
         self._sensitive: frozenset[str] = frozenset()
         self.strict_echo_match: bool = False
         self.command_prefix: str = "nb"
+        # Read-only observers (e.g. the Workbench client). Each entry is a
+        # callable that accepts ``(topic: str, data: dict)`` and either
+        # returns None or an awaitable. Exceptions are swallowed so observers
+        # never break the routing path.
+        self._observers: list[Callable[[str, dict], Any]] = []
 
     # ------------------------------------------------------------------
     # Setup
@@ -149,6 +154,53 @@ class Bridge:
 
         self._senders[instance_id] = (platform, send_func)
         logger.debug(f"Registered sender for instance: {instance_id}")
+        self._fire_event(
+            "driver.status",
+            {"instance_id": instance_id, "platform": platform, "connected": True},
+        )
+
+    def senders_snapshot(self) -> list[dict]:
+        """Return a serialisable snapshot of registered senders for observers."""
+        return [
+            {"instance_id": inst, "platform": platform}
+            for inst, (platform, _) in self._senders.items()
+        ]
+
+    def rules_snapshot(self) -> list[dict]:
+        """Return a shallow copy of the current rules list."""
+        return [dict(r) for r in self._rules]
+
+    # ------------------------------------------------------------------
+    # Observers (read-only event taps; never block dispatch)
+    # ------------------------------------------------------------------
+
+    def register_observer(self, callback: Callable[[str, dict], Any]) -> None:
+        """Register a fire-and-forget observer.
+
+        Observers receive ``(topic, data)`` tuples for events the bridge fires
+        (e.g. ``bridge.message``, ``driver.status``). Sync callbacks are
+        invoked directly; coroutines are scheduled via ``asyncio.create_task``.
+        Any exception is logged and swallowed.
+        """
+        self._observers.append(callback)
+
+    def _fire_event(self, topic: str, data: dict) -> None:
+        if not self._observers:
+            return
+        for obs in self._observers:
+            try:
+                result = obs(topic, data)
+            except Exception as exc:
+                logger.warning(f"Observer {obs!r} raised for {topic}: {exc}")
+                continue
+            if asyncio.iscoroutine(result):
+                try:
+                    asyncio.create_task(result)
+                except RuntimeError:
+                    # No running loop — observer must be sync-compatible.
+                    logger.debug(
+                        f"Observer {obs!r} returned coroutine but no loop running"
+                    )
 
     def _get_command_prefix(self) -> str:
         prefix = (self.command_prefix or "nb").strip().lstrip("/")
@@ -297,6 +349,19 @@ class Bridge:
 
     async def on_message(self, msg: NormalizedMessage):
         logger.info(f"on_message: {msg!s}")
+        self._fire_event(
+            "bridge.message",
+            {
+                "instance_id": msg.instance_id,
+                "platform": msg.platform,
+                "channel": msg.channel,
+                "user": msg.user,
+                "user_id": msg.user_id,
+                "text": msg.text,
+                "message_id": msg.message_id,
+                "time": msg.time,
+            },
+        )
         ping_nickname = self._parse_ping_command(msg.text)
         if ping_nickname is not None:
             if not ping_nickname:

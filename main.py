@@ -253,11 +253,33 @@ if __name__ == "__main__":
     conv.add_argument("src", help="Source config file (e.g. config.json)")
     conv.add_argument("dst", help="Destination config file (e.g. config.yaml)")
 
+    wb = subparsers.add_parser(
+        "workbench", help="Workbench control-plane management"
+    )
+    wb_sub = wb.add_subparsers(dest="workbench_command")
+    pair = wb_sub.add_parser(
+        "pair", help="Exchange a one-time code for a long-lived token"
+    )
+    pair.add_argument("workbench_url", help="e.g. https://dash.siiway.org")
+    pair.add_argument("code", help="One-time pairing code from the Workbench UI")
+    pair.add_argument(
+        "--name", dest="name", default=None, help="Optional instance label"
+    )
+
     args = parser.parse_args()
 
     if args.command == "convert":
         cmd_convert(args.src, args.dst)
         sys.exit(0)
+
+    if args.command == "workbench":
+        if args.workbench_command == "pair":
+            from drivers.workbench import cmd_pair
+
+            cmd_pair(args.workbench_url, args.code, args.name)
+            sys.exit(0)
+        wb.print_help()
+        sys.exit(1)
 
     try:
         asyncio.run(main())

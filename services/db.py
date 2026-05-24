@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     delete,
+    func,
     select,
     update,
 )
@@ -684,6 +685,76 @@ class MessageDB:
             )
             s.commit()
             return int(getattr(result, "rowcount", 0) or 0)
+
+    # ------------------------------------------------------------------
+    # Aggregate read helpers (used by the Workbench RPC surface)
+    # ------------------------------------------------------------------
+
+    def stats(self) -> dict[str, int]:
+        """Return row counts across the mapping tables."""
+        with self._session() as s:
+            return {
+                "message_mappings": int(
+                    s.execute(select(func.count()).select_from(MessageMapping)).scalar() or 0
+                ),
+                "user_mappings": int(
+                    s.execute(select(func.count()).select_from(UserMapping)).scalar() or 0
+                ),
+                "user_bindings": int(
+                    s.execute(select(func.count()).select_from(UserBinding)).scalar() or 0
+                ),
+                "binding_codes": int(
+                    s.execute(select(func.count()).select_from(BindingCode)).scalar() or 0
+                ),
+            }
+
+    def recent_mappings(self, limit: int = 50) -> list[dict]:
+        """Return up to *limit* recent message mappings, newest first.
+
+        Note: MessageMapping has no insertion timestamp, so "recent" here means
+        the rows SQLite returns last (rowid desc). This is good enough for a
+        live tail in the Workbench UI.
+        """
+        limit = max(1, min(int(limit), 500))
+        with self._session() as s:
+            rows = s.execute(
+                select(
+                    MessageMapping.bridge_id,
+                    MessageMapping.instance_id,
+                    MessageMapping.channel_id,
+                    MessageMapping.platform_msg_id,
+                ).order_by(MessageMapping.platform_msg_id.desc()).limit(limit)
+            ).all()
+            return [
+                {
+                    "bridge_id": r[0],
+                    "instance_id": r[1],
+                    "channel_id": r[2],
+                    "platform_msg_id": r[3],
+                }
+                for r in rows
+            ]
+
+    def list_user_bindings(self, limit: int = 200) -> list[dict]:
+        """Return up to *limit* user bindings grouped by global_user_id."""
+        limit = max(1, min(int(limit), 1000))
+        with self._session() as s:
+            rows = s.execute(
+                select(
+                    UserBinding.global_user_id,
+                    UserBinding.instance_id,
+                    UserBinding.platform_user_id,
+                ).limit(limit)
+            ).all()
+        grouped: dict[str, list[dict]] = {}
+        for global_id, inst, uid in rows:
+            grouped.setdefault(global_id, []).append(
+                {"instance_id": inst, "platform_user_id": uid}
+            )
+        return [
+            {"global_user_id": gid, "accounts": accs}
+            for gid, accs in grouped.items()
+        ]
 
     def get_bridge_id(self, instance_id: str, platform_msg_id: str) -> str | None:
         """Find the bridge ID for a given platform-specific message ID."""
