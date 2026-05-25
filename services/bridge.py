@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import json
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -9,8 +8,9 @@ import services.logger as log
 from services import config, cqface
 from services.db import msg_db
 from services.message import NormalizedMessage
+from services.message_format import parse_richheader_tag
 
-logger = log.get_logger()
+logger = log.get_logger("bridge")
 
 # Config keys whose values are treated as credentials and must never appear in
 # outgoing messages.  Matched as substrings against lower-cased key names.
@@ -21,26 +21,6 @@ _SENSITIVE_KEY_PATTERNS = (
     "webhook_url",
     "access_token",
 )
-
-# Rich-header tag: <richheader title="..." content="..."/>
-_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
-_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
-
-
-def _parse_richheader(text: str) -> tuple[str, dict | None]:
-    """
-    Extract a ``<richheader title="..." content="..."/>`` tag from *text*.
-
-    Returns ``(clean_text, attrs_dict)`` where *clean_text* has the tag
-    (and any directly adjacent whitespace) stripped.  *attrs_dict* is
-    ``None`` when no tag is found.
-    """
-    m = _RICHHEADER_RE.search(text)
-    if not m:
-        return text, None
-    attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[: m.start()] + text[m.end() :]).strip()
-    return clean, attrs or None
 
 
 def _collect_sensitive(obj, found: set[str]) -> None:
@@ -74,6 +54,7 @@ class Bridge:
         self._senders: dict[str, tuple[str | None, Callable]] = {}
         self._sensitive: frozenset[str] = frozenset()
         self.strict_echo_match: bool = False
+        self.fuzzy_mention_match: bool = False
         self.command_prefix: str = "nb"
         # Read-only observers (e.g. the Workbench client). Each entry is a
         # callable that accepts ``(topic: str, data: dict)`` and either
@@ -253,6 +234,21 @@ class Bridge:
         args = parts[2:] if len(parts) > 2 else []
         return action, args
 
+    def _is_allowed_command_source(self, msg: NormalizedMessage) -> bool:
+        """Return True when message source exists in any configured rule source."""
+        for rule in self._rules:
+            if rule.get("type") == "connect":
+                channels = rule.get("channels", {})
+                if isinstance(channels, dict) and self._matches_channel(msg, channels):
+                    return True
+                continue
+
+            from_cfg = rule.get("from", {})
+            if isinstance(from_cfg, dict) and self._matches_from(msg, from_cfg):
+                return True
+
+        return False
+
     async def _handle_bind_setup_command(self, msg: NormalizedMessage):
         """Generate a 6-digit binding code for the user."""
         import random
@@ -386,6 +382,13 @@ class Bridge:
         # Handle internal commands
         command = self._parse_internal_command(msg.text)
         if command is not None:
+            if not self._is_allowed_command_source(msg):
+                logger.debug(
+                    f"Ignored command from non-configured channel: "
+                    f"instance={msg.instance_id} channel={msg.channel}"
+                )
+                return
+
             action, args = command
             sender_info = self._senders.get(msg.instance_id)
             if action in ("", "help"):
@@ -538,7 +541,7 @@ class Bridge:
             logger.warning(f"msg_format missing key {e}; using raw text")
             formatted = msg.text
 
-        formatted, rich_header = _parse_richheader(formatted)
+        formatted, rich_header = parse_richheader_tag(formatted)
 
         extra: dict = {}
         # Always pass the original message context to extra for drivers to use
@@ -587,18 +590,24 @@ class Bridge:
             if target_uid:
                 return target_uid
 
-        if target_instance == "qq":
-            # QQ target addressing uses numeric QQ id or qid alias.
-            if mention_id.isdigit():
-                return mention_id
-            if mention_name.isdigit():
-                return mention_name
-            if mention_name:
-                return msg_db().get_user_id_by_name(target_instance, mention_name)
-            return None
+        if self.fuzzy_mention_match and mention_name:
+            fuzzy_target_uid = msg_db().get_user_id_by_name(
+                target_instance, mention_name
+            )
+            if fuzzy_target_uid:
+                return fuzzy_target_uid
 
-        if mention_name:
-            return msg_db().get_user_id_by_name(target_instance, mention_name)
+        target_platform = target_instance
+        if target_instance in self._senders:
+            target_platform = self._senders[target_instance][0]
+
+        if target_platform == "qq":
+            # QQ target addressing uses numeric QQ id or qid alias.
+            if msg.platform == "qq" and mention_id.isdigit():
+                return mention_id
+            if msg.platform == "qq" and mention_name.isdigit():
+                return mention_name
+            return None
 
         return None
 
@@ -686,9 +695,16 @@ class Bridge:
                     **extra_out,
                 )
                 if new_msg_id:
-                    msg_db().save_mapping(
-                        bridge_id, target_id, target_channel, str(new_msg_id)
-                    )
+                    if isinstance(new_msg_id, list):
+                        for m_id in new_msg_id:
+                            if m_id:
+                                msg_db().save_mapping(
+                                    bridge_id, target_id, target_channel, str(m_id)
+                                )
+                    else:
+                        msg_db().save_mapping(
+                            bridge_id, target_id, target_channel, str(new_msg_id)
+                        )
             except Exception as e:
                 logger.error(f"Failed to send to '{target_id}': {e}")
 
@@ -791,9 +807,16 @@ class Bridge:
                     **extra_out,
                 )
                 if new_msg_id:
-                    msg_db().save_mapping(
-                        bridge_id, target_id, target_channel, str(new_msg_id)
-                    )
+                    if isinstance(new_msg_id, list):
+                        for m_id in new_msg_id:
+                            if m_id:
+                                msg_db().save_mapping(
+                                    bridge_id, target_id, target_channel, str(m_id)
+                                )
+                    else:
+                        msg_db().save_mapping(
+                            bridge_id, target_id, target_channel, str(new_msg_id)
+                        )
             except asyncio.CancelledError:
                 logger.info(f"Message dispatch cancelled during send to {target_id}")
                 # Don't return - continue to process other targets

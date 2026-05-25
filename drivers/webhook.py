@@ -30,10 +30,10 @@ import aiohttp
 from aiohttp_socks import ProxyConnector
 from pydantic import Field
 
-import services.logger as log
 from services.message import Attachment
 from services.config_schema import _DriverConfig
 from services.config import get_proxy, UNSET
+from services.message_format import apply_rich_header
 from drivers import BaseDriver
 
 
@@ -42,9 +42,6 @@ class WebhookConfig(_DriverConfig):
     method: Literal["POST", "PUT", "PATCH"] = "POST"
     headers: dict[str, str] = Field(default_factory=dict)
     proxy: str | None = UNSET
-
-
-logger = log.get_logger()
 
 
 class WebhookDriver(BaseDriver[WebhookConfig]):
@@ -60,15 +57,13 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
     async def start(self):
         if self._proxy:
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
-            logger.debug(f"Webhook [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {self._proxy}")
         else:
             connector = aiohttp.TCPConnector(ssl=True)
 
         self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
-        logger.info(
-            f"Webhook [{self.instance_id}] send-only, targeting {self.config.url}"
-        )
+        self.logger.info(f"send-only, targeting {self.config.url}")
 
     # ------------------------------------------------------------------
     # Send
@@ -82,16 +77,12 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
         **kwargs,
     ):
         if self._session is None:
-            logger.warning(
-                f"Webhook [{self.instance_id}] session not ready, message dropped"
-            )
+            self.logger.warning("session not ready, message dropped")
             return
 
         rich_header = kwargs.pop("rich_header", None)
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         payload: dict = {
             "text": text,
@@ -118,12 +109,9 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
             ) as resp:
                 if resp.status not in (200, 201, 202, 204):
                     body = await resp.text()
-                    logger.error(
-                        f"Webhook [{self.instance_id}] send failed "
-                        f"HTTP {resp.status}: {body[:200]}"
-                    )
+                    self.logger.error(f"send failed HTTP {resp.status}: {body[:200]}")
         except Exception as e:
-            logger.error(f"Webhook [{self.instance_id}] send failed: {e}")
+            self.logger.error(f"send failed: {e}")
 
 
 register("webhook", WebhookConfig, WebhookDriver)

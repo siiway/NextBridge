@@ -34,16 +34,12 @@ from neonize.utils.jid import Jid2String, build_jid
 
 from drivers import BaseDriver
 from drivers.registry import register
-import services.logger as log
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
 
 
 class WhatsAppConfig(_DriverConfig):
     storage_dir: str = ""  # defaults to ~/.nextbridge/whatsapp/<instance_id>.db
-
-
-logger = log.get_logger()
 
 
 class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
@@ -64,28 +60,28 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
 
         @client.event(ConnectedEv)
         async def on_connected(_c: NewAClient, _e: ConnectedEv) -> None:
-            logger.info(f"WhatsApp [{self.instance_id}] connected")
+            self.logger.info("connected")
 
         @client.event(DisconnectedEv)
         async def on_disconnected(_c: NewAClient, _e: DisconnectedEv) -> None:
-            logger.warning(f"WhatsApp [{self.instance_id}] disconnected")
+            self.logger.warning("disconnected")
 
         @client.event(QREv)
         async def on_qr(_c: NewAClient, _e: QREv) -> None:
-            logger.info(
+            self.logger.info(
                 f"WhatsApp [{self.instance_id}] QR code displayed — scan it in the terminal"
             )
 
         @client.event(PairStatusEv)
         async def on_pair(_c: NewAClient, evt: PairStatusEv) -> None:
-            logger.info(f"WhatsApp [{self.instance_id}] logged in as {evt.ID.User}")
+            self.logger.info(f"logged in as {evt.ID.User}")
 
         @client.event(MessageEv)
         async def on_message(_c: NewAClient, evt: MessageEv) -> None:
             try:
                 await self._handle(evt)
             except Exception as e:
-                logger.error(
+                self.logger.error(
                     f"WhatsApp [{self.instance_id}] message handler error: {e}"
                 )
 
@@ -162,7 +158,7 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
     ) -> str | None:
         chat_id = channel.get("chat_id")
         if not chat_id or not self._client:
-            logger.warning(f"WhatsApp [{self.instance_id}] send: not ready")
+            self.logger.warning("send: not ready")
             return None
 
         user, server = (
@@ -180,7 +176,7 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
             result = await self._client.send_message(jid, body)
             return result.ID if result else None
         except Exception as e:
-            logger.error(f"WhatsApp [{self.instance_id}] send failed: {e}")
+            self.logger.error(f"send failed: {e}")
             return None
 
 

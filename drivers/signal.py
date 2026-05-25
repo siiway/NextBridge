@@ -29,10 +29,10 @@ import mimetypes
 import aiohttp
 from aiohttp_socks import ProxyConnector
 
-import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.message_format import apply_rich_header
 from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
@@ -42,19 +42,6 @@ class SignalConfig(_DriverConfig):
     number: str
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
-
-
-logger = log.get_logger()
-
-
-def _content_type_to_att_type(ct: str) -> str:
-    if ct.startswith("image/"):
-        return "image"
-    if ct.startswith("video/"):
-        return "video"
-    if ct.startswith("audio/"):
-        return "voice"
-    return "file"
 
 
 class SignalDriver(BaseDriver[SignalConfig]):
@@ -72,7 +59,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
         number = self.config.number
 
         if self._proxy:
-            logger.debug(f"Signal [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {self._proxy}")
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
             self._session = aiohttp.ClientSession(connector=connector)
         else:
@@ -81,13 +68,13 @@ class SignalDriver(BaseDriver[SignalConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
 
         ws_url = f"{api_url}/v1/receive/{number}"
-        logger.info(f"Signal [{self.instance_id}] connecting to {ws_url}")
+        self.logger.info(f"connecting to {ws_url}")
 
         try:
             while True:
                 try:
                     async with self._session.ws_connect(ws_url) as ws:
-                        logger.info(f"Signal [{self.instance_id}] connected")
+                        self.logger.info("connected")
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 try:
@@ -95,9 +82,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
                                         json.loads(msg.data), api_url
                                     )
                                 except Exception as e:
-                                    logger.error(
-                                        f"Signal [{self.instance_id}] handler error: {e}"
-                                    )
+                                    self.logger.error(f"handler error: {e}")
                             elif msg.type in (
                                 aiohttp.WSMsgType.CLOSE,
                                 aiohttp.WSMsgType.ERROR,
@@ -105,9 +90,9 @@ class SignalDriver(BaseDriver[SignalConfig]):
                             ):
                                 break
                 except aiohttp.ClientError as e:
-                    logger.error(f"Signal [{self.instance_id}] connection error: {e}")
+                    self.logger.error(f"connection error: {e}")
 
-                logger.info(f"Signal [{self.instance_id}] reconnecting in 5 s...")
+                self.logger.info("reconnecting in 5 s...")
                 await asyncio.sleep(5)
         finally:
             await self._session.close()
@@ -171,7 +156,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
             att_id = att_info.get("id", "")
             ct = att_info.get("contentType", "application/octet-stream")
             fname = att_info.get("filename") or self._fallback_name(ct)
-            att_type = _content_type_to_att_type(ct)
+            att_type = media.mime_to_attachment_type(ct)
             size = att_info.get("size", -1)
 
             att_url = f"{api_url}/v1/attachments/{att_id}"
@@ -222,12 +207,10 @@ class SignalDriver(BaseDriver[SignalConfig]):
 
         recipient = channel.get("recipient")
         if not recipient:
-            logger.warning(
-                f"Signal [{self.instance_id}] send: no recipient in channel {channel}"
-            )
+            self.logger.warning(f"send: no recipient in channel {channel}")
             return
         if self._session is None:
-            logger.warning(f"Signal [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return
 
         api_url = self.config.api_url.rstrip("/")
@@ -235,9 +218,7 @@ class SignalDriver(BaseDriver[SignalConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         if reply_to_id:
             text = f"> [Reply]\n{text}"
@@ -304,12 +285,9 @@ class SignalDriver(BaseDriver[SignalConfig]):
             async with self._session.post(f"{api_url}/v2/send", json=payload) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    logger.error(
-                        f"Signal [{self.instance_id}] send failed "
-                        f"HTTP {resp.status}: {body}"
-                    )
+                    self.logger.error(f"send failed HTTP {resp.status}: {body}")
         except Exception as e:
-            logger.error(f"Signal [{self.instance_id}] send error: {e}")
+            self.logger.error(f"send error: {e}")
 
 
 register("signal", SignalConfig, SignalDriver)

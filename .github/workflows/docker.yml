@@ -9,17 +9,17 @@ on:
       - ".github/**"
       - "docs/**"
       - "**/*.md"
-  pull_request:
-    branches:
-      - main
-      - 0.*-dev
+  # pull_request:
+  #   branches:
+  #     - main
+  #     - 0.*-dev
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   DOCKERHUB_REGISTRY: docker.io
-  DOCKERHUB_IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/${{ github.repository }}
+  DOCKERHUB_IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/nextbridge
 
 jobs:
   build-and-push:
@@ -68,7 +68,6 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:

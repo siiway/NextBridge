@@ -30,13 +30,13 @@ from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header
 
 
 class VoceChatConfig(_DriverConfig):
@@ -45,19 +45,6 @@ class VoceChatConfig(_DriverConfig):
     listen_path: str = "/vocechat/webhook"
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
-
-
-logger = log.get_logger()
-
-
-def _mime_to_att_type(mime: str) -> str:
-    if mime.startswith("image/"):
-        return "image"
-    if mime.startswith("video/"):
-        return "video"
-    if mime.startswith("audio/"):
-        return "voice"
-    return "file"
 
 
 class VoceChatDriver(BaseDriver[VoceChatConfig]):
@@ -74,7 +61,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
 
     async def start(self):
         if self._proxy:
-            logger.info(f"VoceChat [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.info(f"using proxy {self._proxy}")
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
         else:
             connector = aiohttp.TCPConnector(ssl=True)
@@ -88,12 +75,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         app.add_api_route("/", self._handle_health, methods=["GET"])
         app.add_api_route("/", self._handle_event, methods=["POST"])
         if self.http_server is None:
-            logger.error(
+            self.logger.error(
                 f"VoceChat [{self.instance_id}] shared HTTP server unavailable"
             )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        logger.info(
+        self.logger.info(
             f"VoceChat [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
         try:
@@ -198,12 +185,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     avatar = f"{server}/api/resource/avatar?uid={uid}"
                 else:
                     body = await resp.text()
-                    logger.warning(
+                    self.logger.warning(
                         f"VoceChat [{self.instance_id}] user lookup for uid={uid} "
                         f"failed HTTP {resp.status}: {body[:200]}"
                     )
         except Exception as e:
-            logger.warning(
+            self.logger.warning(
                 f"VoceChat [{self.instance_id}] user lookup for uid={uid} error: {e}"
             )
 
@@ -230,7 +217,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     return None
                 data = await resp.read()
                 if len(data) > max_size:
-                    logger.debug(
+                    self.logger.debug(
                         f"VoceChat [{self.instance_id}] file {path!r} "
                         f"exceeds size limit"
                     )
@@ -238,14 +225,14 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 ct = resp.content_type or "application/octet-stream"
                 name = path.rsplit("/", 1)[-1] or "attachment"
                 return Attachment(
-                    type=_mime_to_att_type(ct),
+                    type=media.mime_to_attachment_type(ct),
                     url="",
                     name=name,
                     size=len(data),
                     data=data,
                 )
         except Exception as e:
-            logger.warning(f"VoceChat [{self.instance_id}] file download failed: {e}")
+            self.logger.warning(f"file download failed: {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -260,13 +247,13 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         **kwargs,
     ):
         if self._session is None:
-            logger.warning(f"VoceChat [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return None
 
         gid = channel.get("gid")
         uid = channel.get("uid")
         if gid is None and uid is None:
-            logger.warning(
+            self.logger.warning(
                 f"VoceChat [{self.instance_id}] send: "
                 f"no gid or uid in channel {channel}"
             )
@@ -281,13 +268,11 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         )
 
         reply_to_id = kwargs.get("reply_to_id")
-        first_msg_id = None
+        msg_ids = []
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         # Handle mentions: replace @Name with @VoceChatName
         mentions = kwargs.get("mentions", [])
@@ -300,7 +285,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 if name:
                     text = text.replace(f"@{m['name']}", f"@{name}")
             except Exception:
-                logger.debug(
+                self.logger.debug(
                     f"VoceChat [{self.instance_id}] get user info for mention {m} failed"
                 )
 
@@ -308,8 +293,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             # Use markdown if rich_header was applied; plain text otherwise
             ct = "text/markdown" if rich_header else "text/plain"
             mid = await self._post_message(endpoint, text.encode(), ct, reply_to_id)
-            if not first_msg_id:
-                first_msg_id = mid
+            if mid:
+                msg_ids.append(mid)
 
         source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
@@ -326,8 +311,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     "text/plain",
                     reply_to_id,
                 )
-                if not first_msg_id:
-                    first_msg_id = mid
+                if mid:
+                    msg_ids.append(mid)
                 continue
 
             data_bytes, mime = result
@@ -338,8 +323,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 mid = await self._post_message(
                     endpoint, body, "vocechat/file", reply_to_id
                 )
-                if not first_msg_id:
-                    first_msg_id = mid
+                if mid:
+                    msg_ids.append(mid)
             else:
                 label = att.name or fname
                 mid = await self._post_message(
@@ -348,10 +333,10 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                     "text/plain",
                     reply_to_id,
                 )
-                if not first_msg_id:
-                    first_msg_id = mid
+                if mid:
+                    msg_ids.append(mid)
 
-        return first_msg_id
+        return msg_ids if msg_ids else None
 
     async def _post_message(
         self, url: str, body: bytes, content_type: str, reply_to_id: str | None = None
@@ -379,12 +364,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                         return res_text.strip().strip('"')
                 else:
                     text = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"VoceChat [{self.instance_id}] send failed "
                         f"HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            logger.error(f"VoceChat [{self.instance_id}] send error: {e}")
+            self.logger.error(f"send error: {e}")
         return None
 
     async def _upload_file(
@@ -406,14 +391,14 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"VoceChat [{self.instance_id}] file prepare failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
                     return None
                 file_id = (await resp.text()).strip().strip('"')
         except Exception as e:
-            logger.error(f"VoceChat [{self.instance_id}] file prepare error: {e}")
+            self.logger.error(f"file prepare error: {e}")
             return None
 
         # Step 2: upload — multipart with file_id, chunk_data, chunk_is_last
@@ -427,7 +412,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"VoceChat [{self.instance_id}] file upload failed "
                         f"HTTP {resp.status}: {body[:200]}"
                     )
@@ -435,7 +420,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
                 js = await resp.json(content_type=None)
                 return js.get("path")
         except Exception as e:
-            logger.error(f"VoceChat [{self.instance_id}] file upload error: {e}")
+            self.logger.error(f"file upload error: {e}")
             return None
 
 

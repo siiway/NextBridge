@@ -32,10 +32,10 @@ from typing import Literal
 
 from pydantic import field_validator
 
-import services.logger as log
 import services.cqface as cqface
 import services.media as media
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header, parse_richheader_tag
 from services.util import get_data_path
 from services.config_schema import _DriverConfig, CoercedBool
 from services.config import get_proxy, UNSET
@@ -65,21 +65,8 @@ class DiscordConfig(_DriverConfig):
         return value
 
 
-logger = log.get_logger()
-
 _CQFACE_RE = re.compile(r":cqface(\d+):")
-_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
-_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 _MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
-
-
-def _parse_richheader(text: str) -> tuple[str, dict | None]:
-    m = _RICHHEADER_RE.search(text)
-    if not m:
-        return text, None
-    attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[: m.start()] + text[m.end() :]).strip()
-    return clean, attrs or None
 
 
 def _sanitize_mass_mentions(text: str) -> tuple[str, bool]:
@@ -119,7 +106,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
         if self._proxy:
-            logger.debug(f"Discord [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {self._proxy}")
             self._session = aiohttp.ClientSession(
                 connector=aiohttp.TCPConnector(ssl=False), proxy=self._proxy
             )
@@ -127,9 +114,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             self._session = aiohttp.ClientSession()
 
         if not self._bot_token:
-            logger.warning(
-                f"Discord [{self.instance_id}] no bot_token configured — "
-                "receive disabled, send-only via webhook"
+            self.logger.warning(
+                "no bot_token configured — receive disabled, send-only via webhook"
             )
             return  # Webhook-only: session stays open, send() will be called by bridge
 
@@ -143,15 +129,13 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         @self._client.event
         async def on_ready():
             assert self._client is not None  # Type narrowing
-            logger.info(
-                f"Discord [{self.instance_id}] logged in as {self._client.user}"
-            )
+            self.logger.info(f"logged in as {self._client.user}")
 
         @self._client.event
         async def on_message(message: discord.Message):
             if message.author.bot:
-                # logger.debug(
-                #     f"Discord [{self.instance_id}] ignoring bot message from {message.author}"
+                # self.logger.debug(
+                #     f"ignoring bot message from {message.author}"
                 # )
                 return
             await self._on_message(message)
@@ -166,9 +150,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     async def _on_message(self, message: discord.Message):
         server_id = str(message.guild.id) if message.guild else ""
         channel_id = str(message.channel.id)
-        logger.debug(
-            f"Discord [{self.instance_id}] message from {message.author} "
-            f"server={server_id} channel={channel_id}"
+        self.logger.debug(
+            f"message from {message.author} server={server_id} channel={channel_id}"
         )
         # Use clean_content to get mentions as @Name instead of <@id>
         text = message.clean_content
@@ -189,9 +172,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             )
 
         if not text.strip() and not attachments:
-            logger.debug(
-                f"Discord [{self.instance_id}] ignoring empty message from {message.author}"
-            )
+            self.logger.debug(f"ignoring empty message from {message.author}")
             return
 
         avatar = (
@@ -264,9 +245,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         except FileNotFoundError:
             pass
         except Exception as exc:
-            logger.opt(exception=exc).warning(
-                f"Discord [{self.instance_id}] failed to read emoji DB"
-            )
+            self.logger.opt(exception=exc).warning("failed to read emoji DB")
 
         return self._emoji_db
 
@@ -326,10 +305,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         # If bot client is available, prefer bot send for reply messages.
         if reply_to_id and self._client is not None and self.config.send_replies_as_bot:
             force_bot = True
-            logger.debug(
-                f"Discord [{self.instance_id}] forcing bot send for reply "
-                f"reference={reply_to_id}"
-            )
+            self.logger.debug(f"forcing bot send for reply reference={reply_to_id}")
 
         # If webhook fallback is set to bot, prefer bot send when cqface is present.
         if has_cqface and self._send_method == "webhook":
@@ -337,8 +313,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 if self._client is not None:
                     force_bot = True
                 else:
-                    logger.warning(
-                        f"Discord [{self.instance_id}] cqface webhook fallback set to bot, "
+                    self.logger.warning(
+                        "cqface webhook fallback set to bot, "
                         "but bot_token is unavailable; using unicode fallback"
                     )
 
@@ -377,11 +353,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 try:
                     text = fmt.format(**ctx)
                 except KeyError as e:
-                    logger.warning(
-                        f"Discord [{self.instance_id}] bot format missing key {e}; using incoming text"
+                    self.logger.warning(
+                        f"bot format missing key {e}; using incoming text"
                     )
                 else:
-                    text, parsed_rich_header = _parse_richheader(text)
+                    text, parsed_rich_header = parse_richheader_tag(text)
                     if parsed_rich_header is not None:
                         parsed_rich_header["avatar"] = kwargs.get("user_avatar") or ""
                         kwargs["rich_header"] = parsed_rich_header
@@ -398,9 +374,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         # Handle mentions: replace @Name with <@id>
         mentions = list(kwargs.get("mentions", []))
@@ -427,16 +401,16 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         if self.config.sanitize_mass_mentions:
             text, had_mass_mentions = _sanitize_mass_mentions(text)
             if had_mass_mentions:
-                logger.warning(
-                    f"Discord [{self.instance_id}] blocked @everyone/@here mention in outgoing message"
+                self.logger.warning(
+                    "blocked @everyone/@here mention in outgoing message"
                 )
 
         if is_webhook_send:
             assert webhook_url is not None  # Type narrowing for type checker
             if reply_to_id:
-                logger.debug(
-                    f"Discord [{self.instance_id}] webhook send does not support "
-                    f"reply reference; sending as normal message. "
+                self.logger.debug(
+                    "webhook send does not support "
+                    "reply reference; sending as normal message. "
                     "Set send_replies_as_bot=true with bot_token for reply bridging."
                 )
             # Remove webhook_url from kwargs to avoid duplicate argument
@@ -447,7 +421,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         elif self._client is not None:
             return await self._send_bot(channel, text, attachments, **kwargs)
         else:
-            logger.warning(f"Discord [{self.instance_id}] no send method available")
+            self.logger.warning("no send method available")
             return None
 
     async def _send_webhook(
@@ -483,7 +457,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 try:
                     payload["username"] = title.format(**ctx)
                 except KeyError as e:
-                    logger.warning(f"webhook_title missing key {e}; using raw title")
+                    self.logger.warning(
+                        f"webhook_title missing key {e}; using raw title"
+                    )
                     payload["username"] = title
             else:
                 payload["username"] = title
@@ -493,7 +469,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 try:
                     payload["avatar_url"] = avatar.format(**ctx)
                 except KeyError as e:
-                    logger.warning(f"webhook_avatar missing key {e}; using raw avatar")
+                    self.logger.warning(
+                        f"webhook_avatar missing key {e}; using raw avatar"
+                    )
                     payload["avatar_url"] = avatar
             else:
                 payload["avatar_url"] = avatar
@@ -520,8 +498,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         url = webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true"
 
         try:
-            logger.debug(
-                f"Discord [{self.instance_id}] webhook payload overrides: "
+            self.logger.debug(
+                f"webhook payload overrides: "
                 f"username={payload.get('username')!r}, "
                 f"avatar_url is {'set' if payload.get('avatar_url') else 'unset'}"
             )
@@ -538,31 +516,27 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
                         author = data.get("author") or {}
-                        logger.debug(
-                            f"Discord [{self.instance_id}] webhook sent message "
+                        self.logger.debug(
+                            f"webhook sent message "
                             f"id={data.get('id')} author={author.get('username')!r}"
                         )
                         return str(data.get("id", ""))
                     body = await resp.text()
-                    logger.error(
-                        f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
-                    )
+                    self.logger.error(f"webhook error {resp.status}: {body}")
             else:
                 async with self._session.post(url, json=payload) as resp:
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
                         author = data.get("author") or {}
-                        logger.debug(
-                            f"Discord [{self.instance_id}] webhook sent message "
+                        self.logger.debug(
+                            f"webhook sent message "
                             f"id={data.get('id')} author={author.get('username')!r}"
                         )
                         return str(data.get("id", ""))
                     body = await resp.text()
-                    logger.error(
-                        f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
-                    )
+                    self.logger.error(f"webhook error {resp.status}: {body}")
         except Exception:
-            logger.exception(f"Discord [{self.instance_id}] webhook exception")
+            self.logger.exception("webhook exception")
         return None
 
     async def _send_bot(
@@ -576,23 +550,19 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return None
         channel_id = channel.get("channel_id")
         if not channel_id:
-            logger.warning(f"Discord [{self.instance_id}] send_bot: no channel_id")
+            self.logger.warning("send_bot: no channel_id")
             return None
         ch = self._client.get_channel(int(channel_id))
         if ch is None:
             try:
                 ch = await self._client.fetch_channel(int(channel_id))
             except Exception as e:
-                logger.warning(
-                    f"Discord [{self.instance_id}] could not fetch channel {channel_id}: {e}"
-                )
+                self.logger.warning(f"could not fetch channel {channel_id}: {e}")
                 return None
 
         # Ensure the channel is messageable (has a send method)
         if not isinstance(ch, discord.abc.Messageable):
-            logger.warning(
-                f"Discord [{self.instance_id}] channel {channel_id} is not messageable"
-            )
+            self.logger.warning(f"channel {channel_id} is not messageable")
             return None
 
         discord_files: list[discord.File] = []
@@ -650,7 +620,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             sent = await ch.send(**send_kwargs)
             return str(sent.id)
         except Exception:
-            logger.exception(f"Discord [{self.instance_id}] send error")
+            self.logger.exception("send error")
         return None
 
 

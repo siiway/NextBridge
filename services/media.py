@@ -16,7 +16,7 @@ from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 
-logger = log.get_logger()
+logger = log.get_logger("media")
 
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
@@ -247,3 +247,20 @@ def filename_for(name: str, content_type: str) -> str:
         "audio/amr": "voice.amr",
     }
     return _fallback.get(content_type, "attachment.bin")
+
+
+def mime_to_attachment_type(mime: str) -> str:
+    """Map a MIME type to one of ``"image"``, ``"video"``, ``"voice"``, or ``"file"``."""
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("video/"):
+        return "video"
+    if mime.startswith("audio/"):
+        return "voice"
+    return "file"
+
+
+def attachment_fallback_text(att_type: str, label: str) -> str:
+    """Generate a plain-text fallback label for a failed attachment."""
+    display_type = "Image" if att_type == "image" else att_type.capitalize()
+    return f"[{display_type}: {label}]"

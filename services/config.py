@@ -8,7 +8,7 @@ import services.logger as log
 import services.config_io as config_io
 from services.config_schema import UNSET
 
-logger = log.get_logger()
+logger = log.get_logger("config")
 
 _config_cache = None
 _config_path: Path | None = None

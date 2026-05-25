@@ -8,7 +8,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 import services.logger as log
 
 UNSET = "unset"
-logger = log.get_logger()
+logger = log.get_logger("config_schema")
 
 # ---------------------------------------------------------------------------
 # Reusable bool coercion: "true" / "1" / "yes" → True
@@ -57,6 +57,14 @@ class DatabaseConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     """Logging configuration for controlling log output and rotation."""
+
+    show_source: Literal["auto", "always", "never"] = "auto"
+    """Controls whether source file locations are shown in logs.
+
+    - ``auto``: show source only for DEBUG/TRACE level messages.
+    - ``always``: always show source.
+    - ``never``: never show source.
+    """
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     """Console log verbosity level.
@@ -173,6 +181,14 @@ class GlobalConfig(BaseModel):
     When True: skips only if target_id == msg.instance_id AND target_channel == msg.channel.
 
     Default is False to maximize echo prevention."""
+
+    fuzzy_mention_match: CoercedBool = False
+    """Controls whether mentions without exact bind mapping should fall back to fuzzy nickname matching.
+
+    When True: Attempts to match mentioned user's name against known display names in the target platform.
+    When False (default): Only exact ID bounds or native platform mentions work.
+
+    Default is False."""
 
     log: LoggingConfig = LoggingConfig()
     """Logging configuration for controlling log output and rotation."""

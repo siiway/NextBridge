@@ -40,13 +40,13 @@ from pydantic import model_validator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header
 
 
 class GoogleChatConfig(_DriverConfig):
@@ -66,20 +66,8 @@ class GoogleChatConfig(_DriverConfig):
         return self
 
 
-logger = log.get_logger()
-
 _SCOPES = ["https://www.googleapis.com/auth/chat.bot"]
 _API_BASE = "https://chat.googleapis.com/v1"
-
-
-def _mime_to_att_type(mime: str) -> str:
-    if mime.startswith("image/"):
-        return "image"
-    if mime.startswith("video/"):
-        return "video"
-    if mime.startswith("audio/"):
-        return "voice"
-    return "file"
 
 
 class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
@@ -97,7 +85,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
     async def start(self):
         if self._proxy:
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
-            logger.info(f"GoogleChat [{self.instance_id}] use proxy {self._proxy}")
+            self.logger.info(f"use proxy {self._proxy}")
         else:
             connector = aiohttp.TCPConnector(ssl=True)
 
@@ -110,7 +98,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                 sa_info, scopes=_SCOPES
             )
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 f"Google Chat [{self.instance_id}] credentials load failed: {e}"
             )
             return
@@ -121,12 +109,12 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         app = FastAPI()
         app.add_api_route("/", self._handle_event, methods=["POST"])
         if self.http_server is None:
-            logger.error(
+            self.logger.error(
                 f"Google Chat [{self.instance_id}] shared HTTP server unavailable"
             )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        logger.info(
+        self.logger.info(
             f"Google Chat [{self.instance_id}] webhook mounted at {self.config.listen_path}"
         )
         try:
@@ -153,7 +141,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                             "http": self._proxy,
                             "https": self._proxy,
                         }
-                        logger.debug(
+                        self.logger.debug(
                             f"GoogleChat [{self.instance_id}] token refresh use proxy {self._proxy}"
                         )
 
@@ -171,11 +159,11 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                     request = _ga_req.Request(session=session)
                     await asyncio.to_thread(self._creds.refresh, request)
 
-                    logger.debug(
+                    self.logger.debug(
                         f"Google Chat [{self.instance_id}] access token refreshed"
                     )
                 except Exception as e:
-                    logger.error(
+                    self.logger.error(
                         f"Google Chat [{self.instance_id}] token refresh failed: {e}"
                     )
                     return ""
@@ -277,7 +265,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             )
             return info.get("email") == "chat@system.gserviceaccount.com"
         except Exception as e:
-            logger.warning(
+            self.logger.warning(
                 f"Google Chat [{self.instance_id}] request verification failed: {e}"
             )
             return False
@@ -288,7 +276,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         download_uri = att_raw.get("downloadUri", "")
         ct = att_raw.get("contentType", "application/octet-stream")
         name = att_raw.get("contentName", "attachment")
-        att_type = _mime_to_att_type(ct)
+        att_type = media.mime_to_attachment_type(ct)
 
         if not download_uri or self._session is None:
             return Attachment(
@@ -305,7 +293,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                     )
                 data = await resp.read()
                 if len(data) > max_size:
-                    logger.debug(
+                    self.logger.debug(
                         f"Google Chat [{self.instance_id}] attachment "
                         f"{name!r} exceeds size limit, skipping data"
                     )
@@ -320,7 +308,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
                     type=att_type, url="", name=name, size=len(data), data=data
                 )
         except Exception as e:
-            logger.warning(
+            self.logger.warning(
                 f"Google Chat [{self.instance_id}] attachment download failed: {e}"
             )
             return Attachment(
@@ -341,12 +329,14 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._session is None:
-            logger.warning(f"Google Chat [{self.instance_id}] send: driver not started")
+            self.logger.warning(
+                f"Google Chat [{self.instance_id}] send: driver not started"
+            )
             return
 
         space_name = channel.get("space_name", "")
         if not space_name:
-            logger.warning(
+            self.logger.warning(
                 f"Google Chat [{self.instance_id}] send: "
                 f"no space_name in channel {channel}"
             )
@@ -358,7 +348,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
 
         token = await self._get_token()
         if not token:
-            logger.error(
+            self.logger.error(
                 f"Google Chat [{self.instance_id}] send: could not obtain access token"
             )
             return
@@ -371,9 +361,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"*{t}*" + (f" · _{c}_" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="google_chat")
 
         if reply_to_id:
             text = f"> [Reply]\n{text}"
@@ -471,12 +459,14 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             ) as resp:
                 if resp.status not in (200, 201):
                     text = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"Google Chat [{self.instance_id}] media upload failed "
                         f"HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            logger.error(f"Google Chat [{self.instance_id}] media upload error: {e}")
+            self.logger.error(
+                f"Google Chat [{self.instance_id}] media upload error: {e}"
+            )
 
     async def _post_message(self, url: str, headers: dict, body: dict) -> None:
         assert self._session is not None  # Type narrowing - session is set in start()
@@ -484,12 +474,12 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             async with self._session.post(url, json=body, headers=headers) as resp:
                 if resp.status not in (200, 201):
                     text = await resp.text()
-                    logger.error(
+                    self.logger.error(
                         f"Google Chat [{self.instance_id}] post failed "
                         f"HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            logger.error(f"Google Chat [{self.instance_id}] post error: {e}")
+            self.logger.error(f"Google Chat [{self.instance_id}] post error: {e}")
 
 
 register("googlechat", GoogleChatConfig, GoogleChatDriver)

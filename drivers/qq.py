@@ -18,7 +18,6 @@ import datetime
 import html
 import json
 import math
-import re
 import ssl
 import tempfile
 import uuid
@@ -42,6 +41,7 @@ from services.config import get as get_config
 from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
+from services.message_format import parse_richheader_tag
 
 
 class QqConfig(_DriverConfig):
@@ -74,22 +74,21 @@ class QqConfig(_DriverConfig):
     proxy: str | None = UNSET
 
 
-logger = log.get_logger()
-
 _DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface-gif/"
 _FORWARD_TEMPLATE_PATH: Path = (
     Path(__file__).resolve().parent.parent / "templates" / "qq_forward_template.html"
 )
-_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
-_RICHHEADER_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 
 _FORWARD_PAGE_TEMPLATE = Template(
     """<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>$title</title></head>
-<body><main><h1>$title</h1><div>$meta_primary</div><div>$meta_secondary</div>$body</main></body>
+<body><main><h1>$title</h1><div class="meta">$meta_primary</div><div class="meta sub">$meta_secondary</div>$body</main></body>
 </html>"""
 )
+
+
+_logger = log.get_logger("qq")
 
 
 @lru_cache(maxsize=1)
@@ -98,7 +97,7 @@ def _get_forward_page_template() -> Template:
         text = _FORWARD_TEMPLATE_PATH.read_text(encoding="utf-8")
         return Template(text)
     except OSError as exc:
-        logger.warning(
+        _logger.warning(
             f"Failed to load forward template {_FORWARD_TEMPLATE_PATH}: {exc}"
         )
         return _FORWARD_PAGE_TEMPLATE
@@ -145,14 +144,14 @@ def _load_face_gif(face_id_raw) -> bytes | None:
         if face_id < 0:
             raise ValueError("negative id")
     except (TypeError, ValueError):
-        logger.warning(f"Invalid face ID {face_id_raw!r} — ignored")
+        _logger.warning(f"Invalid face ID {face_id_raw!r} — ignored")
         return None
 
     candidate = (_FACE_DB / f"{face_id}.gif").resolve()
 
     # Layer 2 path-traversal guard.
     if not candidate.is_relative_to(_FACE_DB):
-        logger.warning(f"Face path {candidate} escapes database dir — blocked")
+        _logger.warning(f"Face path {candidate} escapes database dir — blocked")
         return None
 
     if not candidate.is_file():
@@ -161,7 +160,7 @@ def _load_face_gif(face_id_raw) -> bytes | None:
     try:
         return candidate.read_bytes()
     except OSError as e:
-        logger.error(f"Failed to read face GIF {candidate}: {e}")
+        _logger.error(f"Failed to read face GIF {candidate}: {e}")
         return None
 
 
@@ -196,11 +195,11 @@ class QqDriver(BaseDriver[QqConfig]):
             sep = "&" if "?" in ws_url else "?"
             ws_url = f"{ws_url}{sep}access_token={self.config.ws_token}"
 
-        logger.info(f"NapCat [{self.instance_id}] connecting to {ws_url}")
+        self.logger.info(f"connecting to {ws_url}")
 
         connect_kwargs: dict
         if self._proxy:
-            logger.debug(f"NapCat [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {self._proxy}")
             connect_kwargs = {"proxy": self._proxy}
         else:
             connect_kwargs = {}
@@ -211,7 +210,7 @@ class QqDriver(BaseDriver[QqConfig]):
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
             connect_kwargs["ssl"] = ssl_context
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] TLS certificate verification is disabled for WebSocket"
             )
 
@@ -219,21 +218,21 @@ class QqDriver(BaseDriver[QqConfig]):
             try:
                 async with websockets.connect(ws_url, **connect_kwargs) as ws:
                     self._ws = ws
-                    logger.info(f"NapCat [{self.instance_id}] connected")
+                    self.logger.info("connected")
                     await self._listen(ws)
             except websockets.exceptions.ConnectionClosedOK:
-                logger.info(f"NapCat [{self.instance_id}] connection closed normally")
+                self.logger.info("connection closed normally")
             except ssl.SSLCertVerificationError as e:
-                logger.error(
+                self.logger.error(
                     f"NapCat [{self.instance_id}] TLS certificate verification failed: {e}. "
                     "If your server uses a self-signed cert, set qq.<instance_id>.ws_ssl_verify=false"
                 )
             except Exception as e:
-                logger.error(f"NapCat [{self.instance_id}] connection error: {e}")
+                self.logger.error(f"connection error: {e}")
             finally:
                 self._ws = None
 
-            logger.info(f"NapCat [{self.instance_id}] reconnecting in 5s...")
+            self.logger.info("reconnecting in 5s...")
             await asyncio.sleep(5)
 
     def _normalize_mount_path(self, path: str) -> str:
@@ -354,13 +353,13 @@ class QqDriver(BaseDriver[QqConfig]):
         return f"{self._forward_public_prefix()}/{page_id}"
 
     def _build_forward_asset_url(self, asset_id: str) -> str:
-        return f"{self._forward_public_prefix()}/asset/{asset_id}"
+        return f"./asset/{asset_id}"
 
     def _ensure_forward_http_mount(self) -> None:
         if not self.config.forward_render_enabled:
             return
         if self.http_server is None:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] forward renderer not mounted: shared HTTP server unavailable"
             )
             return
@@ -434,7 +433,7 @@ class QqDriver(BaseDriver[QqConfig]):
             app=app,
         )
         self._forward_mount_registered = True
-        logger.info(
+        self.logger.info(
             f"NapCat [{self.instance_id}] forward renderer mounted at {mount_path}"
         )
 
@@ -460,7 +459,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 self._forward_pages.pop(page_id, None)
             deleted_assets = msg_db().purge_expired_forward_assets(int(now.timestamp()))
             if deleted_assets:
-                logger.debug(
+                self.logger.debug(
                     f"NapCat [{self.instance_id}] purged {deleted_assets} expired forward asset(s)"
                 )
 
@@ -482,9 +481,9 @@ class QqDriver(BaseDriver[QqConfig]):
                     continue
                 self._spawn_event_task(data)
             except json.JSONDecodeError:
-                logger.warning(f"NapCat [{self.instance_id}] invalid JSON received")
+                self.logger.warning("invalid JSON received")
             except Exception as e:
-                logger.error(f"NapCat [{self.instance_id}] handler error: {e}")
+                self.logger.error(f"handler error: {e}")
 
     def _spawn_event_task(self, data: dict) -> None:
         task = asyncio.create_task(self._handle(data))
@@ -496,7 +495,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 return
             exc = done_task.exception()
             if exc is not None:
-                logger.error(f"NapCat [{self.instance_id}] async handler error: {exc}")
+                self.logger.error(f"async handler error: {exc}")
 
         task.add_done_callback(_on_done)
 
@@ -526,7 +525,7 @@ class QqDriver(BaseDriver[QqConfig]):
         sender = event.get("sender", {})
         # Prefer group card (nickname-in-group) over global nickname
         nickname = sender.get("card") or sender.get("nickname") or user_id
-        logger.debug(
+        self.logger.debug(
             f"NapCat [{self.instance_id}] message from {nickname}({user_id}) "
             f"group={group_id} message_id={message_id} seq={message_seq}"
         )
@@ -543,7 +542,7 @@ class QqDriver(BaseDriver[QqConfig]):
         self_id = str(event.get("self_id", ""))
         source_mentioned_self = any(str(m.get("id", "")) == self_id for m in mentions)
         if not text.strip() and not attachments:
-            logger.debug(
+            self.logger.debug(
                 f"NapCat [{self.instance_id}] ignoring empty message from {nickname}({user_id})"
             )
             return
@@ -591,8 +590,19 @@ class QqDriver(BaseDriver[QqConfig]):
 
         text_parts: list[str] = []
         attachments: list[Attachment] = []
-        reply_id: str | None = None
+        reply_id: str | None = next(
+            (
+                str(seg.get("data", {}).get("id", ""))
+                for seg in segments
+                if seg.get("type") == "reply"
+            ),
+            None,
+        )
         mentions: list[dict] = []
+
+        self_id = str(event.get("self_id", ""))
+        strip_next_space = False
+        is_first_text = True
 
         for seg in segments:
             t = seg.get("type", "")
@@ -600,7 +610,13 @@ class QqDriver(BaseDriver[QqConfig]):
 
             match t:
                 case "text":
-                    text_parts.append(d.get("text", ""))
+                    t_str = d.get("text", "")
+                    if strip_next_space and t_str.startswith(" "):
+                        t_str = t_str[1:]
+                    strip_next_space = False
+                    if t_str:
+                        is_first_text = False
+                        text_parts.append(t_str)
 
                 case "at":
                     qq = str(d.get("qq", ""))
@@ -608,9 +624,33 @@ class QqDriver(BaseDriver[QqConfig]):
                     if not name and qq != "all":
                         # Try to look up name in our DB
                         name = msg_db().get_user_name(self.instance_id, qq)
+
+                    if not name and qq != "all" and source_group_id:
+                        # Try to fetch from API
+                        try:
+                            data = await self._api_get_group_member_info(
+                                source_group_id, qq
+                            )
+                            if data:
+                                name = data.get("card") or data.get("nickname")
+                                if name:
+                                    msg_db().save_user(self.instance_id, qq, name)
+                        except Exception as e:
+                            self.logger.debug(
+                                f"NapCat [{self.instance_id}] failed to fetch member info for {qq}: {e}"
+                            )
+
                     if not name:
                         name = qq
 
+                    # Strip auto-mention of self when replying
+                    if qq == self_id and reply_id and is_first_text:
+                        strip_next_space = True
+                        if qq and qq != "all":
+                            mentions.append({"id": qq, "name": name})
+                        continue
+
+                    is_first_text = False
                     text_parts.append(f"@{name}")
                     if qq and qq != "all":
                         mentions.append({"id": qq, "name": name})
@@ -694,8 +734,8 @@ class QqDriver(BaseDriver[QqConfig]):
                         text_parts.append("[App message]")
 
                 case "reply":
-                    # Quote/reply — mention the replied-to message ID if available
-                    reply_id = str(d.get("id", ""))
+                    # Quote/reply handled in pre-pass
+                    pass
 
                 case "forward":
                     # Merged forwarded message chain
@@ -799,7 +839,7 @@ class QqDriver(BaseDriver[QqConfig]):
             )
             if resp and resp.get("status") == "ok":
                 return True
-            logger.warning(
+            self.logger.warning(
                 f"QQ [{self.instance_id}] upload_group_file failed for '{filename}': {resp}"
             )
             return False
@@ -812,7 +852,7 @@ class QqDriver(BaseDriver[QqConfig]):
     def _render_forward_face_segment_html(self, seg_data: dict) -> str:
         face_id = str(seg_data.get("id", "")).strip()
         if not face_id:
-            return html.escape("[表情]")
+            return self._bilingual("\u8868\u60c5", "Sticker")
 
         gif_host = self._forward_cqface_gif_host()
         if not gif_host:
@@ -868,13 +908,13 @@ class QqDriver(BaseDriver[QqConfig]):
         name = html.escape(self._segment_name(seg_data, fallback_name))
         url = self._segment_url(seg_data)
         if not url:
-            return html.escape(f"[{kind_label}: {name}]")
+            return f"[{kind_label}: {name}]"
 
         safe_url = html.escape(url)
         if kind_class == "voice":
             return (
                 f"<div class='media-block media-voice'>"
-                f"<span class='chip'>{html.escape(kind_label)}</span>"
+                f"<span class='chip'>{kind_label}</span>"
                 f"<audio class='media-player' controls preload='none' src='{safe_url}'></audio>"
                 f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
                 f"{name}</a>"
@@ -883,14 +923,14 @@ class QqDriver(BaseDriver[QqConfig]):
         if kind_class == "video":
             return (
                 f"<div class='media-block media-video'>"
-                f"<span class='chip'>{html.escape(kind_label)}</span>"
+                f"<span class='chip'>{kind_label}</span>"
                 f"<video class='media-player' controls preload='metadata' src='{safe_url}'></video>"
                 f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
                 f"{name}</a>"
                 f"</div>"
             )
         return (
-            f"<span class='chip'>{html.escape(kind_label)}</span>"
+            f"<span class='chip'>{kind_label}</span>"
             f"<a class='asset {html.escape(kind_class)}' href='{safe_url}' "
             "target='_blank' rel='noopener noreferrer'>"
             f"{name}</a>"
@@ -900,7 +940,7 @@ class QqDriver(BaseDriver[QqConfig]):
         name = html.escape(self._segment_name(seg_data, "voice.amr"))
         url = self._segment_url(seg_data)
         if not url:
-            return html.escape(f"[语音: {name}]")
+            return self._bilingual(f"语音: {name}", f"Voice: {name}")
 
         attachment = Attachment(
             type="voice", url=url, name=self._segment_name(seg_data, "voice.amr")
@@ -913,11 +953,11 @@ class QqDriver(BaseDriver[QqConfig]):
         if not result:
             safe_url = html.escape(url)
             return (
-                f"<div class='media-block media-voice'>"
-                f"<span class='chip'>语音</span>"
+                "<div class='media-block media-voice'>"
+                "<span class='chip'>" + self._bilingual("语音", "Voice") + "</span>"
                 f"<a class='asset voice' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
                 f"{name}</a>"
-                f"</div>"
+                "</div>"
             )
 
         data, mime = result
@@ -925,12 +965,12 @@ class QqDriver(BaseDriver[QqConfig]):
         safe_data_url = html.escape(data_url)
         safe_url = html.escape(url)
         return (
-            f"<div class='media-block media-voice'>"
-            f"<span class='chip'>语音</span>"
+            "<div class='media-block media-voice'>"
+            "<span class='chip'>" + self._bilingual("语音", "Voice") + "</span>"
             f"<audio class='media-player' controls preload='none' src='{safe_data_url}'></audio>"
             f"<a class='asset voice' href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
             f"{name}</a>"
-            f"</div>"
+            "</div>"
         )
 
     async def _render_forward_image_asset_html(
@@ -957,7 +997,7 @@ class QqDriver(BaseDriver[QqConfig]):
             safe_url = html.escape(url)
             return (
                 f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
-                "<div class='fwd-image-placeholder'>图片未缓存 / 已过期 / 超过大小限制</div>"
+                "<div class='fwd-image-placeholder'><span class='lang-zh'>图片未缓存 / 已过期 / 超过大小限制</span><span class='lang-en'>Image not cached / expired / too large</span></div>"
                 f"</a>"
             )
 
@@ -968,7 +1008,8 @@ class QqDriver(BaseDriver[QqConfig]):
             return (
                 f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer'>"
                 "<div class='fwd-image-placeholder'>"
-                "图片 MIME 类型不安全，已阻止内嵌预览"
+                "<span class='lang-zh'>图片 MIME 类型不安全，已阻止内嵌预览</span>"
+                "<span class='lang-en'>Image MIME type unsafe, embed preview blocked</span>"
                 "</div>"
                 f"</a>"
             )
@@ -978,7 +1019,7 @@ class QqDriver(BaseDriver[QqConfig]):
             safe_data_url = html.escape(data_url)
             return (
                 f"<img class='fwd-image fwd-image-open' src='{safe_data_url}' "
-                "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
+                "loading='lazy' referrerpolicy='no-referrer' alt='Image'/>"
             )
 
         asset_id = str(uuid.uuid4())
@@ -1001,9 +1042,9 @@ class QqDriver(BaseDriver[QqConfig]):
 
         asset_url = html.escape(self._build_forward_asset_url(asset_id))
         return (
-            f"<a href='{asset_url}' target='_blank' rel='noopener noreferrer'>"
+            f"<a class='fwd-image-link' href='{asset_url}' target='_blank' rel='noopener noreferrer'>"
             f"<img class='fwd-image' src='{asset_url}' "
-            "loading='lazy' referrerpolicy='no-referrer' alt='图片'/>"
+            "loading='lazy' referrerpolicy='no-referrer' alt='Image'/>"
             f"</a>"
         )
 
@@ -1019,7 +1060,7 @@ class QqDriver(BaseDriver[QqConfig]):
     @staticmethod
     def _format_size_human(size_bytes: int | None) -> str:
         if size_bytes is None:
-            return "未知"
+            return "Unknown"
         units = ["B", "KB", "MB", "GB", "TB"]
         value = float(size_bytes)
         unit = units[0]
@@ -1083,7 +1124,7 @@ class QqDriver(BaseDriver[QqConfig]):
                     self._forward_file_url_cache[cache_key] = candidate
                     return candidate
 
-        logger.debug(
+        self.logger.debug(
             f"NapCat [{self.instance_id}] forward file download url unresolved for file_id={file_id}"
         )
         self._forward_file_url_cache[cache_key] = None
@@ -1099,8 +1140,8 @@ class QqDriver(BaseDriver[QqConfig]):
         name = html.escape(raw_name)
         file_id = str(seg_data.get("file_id", seg_data.get("id", ""))).strip()
         size_bytes = self._parse_forward_file_size(seg_data)
-        size_text = html.escape(self._format_size_human(size_bytes))
-        file_id_text = html.escape(file_id or "未知")
+        size_text = self._format_size_human(size_bytes)
+        file_id_text = html.escape(file_id or "Unknown")
 
         url = self._segment_url(seg_data)
         if not url and file_id:
@@ -1110,20 +1151,20 @@ class QqDriver(BaseDriver[QqConfig]):
                 busid=str(seg_data.get("busid", seg_data.get("bus_id", ""))).strip(),
             )
 
-        download_html = "<span class='asset file disabled'>暂无法下载</span>"
+        download_html = "<span class='asset file disabled'><span class='lang-zh'>暂无法下载</span><span class='lang-en'>Unavailable</span></span>"
         if url:
             safe_url = html.escape(url)
             download_html = (
                 f"<a class='asset file' href='{safe_url}' "
                 "target='_blank' rel='noopener noreferrer'>"
-                f"下载 {name}</a>"
+                f"<span class='lang-zh'>下载 {name}</span><span class='lang-en'>Download {name}</span></a>"
             )
 
         return (
             "<div class='file-block'>"
-            "<span class='chip'>文件</span>"
+            "<span class='chip'>" + self._bilingual("文件", "File") + "</span>"
             f"<div class='file-name'>{name}</div>"
-            f"<div class='file-meta'>大小: {size_text} · file_id: {file_id_text}</div>"
+            f"<div class='file-meta'><span class='lang-zh'>大小: {size_text} · file_id: {file_id_text}</span><span class='lang-en'>Size: {size_text} · file_id: {file_id_text}</span></div>"
             f"{download_html}"
             "</div>"
         )
@@ -1138,13 +1179,7 @@ class QqDriver(BaseDriver[QqConfig]):
 
     @staticmethod
     def _extract_richheader(text: str) -> tuple[str, dict | None]:
-        match = _RICHHEADER_RE.search(text)
-        if not match:
-            return text, None
-
-        attrs = dict(_RICHHEADER_ATTR_RE.findall(match.group(1)))
-        clean = (text[: match.start()] + text[match.end() :]).strip()
-        return clean, attrs or None
+        return parse_richheader_tag(text)
 
     @staticmethod
     def _forward_node_sender_fields(node: dict) -> tuple[str, str]:
@@ -1223,6 +1258,31 @@ class QqDriver(BaseDriver[QqConfig]):
             if value:
                 return value
         return ""
+
+    @staticmethod
+    def _forward_node_time(node: dict) -> int:
+        candidates = (
+            node.get("time"),
+            node.get("time_stamp"),
+            node.get("timestamp"),
+        )
+        data = node.get("data")
+        if isinstance(data, dict):
+            candidates += (
+                data.get("time"),
+                data.get("time_stamp"),
+                data.get("timestamp"),
+            )
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            try:
+                val = int(candidate)
+                if val > 0:
+                    return val
+            except (TypeError, ValueError):
+                pass
+        return 0
 
     @staticmethod
     def _forward_reply_target_id(seg_data: dict) -> str:
@@ -1311,7 +1371,7 @@ class QqDriver(BaseDriver[QqConfig]):
         try:
             formatted = msg_format.format(**ctx)
         except KeyError as exc:
-            logger.debug(
+            self.logger.debug(
                 f"NapCat [{self.instance_id}] forward header msg_format missing key: {exc}"
             )
             return None
@@ -1359,6 +1419,45 @@ class QqDriver(BaseDriver[QqConfig]):
             return f"{minutes}分{secs}秒"
         return f"{secs}秒"
 
+    @staticmethod
+    def _format_duration_en(seconds: int) -> str:
+        seconds = max(0, int(seconds))
+        days, rem = divmod(seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, secs = divmod(rem, 60)
+
+        parts: list[str] = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        parts.append(f"{secs}s")
+        return " ".join(parts)
+
+    @staticmethod
+    def _bilingual(zh: str, en: str) -> str:
+        return (
+            "<span class='lang-zh'>"
+            + html.escape(zh)
+            + "</span><span class='lang-en'>"
+            + html.escape(en)
+            + "</span>"
+        )
+
+    @staticmethod
+    def _format_message_time(ts: int) -> str:
+        if not ts:
+            return ""
+        dt = datetime.datetime.fromtimestamp(ts)
+        now = datetime.datetime.now()
+
+        # simple formatting: MM-DD HH:MM
+        if dt.year == now.year:
+            return dt.strftime("%m-%d %H:%M")
+        return dt.strftime("%Y-%m-%d %H:%M")
+
     async def _render_forward_nodes_html(
         self,
         nodes: list[dict],
@@ -1377,16 +1476,24 @@ class QqDriver(BaseDriver[QqConfig]):
         for node in nodes:
             user_id, nickname = self._forward_node_sender_fields(node)
             message_id = self._forward_node_message_id(node)
+            msg_time = self._forward_node_time(node)
+            time_text = self._format_message_time(msg_time) if msg_time else ""
+            time_hover = (
+                datetime.datetime.fromtimestamp(msg_time).strftime("%Y-%m-%d %H:%M:%S")
+                if msg_time
+                else ""
+            )
+
             richheader: dict | None = None
             reply_to_id = ""
             user_id_reliable = user_id not in unreliable_user_ids
 
             # if not user_id_reliable and user_id:
-            #     logger.debug(
+            #     self.logger.debug(
             #         f"NapCat [{self.instance_id}] forward node user_id marked unreliable: {user_id}"
             #     )
 
-            # logger.debug(
+            # self.logger.debug(
             #     f"NapCat [{self.instance_id}] forward node sender resolved "
             #     f"nickname={nickname!r} user_id={user_id!r} "
             #     f"raw_sender={node.get('sender')!r}"
@@ -1432,7 +1539,7 @@ class QqDriver(BaseDriver[QqConfig]):
                     content_parts.append(
                         self._render_forward_asset_html(
                             seg_data,
-                            kind_label="视频",
+                            kind_label=self._bilingual("视频", "Video"),
                             kind_class="video",
                             fallback_name="video.mp4",
                         )
@@ -1456,8 +1563,8 @@ class QqDriver(BaseDriver[QqConfig]):
                             )
                         )
                     else:
-                        plain_text_parts.append("[合并转发]")
-                        content_parts.append(html.escape("[合并转发]"))
+                        plain_text_parts.append("Forward")
+                        content_parts.append(self._bilingual("合并转发", "Forward"))
                 elif seg_type == "reply":
                     reply_to_id = self._forward_reply_target_id(seg_data)
                 elif seg_type == "face":
@@ -1478,8 +1585,8 @@ class QqDriver(BaseDriver[QqConfig]):
                         plain_text_parts.append(summary)
                         content_parts.append(html.escape(summary))
                     else:
-                        plain_text_parts.append("[表情]")
-                        content_parts.append(html.escape("[表情]"))
+                        plain_text_parts.append("Sticker")
+                        content_parts.append(self._bilingual("表情", "Sticker"))
 
             if richheader is None:
                 msg_text = "".join(plain_text_parts).strip()
@@ -1490,11 +1597,13 @@ class QqDriver(BaseDriver[QqConfig]):
                     msg_text=msg_text,
                 )
 
-            message_html = "".join(content_parts).strip() or html.escape("[空消息]")
+            message_html = "".join(content_parts).strip() or self._bilingual(
+                "空消息", "Empty"
+            )
             message_text = "".join(plain_text_parts).strip() or "[空消息]"
             default_sender = f"{nickname}" + (f" ({user_id})" if user_id else "")
             if user_id and not user_id_reliable:
-                default_sender += " [UID 不可信]"
+                default_sender += " [UID Unreliable]"
 
             header_title_raw = (
                 str(richheader.get("title", "")).strip() if richheader else ""
@@ -1510,9 +1619,9 @@ class QqDriver(BaseDriver[QqConfig]):
                         else f"QQ: {user_id}"
                     )
                 header_content_raw = (
-                    f"{header_content_raw} · UID 不可信"
+                    f"{header_content_raw} · UID Unreliable"
                     if header_content_raw
-                    else "UID 不可信"
+                    else "UID Unreliable"
                 )
 
             header_title = html.escape(header_title_raw) or html.escape(default_sender)
@@ -1527,8 +1636,31 @@ class QqDriver(BaseDriver[QqConfig]):
             avatar_html = ""
             if avatar_url.startswith(("http://", "https://")):
                 avatar_html = (
+                    "<div class='avatar-wrapper'>"
                     f"<img class='avatar' src='{html.escape(avatar_url)}' "
                     "alt='avatar' referrerpolicy='no-referrer' loading='lazy'/>"
+                    "</div>"
+                )
+            else:
+                avatar_html = "<div class='avatar-wrapper'></div>"
+
+            hover_parts = []
+            if user_id:
+                hover_parts.append(
+                    f"UID: {user_id}"
+                    if user_id_reliable
+                    else f"UID: {user_id} (Unreliable)"
+                )
+            if time_hover:
+                hover_parts.append(time_hover)
+            hover_text = " · ".join(hover_parts)
+            hover_html = f" title='{html.escape(hover_text)}'" if hover_text else ""
+
+            # Use span with title inside header_title for hover
+            header_title_html = f"<span{hover_html}>{header_title}</span>"
+            if time_text:
+                header_title_html += (
+                    f"<span class='msg-time'>{html.escape(time_text)}</span>"
                 )
 
             header_content_html = (
@@ -1540,7 +1672,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 "message_id": message_id,
                 "reply_to_id": reply_to_id,
                 "default_sender": default_sender,
-                "header_title": header_title,
+                "header_title": header_title_html,
                 "message_text": message_text,
                 "avatar_html": avatar_html,
                 "header_content_html": header_content_html,
@@ -1556,21 +1688,23 @@ class QqDriver(BaseDriver[QqConfig]):
             if reply_to_id:
                 reply_html = (
                     "<blockquote class='reply-preview'>"
-                    "<div class='reply-preview-title'>回复消息</div>"
+                    "<div class='reply-preview-title'>"
+                    + self._bilingual("回复消息", "Reply")
+                    + "</div>"
                     "</blockquote>"
                 )
 
             rendered.append(
                 "<article class='msg'>"
-                "<div class='sender'>"
                 f"{item.get('avatar_html', '')}"
                 "<div class='sender-meta'>"
                 f"<div class='sender-main'>{item.get('header_title', '')}</div>"
                 f"{item.get('header_content_html', '')}"
-                "</div>"
-                "</div>"
+                "<div class='content-wrapper'>"
                 f"{reply_html}"
                 f"<div class='content'>{item.get('message_html', '')}</div>"
+                "</div>"
+                "</div>"
                 "</article>"
             )
 
@@ -1592,7 +1726,9 @@ class QqDriver(BaseDriver[QqConfig]):
         )
         return (
             "<details class='nested-forward'>"
-            "<summary class='nested-forward-title'>嵌套合并转发（点击展开）</summary>"
+            "<summary class='nested-forward-title'>"
+            + self._bilingual("展开嵌套合并转发", "Expand Nested Forward")
+            + "</summary>"
             f"<div class='nested-forward-body'>{nested_body}</div>"
             "</details>"
         )
@@ -1603,26 +1739,28 @@ class QqDriver(BaseDriver[QqConfig]):
         body_html: str,
         meta_primary_text: str,
         meta_secondary_text: str,
+        meta_attachment_text: str,
         *,
         created_at: datetime.datetime,
         expires_at: datetime.datetime,
         destroyed_at: datetime.datetime | None = None,
     ) -> str:
-        title_html = html.escape(title)
-        meta_primary_html = html.escape(meta_primary_text)
-        meta_secondary_html = html.escape(meta_secondary_text)
+        title_html = self._bilingual("QQ 合并转发消息", "QQ Combined Forward")
+        meta_primary_html = meta_primary_text
+        meta_secondary_html = meta_secondary_text
+        meta_attachment_html = meta_attachment_text
         page_state = "destroyed" if destroyed_at is not None else "active"
-        page_state_text = "已销毁" if destroyed_at is not None else "有效"
-        page_state_banner = "已销毁" if destroyed_at is not None else "当前页面有效"
-        page_state_detail = (
-            "当前页面已超过有效期"
+        page_state_text = (
+            self._bilingual("已销毁", "Destroyed")
             if destroyed_at is not None
-            else "页面将在到期后自动切换为已销毁"
+            else self._bilingual("有效", "Active")
         )
         return _get_forward_page_template().substitute(
-            title=title_html,
+            title=title,
+            title_html=title_html,
             meta_primary=meta_primary_html,
             meta_secondary=meta_secondary_html,
+            meta_attachment=meta_attachment_html,
             created_at_epoch=str(int(created_at.timestamp())),
             expires_at_epoch=str(int(expires_at.timestamp())),
             destroyed_at_epoch=str(int(destroyed_at.timestamp()))
@@ -1630,8 +1768,6 @@ class QqDriver(BaseDriver[QqConfig]):
             else "",
             page_state=page_state,
             page_state_text=page_state_text,
-            page_state_banner=page_state_banner,
-            page_state_detail=page_state_detail,
             body=body_html,
         )
 
@@ -1648,28 +1784,22 @@ class QqDriver(BaseDriver[QqConfig]):
         if not forward_id:
             return "[Forwarded messages]"
 
-        logger.debug(
+        self.logger.debug(
             f"NapCat [{self.instance_id}] rendering forward segment id={forward_id}"
         )
 
-        response = await self._call(
-            "get_forward_msg",
-            {"id": forward_id},
-            timeout=30.0,
-            retries=2,
-        )
-        if not response or response.get("status") != "ok":
-            logger.warning(
-                f"NapCat [{self.instance_id}] get_forward_msg failed for id={forward_id}: {response}"
+        payload = await self._api_get_forward_msg(forward_id)
+        if not payload:
+            self.logger.warning(
+                f"NapCat [{self.instance_id}] get_forward_msg failed for id={forward_id}"
             )
             return "[Forwarded messages]"
 
-        payload = response.get("data") or {}
         nodes = payload.get("messages")
         if nodes is None:
             nodes = payload.get("message")
         if not isinstance(nodes, list):
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] get_forward_msg no messages for id={forward_id}"
             )
             return "[Forwarded messages]"
@@ -1686,17 +1816,32 @@ class QqDriver(BaseDriver[QqConfig]):
         expires_at = created_at + datetime.timedelta(seconds=ttl)
         expires_at_ts = int(expires_at.timestamp())
         meta_primary_text = (
-            f"生成于 {created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}"
+            f"<span class='lang-zh'>生成于 {created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}</span>"
+            f"<span class='lang-en'>Generated at {created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}</span>"
         )
         meta_secondary_text = (
-            f"有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} · "
-            f"距离销毁约 {self._format_duration_cn(ttl)}"
+            f"<span class='lang-zh'>有效期至 {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}</span>"
+            f"<span class='lang-en'>Expires at {expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')}</span>"
         )
+        asset_ttl = self._effective_forward_asset_ttl()
+        if asset_ttl > 0:
+            asset_expires_at = created_at + datetime.timedelta(seconds=asset_ttl)
+            cn_dur = self._format_duration_cn(asset_ttl)
+            en_dur = self._format_duration_en(asset_ttl)
+            meta_attachment_text = (
+                f"<span class='lang-zh'>附件有效期至 {asset_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} "
+                f"（约 {cn_dur}）</span>"
+                f"<span class='lang-en'>Attachments expire at {asset_expires_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %z')} "
+                f"(approx. {en_dur})</span>"
+            )
+        else:
+            meta_attachment_text = ""
         page_html = self._render_forward_page_html(
             title="QQ 合并转发消息",
             body_html=body_html,
             meta_primary_text=meta_primary_text,
             meta_secondary_text=meta_secondary_text,
+            meta_attachment_text=meta_attachment_text,
             created_at=created_at,
             expires_at=expires_at,
         )
@@ -1754,12 +1899,12 @@ class QqDriver(BaseDriver[QqConfig]):
             except TimeoutError:
                 self._pending.pop(echo, None)
                 if attempt >= max_attempts:
-                    logger.warning(
+                    self.logger.warning(
                         f"NapCat [{self.instance_id}] action '{action}' timed out "
                         f"after {attempt} attempt(s)"
                     )
                     return None
-                logger.warning(
+                self.logger.warning(
                     f"NapCat [{self.instance_id}] action '{action}' timed out, "
                     f"retrying ({attempt}/{max_attempts - 1})"
                 )
@@ -1767,12 +1912,12 @@ class QqDriver(BaseDriver[QqConfig]):
             except Exception as e:
                 self._pending.pop(echo, None)
                 if attempt >= max_attempts:
-                    logger.error(
+                    self.logger.error(
                         f"NapCat [{self.instance_id}] action '{action}' error "
                         f"after {attempt} attempt(s): {e}"
                     )
                     return None
-                logger.warning(
+                self.logger.warning(
                     f"NapCat [{self.instance_id}] action '{action}' error, "
                     f"retrying ({attempt}/{max_attempts - 1}): {e}"
                 )
@@ -1780,37 +1925,98 @@ class QqDriver(BaseDriver[QqConfig]):
 
         return None
 
+    async def _api_send_group_msg(
+        self, group_id, message, *, timeout: float = 30.0
+    ) -> str | None:
+        """Send a group message via OneBot. Returns ``message_id`` on success or ``None``."""
+        resp = await self._call(
+            "send_group_msg",
+            {"group_id": int(group_id), "message": message},
+            timeout=timeout,
+        )
+        if resp and resp.get("status") == "ok":
+            data = resp.get("data") or {}
+            if "message_id" in data:
+                return str(data["message_id"])
+        return None
+
+    async def _api_get_group_member_info(
+        self, group_id, user_id, *, no_cache: bool = False
+    ) -> dict | None:
+        """Fetch group member info via OneBot. Returns the ``data`` dict or ``None``."""
+        resp = await self._call(
+            "get_group_member_info",
+            {"group_id": int(group_id), "user_id": int(user_id), "no_cache": no_cache},
+        )
+        if resp and resp.get("status") == "ok":
+            return resp.get("data") or {}
+        return None
+
+    async def _api_get_stranger_info(self, user_id) -> dict | None:
+        """Fetch stranger info via OneBot. Returns the ``data`` dict or ``None``."""
+        resp = await self._call(
+            "get_stranger_info",
+            {"user_id": user_id},
+            timeout=30.0,
+            retries=2,
+        )
+        if resp and resp.get("status") == "ok":
+            return resp.get("data") or {}
+        return None
+
+    async def _api_get_forward_msg(self, forward_id) -> dict | None:
+        """Fetch forward message chain via OneBot. Returns the ``data`` dict or ``None``."""
+        resp = await self._call(
+            "get_forward_msg",
+            {"id": forward_id},
+            timeout=30.0,
+            retries=2,
+        )
+        if resp and resp.get("status") == "ok":
+            return resp.get("data") or {}
+        return None
+
+    async def _api_get_group_file_url(self, group_id, file_id, busid) -> str | None:
+        """Resolve a group file download URL. Tries ``get_group_file_url`` and ``get_file``."""
+        resp = await self._call(
+            "get_group_file_url",
+            {"group_id": int(group_id), "file_id": str(file_id), "busid": busid},
+            timeout=20.0,
+        )
+        if resp and resp.get("status") == "ok":
+            data = resp.get("data") or {}
+            for key in ("url", "download_url", "file_url", "file"):
+                candidate = str(data.get(key, "")).strip()
+                if candidate.startswith(("http://", "https://")):
+                    return candidate
+        resp = await self._call(
+            "get_file",
+            {"file_id": str(file_id)},
+            timeout=20.0,
+        )
+        if resp and resp.get("status") == "ok":
+            data = resp.get("data") or {}
+            for key in ("url", "download_url", "file_url", "file"):
+                candidate = str(data.get(key, "")).strip()
+                if candidate.startswith(("http://", "https://")):
+                    return candidate
+        return None
+
     async def _get_qid(self, user_id: str, group_id: str | None = None) -> str:
         """Get user's qid using NapCat API with caching."""
-        # Check cache first
         if user_id in self._qid_cache:
             return self._qid_cache[user_id]
 
         try:
-            # Use get_stranger_info to get qid
-            result = await self._call(
-                "get_stranger_info",
-                {"user_id": user_id},
-                timeout=30.0,
-                retries=2,
-            )
-            # logger.debug(
-            #     f"NapCat [{self.instance_id}] get_stranger_info result for {user_id}: {result}"
-            # )
-            if result and result.get("status") == "ok" and result.get("data"):
-                data = result["data"]
+            data = await self._api_get_stranger_info(user_id)
+            if data:
                 qid = data.get("qid", "")
-                # Cache the result
                 if qid:
                     self._qid_cache[user_id] = qid
-                logger.debug(f"NapCat [{self.instance_id}] qid for {user_id}: {qid}")
+                self.logger.debug(f"qid for {user_id}: {qid}")
                 return qid
-            else:
-                logger.warning(
-                    f"NapCat [{self.instance_id}] get_stranger_info failed for {user_id}: {result}"
-                )
         except Exception as e:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
             )
         return ""
@@ -1846,13 +2052,13 @@ class QqDriver(BaseDriver[QqConfig]):
                 },
             )
             if resp is None:
-                logger.warning(
+                self.logger.warning(
                     f"NapCat [{self.instance_id}] stream upload chunk {i}/{total_chunks} "
                     f"got no response for '{filename}'"
                 )
                 return None
             if resp.get("status") == "failed":
-                logger.warning(
+                self.logger.warning(
                     f"NapCat [{self.instance_id}] stream upload failed at chunk "
                     f"{i}/{total_chunks}: {resp.get('msg', '')}"
                 )
@@ -1867,7 +2073,7 @@ class QqDriver(BaseDriver[QqConfig]):
             },
         )
         if resp is None or resp.get("status") == "failed":
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] stream upload completion failed "
                 f"for '{filename}': {resp}"
             )
@@ -1876,7 +2082,7 @@ class QqDriver(BaseDriver[QqConfig]):
         data = resp.get("data") or {}
         file_path = data.get("file_path")
         if not file_path:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] stream upload complete but "
                 f"no file_path in response: {resp}"
             )
@@ -1897,24 +2103,31 @@ class QqDriver(BaseDriver[QqConfig]):
     ):
         group_id = channel.get("group_id")
         if not group_id:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] send: no group_id in channel {channel}"
             )
             return None
 
         if self._ws is None:
-            logger.warning(
+            self.logger.warning(
                 f"NapCat [{self.instance_id}] send: not connected, message dropped"
             )
             return None
 
         segments: list[dict] = []
+        msg_ids: list[str] = []
+        deferred_file_uploads = []
 
         reply_to_id = kwargs.get("reply_to_id")
         if reply_to_id:
             segments.append({"type": "reply", "data": {"id": str(reply_to_id)}})
 
         rich_header = kwargs.get("rich_header")
+        # Video/Record cannot be mixed with text in QQ, so if there are such attachments,
+        # we still want to make sure the header goes with the text, but the whole text
+        # message must be sent separately from the video/record message.
+        # We will handle the separation later, so we just prepend the header to the text if there is text.
+        # If there is NO text but there ARE non-image attachments, we send the header separately.
         has_non_image_attachments = any(
             att.type != "image"
             for att in (attachments or [])
@@ -1931,18 +2144,16 @@ class QqDriver(BaseDriver[QqConfig]):
             else:
                 t, c = rich_header.get("title", ""), rich_header.get("content", "")
                 prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-                header_resp = await self._call(
-                    "send_group_msg",
-                    {
-                        "group_id": int(group_id),
-                        "message": [{"type": "text", "data": {"text": prefix}}],
-                    },
+                msg_id = await self._api_send_group_msg(
+                    group_id, [{"type": "text", "data": {"text": prefix}}]
                 )
-                if not header_resp or header_resp.get("status") != "ok":
-                    logger.warning(
+                if not msg_id:
+                    self.logger.warning(
                         f"NapCat [{self.instance_id}] failed to send standalone rich header "
-                        f"before media message: {header_resp}"
+                        f"before media message"
                     )
+                else:
+                    msg_ids.append(msg_id)
 
         # Process mentions: replace @Name with at segments
         mentions = kwargs.get("mentions", [])
@@ -2059,50 +2270,62 @@ class QqDriver(BaseDriver[QqConfig]):
                     if result:
                         data_bytes, _ = result
                         fname = att.name or "file"
-                        if self._supports_stream_file_upload():
-                            mode = self._resolve_send_mode(len(data_bytes))
-                            if mode == "base64":
-                                b64 = base64.b64encode(data_bytes).decode()
-                                await self._call(
-                                    "upload_group_file",
-                                    {
-                                        "group_id": int(group_id),
-                                        "file": f"base64://{b64}",
-                                        "name": fname,
-                                    },
-                                )
-                            else:  # stream (default)
-                                file_path = await self._upload_file_stream(
-                                    data_bytes, fname
-                                )
-                                if file_path:
+
+                        async def _do_upload(d=data_bytes, fn=fname, gid=group_id):
+                            if self._supports_stream_file_upload():
+                                mode = self._resolve_send_mode(len(d))
+                                if mode == "base64":
+                                    b64 = base64.b64encode(d).decode()
                                     await self._call(
                                         "upload_group_file",
                                         {
-                                            "group_id": int(group_id),
-                                            "file": file_path,
-                                            "name": fname,
+                                            "group_id": int(gid),
+                                            "file": f"base64://{b64}",
+                                            "name": fn,
                                         },
                                     )
-                                else:
-                                    segments.append(
-                                        {
-                                            "type": "text",
-                                            "data": {"text": f"\n[文件: {att.name}]"},
-                                        }
+                                else:  # stream (default)
+                                    file_path = await self._upload_file_stream(d, fn)
+                                    if file_path:
+                                        await self._call(
+                                            "upload_group_file",
+                                            {
+                                                "group_id": int(gid),
+                                                "file": file_path,
+                                                "name": fn,
+                                            },
+                                        )
+                                    else:
+                                        await self._api_send_group_msg(
+                                            gid,
+                                            [
+                                                {
+                                                    "type": "text",
+                                                    "data": {
+                                                        "text": f"\n[文件发送失败: {fn}]"
+                                                    },
+                                                }
+                                            ],
+                                        )
+                            else:
+                                if not await self._upload_group_file_from_bytes(
+                                    d,
+                                    fn,
+                                    str(gid),
+                                ):
+                                    await self._api_send_group_msg(
+                                        gid,
+                                        [
+                                            {
+                                                "type": "text",
+                                                "data": {
+                                                    "text": f"\n[文件发送失败: {fn}]"
+                                                },
+                                            }
+                                        ],
                                     )
-                        else:
-                            if not await self._upload_group_file_from_bytes(
-                                data_bytes,
-                                fname,
-                                str(group_id),
-                            ):
-                                segments.append(
-                                    {
-                                        "type": "text",
-                                        "data": {"text": f"\n[文件: {att.name}]"},
-                                    }
-                                )
+
+                        deferred_file_uploads.append(_do_upload)
                     else:
                         segments.append(
                             {
@@ -2111,20 +2334,38 @@ class QqDriver(BaseDriver[QqConfig]):
                             }
                         )
 
-        if not segments:
-            return None
+        main_segments = []
+        standalone_segments = []
+        for seg in segments:
+            if seg["type"] in ("video", "record"):
+                standalone_segments.append(seg)
+            else:
+                main_segments.append(seg)
 
-        resp = await self._call(
-            "send_group_msg",
-            {
-                "group_id": int(group_id),
-                "message": segments,
-            },
-        )
-        if resp and resp.get("status") == "ok":
-            data = resp.get("data") or {}
-            return str(data.get("message_id", ""))
-        return None
+        if main_segments:
+            if (
+                len(main_segments) == 1
+                and main_segments[0]["type"] == "reply"
+                and standalone_segments
+            ):
+                # If only reply segment remains, attach it to the first standalone segment
+                standalone_segments[0] = [main_segments[0], standalone_segments[0]]
+                main_segments = []
+            else:
+                msg_id = await self._api_send_group_msg(group_id, main_segments)
+                if msg_id:
+                    msg_ids.append(msg_id)
+
+        for seg in standalone_segments:
+            msg_to_send = seg if isinstance(seg, list) else [seg]
+            msg_id = await self._api_send_group_msg(group_id, msg_to_send)
+            if msg_id:
+                msg_ids.append(msg_id)
+
+        for upload_func in deferred_file_uploads:
+            await upload_func()
+
+        return msg_ids if msg_ids else None
 
 
 register("qq", QqConfig, QqDriver)

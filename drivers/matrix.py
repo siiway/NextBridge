@@ -47,13 +47,13 @@ from mautrix.types import (
 )
 from pydantic import model_validator
 
-import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header
 
 
 class MatrixConfig(_DriverConfig):
@@ -79,8 +79,6 @@ class MatrixConfig(_DriverConfig):
             raise ValueError("store_path is required when enable_e2e is True")
         return self
 
-
-logger = log.get_logger()
 
 _FILE_TYPES = {
     "image": MessageType.IMAGE,
@@ -120,7 +118,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         # proxy support
         session: ClientSession | None = None
         if self._proxy:
-            logger.debug(f"Matrix [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {self._proxy}")
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
         else:
             connector = None
@@ -146,7 +144,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     store_access_token=True,
                 )
             except Exception as e:
-                logger.error(f"Matrix [{self.instance_id}] login failed: {e}")
+                self.logger.error(f"login failed: {e}")
                 return
 
         # Initialize E2E encryption if enabled
@@ -170,69 +168,55 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                         # For now, return an empty list as we don't track shared rooms
                         return []
 
-                logger.info(
-                    f"Matrix [{self.instance_id}] Initializing E2E encryption..."
-                )
+                self.logger.info("Initializing E2E encryption...")
 
                 # Create store directory if it doesn't exist
                 store_path = Path(self.config.store_path)
                 store_path.mkdir(parents=True, exist_ok=True)
-                logger.debug(
-                    f"Matrix [{self.instance_id}] E2E store path: {store_path}"
-                )
+                self.logger.debug(f"E2E store path: {store_path}")
 
                 # Initialize crypto store
-                logger.debug(
-                    f"Matrix [{self.instance_id}] Using in-memory crypto store"
-                )
+                self.logger.debug("Using in-memory crypto store")
                 self._crypto_store = CustomCryptoStore(
                     account_id=user_id,
                     pickle_key="nextbridge_e2e",
                 )
-                logger.debug(f"Matrix [{self.instance_id}] Crypto store initialized")
+                self.logger.debug("Crypto store initialized")
 
                 # Try to delete old crypto store data to avoid corrupted sessions
                 try:
                     await self._crypto_store.delete()
-                    logger.debug(
-                        f"Matrix [{self.instance_id}] Old crypto store data deleted"
-                    )
+                    self.logger.debug("Old crypto store data deleted")
                 except Exception as e:
-                    logger.debug(
-                        f"Matrix [{self.instance_id}] No old crypto store data to delete: {e}"
-                    )
+                    self.logger.debug(f"No old crypto store data to delete: {e}")
 
                 # Initialize state store
-                logger.debug(f"Matrix [{self.instance_id}] Using in-memory state store")
+                self.logger.debug("Using in-memory state store")
                 self._state_store = CustomStateStore()
-                logger.debug(f"Matrix [{self.instance_id}] State store initialized")
+                self.logger.debug("State store initialized")
 
                 # Initialize Olm machine for E2E encryption
-                logger.debug(f"Matrix [{self.instance_id}] Initializing Olm machine...")
+                self.logger.debug("Initializing Olm machine...")
                 self._crypto = OlmMachine(
                     client=self._client,
                     crypto_store=self._crypto_store,
                     state_store=cast(StateStore, self._state_store),
                 )
                 await self._crypto.load()
-                logger.debug(f"Matrix [{self.instance_id}] Olm machine initialized")
+                self.logger.debug("Olm machine initialized")
 
                 # Set up state store and crypto on the client
                 self._client.state_store = self._state_store
                 self._client.crypto = self._crypto
 
-                logger.info(f"Matrix [{self.instance_id}] E2E encryption enabled")
+                self.logger.info("E2E encryption enabled")
             except Exception as e:
-                logger.opt(exception=True).error(
-                    f"Matrix [{self.instance_id}] E2E initialization failed: {e}"
-                )
-                logger.warning(
-                    f"Matrix [{self.instance_id}] continuing without E2E encryption"
-                )
+                self.logger.opt(exception=True).error(f"E2E initialization failed: {e}")
+                self.logger.warning("continuing without E2E encryption")
                 self._crypto = None
                 self._crypto_store = None
         else:
-            logger.info(f"Matrix [{self.instance_id}] E2E encryption is disabled")
+            self.logger.info("E2E encryption is disabled")
 
         # Skip the initial sync batch so historical messages are not bridged
         self._client.ignore_first_sync = True
@@ -256,11 +240,11 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         # Register only after the client is fully ready so send() is never
         # called while self._client is None (e.g. after a config error above).
         self.bridge.register_sender(self.instance_id, self.send)
-        logger.info(f"Matrix [{self.instance_id}] starting sync")
+        self.logger.info("starting sync")
         try:
             await self._client.start(filter_data=None)
         except Exception as e:
-            logger.error(f"Matrix [{self.instance_id}] sync loop error: {e}")
+            self.logger.error(f"sync loop error: {e}")
             raise
 
     # ------------------------------------------------------------------
@@ -302,9 +286,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
     async def _on_encrypted_message(self, event) -> None:
         """Handle encrypted messages by decrypting them and processing the content."""
         if not self._crypto:
-            logger.warning(
-                f"Matrix [{self.instance_id}] Received encrypted message but E2E is not initialized"
-            )
+            self.logger.warning("Received encrypted message but E2E is not initialized")
             return
 
         try:
@@ -331,15 +313,11 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     )
                     await self._on_message(decrypted_msg_event)
                 else:
-                    logger.warning(
-                        f"Matrix [{self.instance_id}] unsupported decrypted content type"
-                    )
+                    self.logger.warning("unsupported decrypted content type")
             else:
-                logger.warning(f"Matrix [{self.instance_id}] Failed to decrypt event")
+                self.logger.warning("Failed to decrypt event")
         except Exception as e:
-            logger.opt(exception=True).error(
-                f"Matrix [{self.instance_id}] Error decrypting message: {e}"
-            )
+            self.logger.opt(exception=True).error(f"Error decrypting message: {e}")
 
     async def _on_message(self, event: MessageEvent) -> None:
         if self._client and event.sender == self._client.mxid:
@@ -393,8 +371,8 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             # Honour declared size before downloading
             declared = getattr(content.info, "size", None) if content.info else None
             if declared and declared > self.config.max_file_size:
-                logger.debug(
-                    f"Matrix [{self.instance_id}] skipping {content.body!r}: {declared} > {self.config.max_file_size}"
+                self.logger.debug(
+                    f"skipping {content.body!r}: {declared} > {self.config.max_file_size}"
                 )
                 return
 
@@ -407,14 +385,10 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     if len(raw) <= self.config.max_file_size:
                         att_data = raw
                     else:
-                        logger.debug(
-                            f"Matrix [{self.instance_id}] {content.body!r} exceeds size limit"
-                        )
+                        self.logger.debug(f"{content.body!r} exceeds size limit")
                         return
                 except Exception as e:
-                    logger.warning(
-                        f"Matrix [{self.instance_id}] media download failed: {e}"
-                    )
+                    self.logger.warning(f"media download failed: {e}")
                     att_url = self._mxc_to_http(str(mxc))
 
             display_name, avatar = await self._get_profile(str(event.sender))
@@ -456,22 +430,17 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             reply_to_event_id = EventID(reply_to_id)
 
         if self._client is None:
-            logger.warning(f"Matrix [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return
 
         room_id = channel.get("room_id")
         if not room_id:
-            logger.warning(
-                f"Matrix [{self.instance_id}] send: no room_id in channel {channel}"
-            )
+            self.logger.warning(f"send: no room_id in channel {channel}")
             return
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t = rich_header.get("title", "")
-            c = rich_header.get("content", "")
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         mentions = kwargs.get("mentions", [])
         html_text = text
@@ -511,7 +480,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 else:
                     await self._client.send_text(room_id, text, relates_to=relates_obj)
             except Exception as e:
-                logger.error(f"Matrix [{self.instance_id}] send text failed: {e}")
+                self.logger.error(f"send text failed: {e}")
 
         source_proxy = self._source_proxy_from_kwargs(kwargs)
         for att in attachments or []:
@@ -539,7 +508,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     size=len(data_bytes),
                 )
             except Exception as e:
-                logger.error(f"Matrix [{self.instance_id}] upload failed: {e}")
+                self.logger.error(f"upload failed: {e}")
                 label = att.name or att.url or fname
                 await self._send_fallback(
                     room_id, f"[{att.type.capitalize()}: {label}]", relates_obj
@@ -556,7 +525,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     relates_to=relates_obj,
                 )
             except Exception as e:
-                logger.error(f"Matrix [{self.instance_id}] send media failed: {e}")
+                self.logger.error(f"send media failed: {e}")
 
     async def _send_fallback(
         self, room_id: str, body: str, relates_obj: RelatesTo | None = None
@@ -566,7 +535,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
         try:
             await self._client.send_text(RoomID(room_id), body, relates_to=relates_obj)
         except Exception as e:
-            logger.error(f"Matrix [{self.instance_id}] fallback send failed: {e}")
+            self.logger.error(f"fallback send failed: {e}")
 
 
 register("matrix", MatrixConfig, MatrixDriver)
