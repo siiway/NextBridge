@@ -44,6 +44,8 @@
  - python-telegram-bot
  - mautrix-python
  - lark-oapi
+ - websockets
+ - httpx
  - alibabacloud-dingtalk
  - khl-py
  - yunhu

@@ -55,7 +55,7 @@ from services.message import Attachment, NormalizedMessage
 if TYPE_CHECKING:
     pass
 
-logger = log.get_logger()
+logger = log.get_logger("workbench")
 
 
 # ---------------------------------------------------------------------------
@@ -375,9 +375,7 @@ async def _chat_send(driver: "WorkbenchDriver", params: dict) -> dict:
     try:
         await driver.bridge.on_message(msg)
     except Exception as exc:
-        logger.opt(exception=exc).warning(
-            f"Workbench [{driver.instance_id}] chat.send dispatch failed"
-        )
+        driver.logger.opt(exception=exc).warning("chat.send dispatch failed")
         raise
 
     return {"ok": True, "message_id": message_id, "time": now}
@@ -493,9 +491,9 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
 
     async def start(self):
         if not self.config.url or not self.config.token:
-            logger.warning(
-                f"Workbench [{self.instance_id}]: url/token missing; not starting. "
-                f"Run `python main.py workbench pair <url> <code>` to configure."
+            self.logger.warning(
+                "url/token missing; not starting. "
+                "Run `python main.py workbench pair <url> <code>` to configure."
             )
             return
 
@@ -520,7 +518,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         max_backoff = max(backoff, int(self.config.reconnect_max_seconds))
 
         url = _to_wss_url(self.config.url)
-        logger.info(f"Workbench [{self.instance_id}] target: {url}")
+        self.logger.info(f"target: {url}")
 
         try:
             while not self._stop.is_set():
@@ -530,9 +528,8 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    logger.warning(
-                        f"Workbench [{self.instance_id}] disconnected "
-                        f"({type(exc).__name__}): {exc}; retrying in {backoff}s"
+                    self.logger.warning(
+                        f"disconnected ({type(exc).__name__}): {exc}; retrying in {backoff}s"
                     )
                 jitter = random.uniform(0, 0.3 * backoff)
                 try:
@@ -544,7 +541,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                     pass
                 backoff = min(max_backoff, backoff * 2)
         finally:
-            logger.info(f"Workbench [{self.instance_id}] stopped")
+            self.logger.info("stopped")
 
     async def send(self, channel: dict, text: str, **kwargs) -> str | None:
         """Called by the bridge when a rule routes a message to this Workbench.
@@ -609,7 +606,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
             "X-NextBridge-Instance": self.config.workbench_instance_id or "",
             "X-NextBridge-Version": self._version,
         }
-        logger.info(f"Workbench [{self.instance_id}] connecting...")
+        self.logger.info("connecting...")
         async with websockets.connect(
             url,
             additional_headers=headers,
@@ -619,7 +616,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         ) as ws:
             self._ws = ws
             self._handshake_ok = False
-            logger.info(f"Workbench [{self.instance_id}] connected")
+            self.logger.info("connected")
             await self._send_json(
                 {
                     "kind": "hello",
@@ -638,43 +635,30 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
             try:
                 raw_ack = await asyncio.wait_for(ws.recv(), timeout=10)
             except asyncio.TimeoutError:
-                logger.error(
-                    f"Workbench [{self.instance_id}] hello.ack timeout; "
-                    f"closing and retrying"
-                )
+                self.logger.error("hello.ack timeout; closing and retrying")
                 return
             try:
                 ack = json.loads(
                     raw_ack.decode("utf-8") if isinstance(raw_ack, bytes) else raw_ack
                 )
             except (UnicodeDecodeError, json.JSONDecodeError):
-                logger.error(
-                    f"Workbench [{self.instance_id}] malformed hello.ack frame"
-                )
+                self.logger.error("malformed hello.ack frame")
                 return
             # Valid JSON doesn't have to be an object — `[]`, `"x"`, `null`,
             # numbers, etc. all parse but would AttributeError on `.get`.
             # Treat non-dicts as a handshake failure rather than crash.
             if not isinstance(ack, dict):
-                logger.error(
-                    f"Workbench [{self.instance_id}] hello.ack not an object: "
-                    f"{type(ack).__name__}"
-                )
+                self.logger.error(f"hello.ack not an object: {type(ack).__name__}")
                 return
             if (
                 ack.get("kind") != "hello.ack"
                 or not ack.get("ok")
                 or ack.get("instance_id") != self.config.workbench_instance_id
             ):
-                logger.error(
-                    f"Workbench [{self.instance_id}] hello.ack rejected: {ack!r}"
-                )
+                self.logger.error(f"hello.ack rejected: {ack!r}")
                 return
             self._handshake_ok = True
-            logger.info(
-                f"Workbench [{self.instance_id}] handshake complete "
-                f"(team={ack.get('team_id', '?')})"
-            )
+            self.logger.info(f"handshake complete (team={ack.get('team_id', '?')})")
 
             await self._flush_buffer()
 
@@ -730,9 +714,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                 break
             sent += 1
         if sent:
-            logger.debug(
-                f"Workbench [{self.instance_id}] flushed {sent} buffered event(s)"
-            )
+            self.logger.debug(f"flushed {sent} buffered event(s)")
 
     # ------------------------------------------------------------------
     # Incoming frames
@@ -744,25 +726,20 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         # belt-and-braces — protects against future refactors that might
         # interleave incoming frames with the handshake.
         if not self._handshake_ok:
-            logger.warning(
-                f"Workbench [{self.instance_id}] pre-handshake frame dropped"
-            )
+            self.logger.warning("pre-handshake frame dropped")
             return
 
         try:
             text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
             frame = json.loads(text)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            logger.warning(f"Workbench [{self.instance_id}] bad frame ({exc})")
+            self.logger.warning(f"bad frame ({exc})")
             return
         # Valid JSON can be a list, string, number, null — none of which
         # support `.get`. Treat non-objects as malformed instead of letting
         # AttributeError leak out of the dispatch loop.
         if not isinstance(frame, dict):
-            logger.warning(
-                f"Workbench [{self.instance_id}] frame not an object: "
-                f"{type(frame).__name__}"
-            )
+            self.logger.warning(f"frame not an object: {type(frame).__name__}")
             return
 
         kind = frame.get("kind")
@@ -772,9 +749,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         if kind == "pong":
             return
         if kind != "req":
-            logger.debug(
-                f"Workbench [{self.instance_id}] ignoring frame kind={kind}"
-            )
+            self.logger.debug(f"ignoring frame kind={kind}")
             return
 
         rpc_id = frame.get("id")
@@ -796,9 +771,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
             if inspect.isawaitable(result):
                 result = await result
         except Exception as exc:
-            logger.opt(exception=exc).warning(
-                f"Workbench [{self.instance_id}] RPC {method} failed"
-            )
+            self.logger.opt(exception=exc).warning(f"RPC {method} failed")
             await self._send_response(rpc_id, ok=False, error=str(exc))
             return
 
@@ -832,10 +805,7 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
                 )
                 return True
             except Exception as exc:
-                logger.debug(
-                    f"Workbench [{self.instance_id}] send failed "
-                    f"({type(exc).__name__}): {exc}"
-                )
+                self.logger.debug(f"send failed ({type(exc).__name__}): {exc}")
                 try:
                     await self._ws.close()
                 except Exception:
@@ -1034,10 +1004,9 @@ class WorkbenchDriver(BaseDriver[WorkbenchConfig]):
         self._drop_count += 1
         now = time.monotonic()
         if now - self._last_drop_log >= self._DROP_LOG_INTERVAL:
-            logger.warning(
-                f"Workbench [{self.instance_id}] event buffer full; "
-                f"dropped {self._drop_count} oldest event(s) since last log "
-                f"(buffer maxsize={self._event_buffer.maxsize}, "
+            self.logger.warning(
+                f"event buffer full; dropped {self._drop_count} oldest event(s) "
+                f"since last log (buffer maxsize={self._event_buffer.maxsize}, "
                 f"current={self._event_buffer.qsize()})"
             )
             self._drop_count = 0
