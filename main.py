@@ -15,21 +15,18 @@ from services import config_io
 from services.bridge import bridge
 from services.config_schema import GlobalConfig
 from services.db import db_target_version, init_db
+from services.driver_context import DriverContext
+from services.driver_manager import DriverManager
+from services.event_bus import EventBus
 from services.http_server import HttpServerManager
 from services.media import close_all_sessions
+from services.middleware import MiddlewareChain
+from services.plugin_loader import load_all_drivers
 
 logger = log.get_logger("__main__")
 
 
 def _load_project_version() -> str:
-    """Load project version from pyproject.toml.
-
-    Returns:
-        The version string from [project].version.
-
-    Raises:
-        RuntimeError: If pyproject.toml cannot be read or version is missing.
-    """
     try:
         with open("pyproject.toml", "rb") as f:
             version = str(load_toml(f).get("project", {}).get("version", "")).strip()
@@ -42,21 +39,23 @@ def _load_project_version() -> str:
     return version
 
 
-def _load_all_drivers(enabled_platforms: list[str]) -> None:
-    """Import every module in the ``drivers/`` package.
-
-    Each driver module calls ``drivers.registry.register()`` at import time,
-    so this one pass is enough to populate the registry.  The ``registry``
-    module itself is skipped to avoid a circular bootstrap.
-    """
-    for platform in enabled_platforms:
-        module_name = f"drivers.{platform}"
-        if importlib.util.find_spec(module_name) is None:
-            logger.warning(
-                f"Driver module for platform '{platform}' not found, skipping."
-            )
+def _discover_all_driver_modules() -> None:
+    """Import every .py in drivers/ to discover CLI hooks and registrations."""
+    drivers_dir = Path(__file__).parent / "drivers"
+    if not drivers_dir.is_dir():
+        return
+    for py_file in sorted(drivers_dir.glob("*.py")):
+        if py_file.name.startswith("_"):
             continue
-        importlib.import_module(module_name)
+        module_name = f"drivers.{py_file.stem}"
+        if module_name in sys.modules:
+            continue
+        if importlib.util.find_spec(module_name) is None:
+            continue
+        try:
+            importlib.import_module(module_name)
+        except Exception:
+            pass
 
 
 def cmd_convert(src: str, dst: str) -> None:
@@ -104,17 +103,11 @@ async def main():
     bridge.load_sensitive_values(raw)
 
     enabled_platforms = [key for key in raw if key != "global"]
-    _load_all_drivers(enabled_platforms)
-    from drivers.registry import all_drivers
-
-    logger.info("NextBridge starting...")
 
     # Load global configuration
     global_config = raw.get("global", {})
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
     bridge.fuzzy_mention_match = global_config.get("fuzzy_mention_match", False)
-
-    # Validate database configuration
 
     try:
         validated_global = GlobalConfig.model_validate(global_config)
@@ -145,14 +138,20 @@ async def main():
         )
         return
 
-    http_server = HttpServerManager(
-        host=validated_global.http.host,
-        port=validated_global.http.port,
-        root_path=validated_global.http.root_path,
-        log_level=validated_global.http.log_level,
-        start_without_mounts=validated_global.http.enable == "true",
-        version=version,
-    )
+    # ------------------------------------------------------------------
+    # Set up plugin infrastructure
+    # ------------------------------------------------------------------
+    event_bus = EventBus()
+    middleware = MiddlewareChain()
+    bridge.set_middleware(middleware)
+    bridge.set_event_bus(event_bus)
+
+    # Discover and import driver modules (built-in, entrypoints, local)
+    plugin_cfg = validated_global.plugins
+    load_all_drivers(enabled_platforms, plugin_cfg.paths or None)
+    from drivers.registry import all_drivers
+
+    logger.info("NextBridge starting...")
 
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()
@@ -174,37 +173,59 @@ async def main():
     if not config_ok:
         return
 
-    def _on_task_done(task: asyncio.Task) -> None:
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None:
-            logger.opt(exception=exc).error(f"Driver '{task.get_name()}' crashed")
+    http_server = HttpServerManager(
+        host=validated_global.http.host,
+        port=validated_global.http.port,
+        root_path=validated_global.http.root_path,
+        log_level=validated_global.http.log_level,
+        start_without_mounts=validated_global.http.enable == "true",
+        version=version,
+    )
+
+    # ------------------------------------------------------------------
+    # Create driver context and manager
+    # ------------------------------------------------------------------
+    ctx = DriverContext(
+        bridge=bridge,
+        http_server=http_server,
+        event_bus=event_bus,
+        middleware=middleware,
+        version=version,
+        config_path=config_path,
+    )
+
+    driver_manager = DriverManager(
+        event_bus,
+        auto_restart=plugin_cfg.auto_restart,
+        max_restart_attempts=plugin_cfg.max_restart_attempts,
+        health_check_interval=plugin_cfg.health_check_interval,
+    )
 
     logger.info(f"========== NextBridge v{version} Starting ==========")
 
-    driver_tasks: list[asyncio.Task] = []
     for platform, (_, driver_cls) in registry.items():
         for inst_id, cfg in validated.get(platform, {}).items():
-            drv = driver_cls(inst_id, cfg, bridge)
+            drv = driver_cls(inst_id, cfg, ctx)
             drv.attach_http_server(http_server)
-            task = asyncio.create_task(drv.start(), name=f"{platform}/{inst_id}")
-            task.add_done_callback(_on_task_done)
-            driver_tasks.append(task)
+            await driver_manager.register_and_start(platform, inst_id, drv, cfg)
             logger.info(f"Registered driver: {platform}/{inst_id}")
 
-    if not driver_tasks and validated_global.http.enable != "true":
+    has_drivers = bool(driver_manager.drivers)
+    if not has_drivers and validated_global.http.enable != "true":
         logger.error("No drivers configured — nothing to do, exiting.")
         return
-    if not driver_tasks and validated_global.http.enable == "true":
+    if not has_drivers and validated_global.http.enable == "true":
         logger.warning(
             "No drivers configured — starting HTTP server due to http.enable=true"
         )
 
+    # Start health monitoring
+    await driver_manager.start_health_monitor()
+
     # Let drivers perform startup and register webhook sub-apps.
     await asyncio.sleep(0)
 
-    all_tasks = list(driver_tasks)
+    all_tasks: list[asyncio.Task] = []
     http_enable = validated_global.http.enable
     if http_enable == "false":
         if http_server.has_mounts():
@@ -214,27 +235,32 @@ async def main():
             )
         logger.info("Shared HTTP server disabled by configuration (http.enable=false)")
     elif http_server.should_start():
+        admin_cfg = plugin_cfg.admin
+        if admin_cfg.enable:
+            if not admin_cfg.password:
+                logger.critical(
+                    "Admin API is enabled but no password is set "
+                    "(global.plugins.admin.password). Refusing to start."
+                )
+                return
+            http_server.set_driver_manager(driver_manager, password=admin_cfg.password)
         http_task = asyncio.create_task(http_server.run(), name="http/shared")
-        http_task.add_done_callback(_on_task_done)
         all_tasks.append(http_task)
     else:
         logger.info("No HTTP sub-app mounted; shared HTTP server disabled")
 
     try:
-        results = await asyncio.gather(*all_tasks, return_exceptions=True)
-        for task, result in zip(all_tasks, results):
-            if isinstance(result, Exception):
-                logger.error(f"Driver '{task.get_name()}' exited with error: {result}")
+        await asyncio.Event().wait()
     except asyncio.CancelledError:
         logger.info("NextBridge shutting down...")
+    finally:
+        await driver_manager.stop_all()
 
-        # stop all tasks explicitly
         for task in all_tasks:
             if not task.done():
                 task.cancel()
-
-        # wait for all drivers to clean up
-        await asyncio.gather(*all_tasks, return_exceptions=True)
+        if all_tasks:
+            await asyncio.gather(*all_tasks, return_exceptions=True)
 
         logger.info("NextBridge stopped.")
 
@@ -251,10 +277,30 @@ if __name__ == "__main__":
     conv.add_argument("src", help="Source config file (e.g. config.json)")
     conv.add_argument("dst", help="Destination config file (e.g. config.yaml)")
 
+    # Discover CLI hooks from all driver modules (built-in + plugins).
+    # This imports every driver .py but only to pick up register_cli() calls;
+    # the full driver startup happens later in main().
+    _discover_all_driver_modules()
+    from drivers.registry import all_cli_hooks
+
+    for hook in all_cli_hooks():
+        try:
+            hook(subparsers)
+        except Exception:
+            pass
+
     args = parser.parse_args()
 
     if args.command == "convert":
         cmd_convert(args.src, args.dst)
+        sys.exit(0)
+
+    # Dispatch plugin CLI subcommands.
+    # Drivers register handlers by attaching a _cli_handler attribute
+    # to the subparser action via set_defaults().
+    handler = getattr(args, "cli_handler", None)
+    if handler is not None:
+        handler(args)
         sys.exit(0)
 
     try:

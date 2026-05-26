@@ -155,6 +155,46 @@ class HttpConfig(BaseModel):
         return val
 
 
+class AdminApiConfig(BaseModel):
+    """Admin API configuration (driver status, reload, etc.)."""
+
+    enable: CoercedBool = False
+    """Enable the admin API endpoints (``/_nextbridge/drivers``, etc.).
+
+    Disabled by default.  When enabled, ``password`` must also be set."""
+
+    password: str = ""
+    """Password for admin API access (HTTP Basic Auth, username ignored).
+
+    Must be non-empty when ``enable`` is true."""
+
+
+class PluginConfig(BaseModel):
+    """Plugin discovery and driver lifecycle configuration."""
+
+    paths: list[str] = []
+    """Local directories to scan for driver plugin ``.py`` files."""
+
+    auto_restart: CoercedBool = True
+    """Automatically restart crashed drivers with exponential backoff."""
+
+    max_restart_attempts: int = 5
+    """Maximum restart attempts before a crashed driver is abandoned."""
+
+    health_check_interval: int = 60
+    """Seconds between periodic driver health checks.  Set to 0 to disable."""
+
+    admin: AdminApiConfig = AdminApiConfig()
+    """Admin API configuration (driver status, reload, etc.)."""
+
+
+class MiddlewareConfig(BaseModel):
+    """Message middleware configuration."""
+
+    enabled: list[str] = []
+    """Middleware names to enable (evaluated in list order)."""
+
+
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
@@ -198,6 +238,12 @@ class GlobalConfig(BaseModel):
 
     http: HttpConfig = HttpConfig()
     """Shared HTTP server configuration for mounted driver webhooks."""
+
+    plugins: PluginConfig = PluginConfig()
+    """Plugin discovery and driver lifecycle configuration."""
+
+    middleware: MiddlewareConfig = MiddlewareConfig()
+    """Message middleware configuration."""
 
     @field_validator("command_prefix", mode="before")
     def normalize_command_prefix(cls, v):

@@ -2334,8 +2334,8 @@ class QqDriver(BaseDriver[QqConfig]):
                             }
                         )
 
-        main_segments = []
-        standalone_segments = []
+        main_segments: list[dict] = []
+        standalone_segments: list[dict | list[dict]] = []
         for seg in segments:
             if seg["type"] in ("video", "record"):
                 standalone_segments.append(seg)
@@ -2349,7 +2349,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 and standalone_segments
             ):
                 # If only reply segment remains, attach it to the first standalone segment
-                standalone_segments[0] = [main_segments[0], standalone_segments[0]]
+                standalone_segments[0] = [main_segments[0], standalone_segments[0]]  # ty: ignore[invalid-assignment]
                 main_segments = []
             else:
                 msg_id = await self._api_send_group_msg(group_id, main_segments)

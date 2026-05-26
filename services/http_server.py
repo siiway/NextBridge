@@ -2,17 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 import loguru
 import uvicorn
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 import services.logger as log
 
+if TYPE_CHECKING:
+    from services.driver_manager import DriverManager
+
 logger = log.get_logger("http")
+
+_security = HTTPBasic()
 
 
 class _UvicornLogHandler(logging.Handler):
@@ -79,6 +86,8 @@ class HttpServerManager:
         self._mounted_paths: set[str] = set()
         self._ready = asyncio.Event()
         self._started = False
+        self._driver_manager: DriverManager | None = None
+        self._admin_password: str = ""
 
     @staticmethod
     def _normalize_path(path: str) -> str:
@@ -107,11 +116,24 @@ class HttpServerManager:
         )
         self._ready.set()
 
+    def set_driver_manager(self, manager: DriverManager, *, password: str) -> None:
+        self._driver_manager = manager
+        self._admin_password = password
+
     def has_mounts(self) -> bool:
         return bool(self._mounts)
 
     def should_start(self) -> bool:
         return self.start_without_mounts or self.has_mounts()
+
+    def _check_admin_auth(
+        self,
+        credentials: HTTPBasicCredentials = Depends(_security),
+    ) -> None:
+        if not secrets.compare_digest(
+            credentials.password.encode(), self._admin_password.encode()
+        ):
+            raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
 
     async def run(self) -> None:
         """Start shared uvicorn server if mount exists or start_without_mounts is enabled."""
@@ -132,6 +154,34 @@ class HttpServerManager:
             if self.log_level == "debug":
                 payload["mounts"] = [m.path for m in self._mounts]
             return JSONResponse(payload)
+
+        if self._driver_manager is not None:
+
+            @root.get(
+                "/_nextbridge/drivers",
+                dependencies=[Depends(self._check_admin_auth)],
+            )
+            async def _drivers_status() -> JSONResponse:
+                assert self._driver_manager is not None
+                return JSONResponse({"drivers": self._driver_manager.get_status()})
+
+            @root.post(
+                "/_nextbridge/admin/reload/{instance_id}",
+                dependencies=[Depends(self._check_admin_auth)],
+            )
+            async def _reload_driver(instance_id: str) -> JSONResponse:
+                assert self._driver_manager is not None
+                if instance_id not in self._driver_manager.drivers:
+                    return JSONResponse(
+                        {"error": f"unknown driver: {instance_id}"},
+                        status_code=404,
+                    )
+                await self._driver_manager.restart_driver(instance_id)
+                return JSONResponse({"status": "restarted", "instance_id": instance_id})
+
+            logger.info(
+                "Admin API enabled (/_nextbridge/drivers, /_nextbridge/admin/*)"
+            )
 
         for mount in self._mounts:
             root.mount(mount.path, mount.app)

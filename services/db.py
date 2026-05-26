@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     delete,
+    func,
     select,
     update,
 )
@@ -765,6 +766,84 @@ class MessageDB:
             # Final fallback: if there are multiple rows, pick the first deterministically
             # instead of raising MultipleResultsFound.
             return s.execute(base_stmt).scalars().first()
+
+    # ------------------------------------------------------------------
+    # Aggregate helpers (used by control-plane drivers like Workbench)
+    # ------------------------------------------------------------------
+
+    def session(self):
+        """Return a managed DB session (context manager) for advanced queries."""
+        return self._session()
+
+    def stats(self) -> dict[str, int]:
+        with self._session() as s:
+            return {
+                "message_mappings": int(
+                    s.execute(select(func.count()).select_from(MessageMapping)).scalar()
+                    or 0
+                ),
+                "user_mappings": int(
+                    s.execute(select(func.count()).select_from(UserMapping)).scalar()
+                    or 0
+                ),
+                "user_bindings": int(
+                    s.execute(select(func.count()).select_from(UserBinding)).scalar()
+                    or 0
+                ),
+                "binding_codes": int(
+                    s.execute(select(func.count()).select_from(BindingCode)).scalar()
+                    or 0
+                ),
+            }
+
+    def recent_mappings(self, limit: int = 50) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self._session() as s:
+            rows = s.execute(
+                select(
+                    MessageMapping.bridge_id,
+                    MessageMapping.instance_id,
+                    MessageMapping.channel_id,
+                    MessageMapping.platform_msg_id,
+                )
+                .order_by(MessageMapping.platform_msg_id.desc())
+                .limit(limit)
+            ).all()
+            return [
+                {
+                    "bridge_id": r[0],
+                    "instance_id": r[1],
+                    "channel_id": r[2],
+                    "platform_msg_id": r[3],
+                }
+                for r in rows
+            ]
+
+    def list_user_bindings(self, limit: int = 200) -> list[dict]:
+        limit = max(1, min(int(limit), 1000))
+        with self._session() as s:
+            rows = s.execute(
+                select(
+                    UserBinding.global_user_id,
+                    UserBinding.instance_id,
+                    UserBinding.platform_user_id,
+                )
+                .order_by(
+                    UserBinding.global_user_id.asc(),
+                    UserBinding.instance_id.asc(),
+                )
+                .limit(limit)
+            ).all()
+        result: list[dict] = []
+        by_global: dict[str, dict] = {}
+        for global_id, inst, uid in rows:
+            entry = by_global.get(global_id)
+            if entry is None:
+                entry = {"global_user_id": global_id, "accounts": []}
+                by_global[global_id] = entry
+                result.append(entry)
+            entry["accounts"].append({"instance_id": inst, "platform_user_id": uid})
+        return result
 
 
 # Shared singleton

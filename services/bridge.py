@@ -1,14 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import services.logger as log
 from services import config, cqface
 from services.db import msg_db
 from services.message import NormalizedMessage
 from services.message_format import parse_richheader_tag
+
+if TYPE_CHECKING:
+    from services.event_bus import EventBus
+    from services.middleware import MiddlewareChain
 
 logger = log.get_logger("bridge")
 
@@ -53,9 +59,17 @@ class Bridge:
         self._rules: list[dict] = []
         self._senders: dict[str, tuple[str | None, Callable]] = {}
         self._sensitive: frozenset[str] = frozenset()
+        self._middleware: MiddlewareChain | None = None
+        self._event_bus: EventBus | None = None
         self.strict_echo_match: bool = False
         self.fuzzy_mention_match: bool = False
         self.command_prefix: str = "nb"
+
+    def set_middleware(self, chain: MiddlewareChain) -> None:
+        self._middleware = chain
+
+    def set_event_bus(self, bus: EventBus) -> None:
+        self._event_bus = bus
 
     # ------------------------------------------------------------------
     # Setup
@@ -130,6 +144,24 @@ class Bridge:
 
         self._senders[instance_id] = (platform, send_func)
         logger.debug(f"Registered sender for instance: {instance_id}")
+        if self._event_bus:
+            self._event_bus.emit(
+                "driver.status",
+                instance_id=instance_id,
+                platform=platform,
+                connected=True,
+            )
+
+    def senders_snapshot(self) -> list[dict]:
+        """Return a serialisable snapshot of registered senders."""
+        return [
+            {"instance_id": iid, "platform": platform}
+            for iid, (platform, _) in self._senders.items()
+        ]
+
+    def rules_snapshot(self) -> list[dict]:
+        """Return a shallow copy of the current rules list."""
+        return [dict(r) for r in self._rules]
 
     def _get_command_prefix(self) -> str:
         prefix = (self.command_prefix or "nb").strip().lstrip("/")
@@ -293,6 +325,21 @@ class Bridge:
 
     async def on_message(self, msg: NormalizedMessage):
         logger.info(f"on_message: {msg!s}")
+
+        if self._event_bus:
+            self._event_bus.emit(
+                "bridge.message",
+                instance_id=msg.instance_id,
+                platform=msg.platform,
+                channel=msg.channel,
+                user=msg.user,
+                user_id=msg.user_id,
+                text=msg.text,
+                message_id=msg.message_id,
+                time=msg.time,
+                attachments=msg.attachments,
+            )
+
         ping_nickname = self._parse_ping_command(msg.text)
         if ping_nickname is not None:
             if not ping_nickname:
@@ -352,6 +399,13 @@ class Bridge:
                 _, sender = sender_info
                 await sender(msg.channel, self._get_command_help())
             return
+
+        # Run receive middleware (after commands, before routing)
+        if self._middleware and self._middleware.has_receive:
+            result = await self._middleware.run_receive(msg)
+            if result is None:
+                return
+            msg = result
 
         # Save sender's user mapping
         if msg.user_id:
@@ -613,6 +667,15 @@ class Bridge:
                     dict.fromkeys(source_self_mention_names)
                 )
 
+            # Run send middleware
+            if self._middleware and self._middleware.has_send:
+                mw_result = await self._middleware.run_send(
+                    target_id, target_channel, formatted_out, extra_out
+                )
+                if mw_result is None:
+                    continue
+                formatted_out, extra_out = mw_result
+
             try:
                 new_msg_id = await sender(
                     target_channel,
@@ -724,6 +787,15 @@ class Bridge:
                 extra_out["source_self_mention_names"] = list(
                     dict.fromkeys(source_self_mention_names)
                 )
+
+            # Run send middleware
+            if self._middleware and self._middleware.has_send:
+                mw_result = await self._middleware.run_send(
+                    target_id, target_channel, formatted_out, extra_out
+                )
+                if mw_result is None:
+                    continue
+                formatted_out, extra_out = mw_result
 
             try:
                 new_msg_id = await sender(
