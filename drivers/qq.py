@@ -395,6 +395,10 @@ class QqDriver(BaseDriver[QqConfig]):
             if page is None:
                 raise HTTPException(status_code=404, detail="Forward page not found")
 
+            if page.destroyed_at is not None:
+                self._forward_pages.pop(page_id, None)
+                raise HTTPException(status_code=404, detail="Forward page destroyed")
+
             if page.expires_at <= _utc_now() and page.destroyed_at is None:
                 page.destroyed_at = _utc_now()
                 if self.config.forward_render_persist_enabled:
@@ -1446,6 +1450,9 @@ class QqDriver(BaseDriver[QqConfig]):
             + "</span>"
         )
 
+    def _unreliable_uid_label(self) -> str:
+        return self._bilingual("UID 不可靠", "UID Unreliable")
+
     @staticmethod
     def _format_message_time(ts: int) -> str:
         if not ts:
@@ -1603,7 +1610,7 @@ class QqDriver(BaseDriver[QqConfig]):
             message_text = "".join(plain_text_parts).strip() or "[空消息]"
             default_sender = f"{nickname}" + (f" ({user_id})" if user_id else "")
             if user_id and not user_id_reliable:
-                default_sender += " [UID Unreliable]"
+                default_sender += f" [{self._unreliable_uid_label()}]"
 
             header_title_raw = (
                 str(richheader.get("title", "")).strip() if richheader else ""
@@ -1619,9 +1626,9 @@ class QqDriver(BaseDriver[QqConfig]):
                         else f"QQ: {user_id}"
                     )
                 header_content_raw = (
-                    f"{header_content_raw} · UID Unreliable"
+                    f"{header_content_raw} · UID 不可靠"
                     if header_content_raw
-                    else "UID Unreliable"
+                    else "UID 不可靠"
                 )
 
             header_title = html.escape(header_title_raw) or html.escape(default_sender)
@@ -1649,7 +1656,7 @@ class QqDriver(BaseDriver[QqConfig]):
                 hover_parts.append(
                     f"UID: {user_id}"
                     if user_id_reliable
-                    else f"UID: {user_id} (Unreliable)"
+                    else f"UID: {user_id} (UID 不可靠)"
                 )
             if time_hover:
                 hover_parts.append(time_hover)

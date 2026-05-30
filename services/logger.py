@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import sys
 from contextlib import contextmanager
 from datetime import datetime
@@ -46,6 +47,7 @@ LOG_FILE_LEVEL = "DEBUG"
 
 _console_id: int | None = None
 _file_id: int | None = None
+_stdlib_logging_configured = False
 
 _sensitive: set[str] = set()
 
@@ -160,6 +162,39 @@ def _masking_filter(record: "loguru.Record") -> bool:
     return True
 
 
+class _InterceptHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = loguru.logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        frame = logging.currentframe()
+        depth = 2
+        while frame is not None:
+            frame = frame.f_back
+            depth += 1
+            if frame is None:
+                break
+            if frame.f_code.co_filename == logging.__file__:
+                continue
+            break
+        loguru.logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
+
+
+def _configure_stdlib_logging() -> None:
+    global _stdlib_logging_configured
+    if _stdlib_logging_configured:
+        return
+
+    logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
+    for name in ("httpx", "urllib3", "requests"):
+        logging.getLogger(name).handlers.clear()
+        logging.getLogger(name).propagate = True
+    _stdlib_logging_configured = True
+
+
 # ── Level icons ──
 logger.level("TRACE", icon="TRC")
 logger.level("DEBUG", icon="DBG")
@@ -170,6 +205,8 @@ logger.level("CRITICAL", icon="CRT")
 
 # ── Remove default sink ──
 logger.remove()
+
+_configure_stdlib_logging()
 
 # ── Console sink ──
 _console_id = logger.add(
