@@ -119,7 +119,13 @@ class MessageDB:
             engine: Optional SQLAlchemy engine. If not provided, will be created from config.
         """
         self._engine = engine or self._create_engine_from_config()
+        # Create the base ORM schema BEFORE running incremental migrations.
+        # Tables like `user_mappings` are defined only by the ORM models, and
+        # migrations (e.g. 3->4 `ALTER TABLE user_mappings ...`) assume they
+        # already exist. Running migrations first would fail on a fresh or
+        # partially-initialized database.
         _Base.metadata.create_all(self._engine)
+        self._run_migrations(self._engine)
 
     @staticmethod
     def _create_engine_from_config() -> Engine:
@@ -179,8 +185,6 @@ class MessageDB:
 
         logger.info(f"Initializing database engine: {url.split('://')[0]}")
         engine = create_engine(url, **engine_kwargs)
-
-        MessageDB._run_migrations(engine)
 
         return engine
 
