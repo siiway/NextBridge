@@ -129,7 +129,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         @self._client.event
         async def on_ready():
             assert self._client is not None  # Type narrowing
-            self.logger.info(f"logged in as {self._client.user}")
+            self.logger.debug(f"logged in as {self._client.user}")
 
         @self._client.event
         async def on_message(message: discord.Message):

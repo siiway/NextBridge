@@ -108,7 +108,7 @@ class DriverManager:
             managed.state = DriverState.RUNNING
             managed.driver.health = DriverHealth.HEALTHY
             self._event_bus.emit("driver.started", instance_id=managed.instance_id)
-            logger.info(f"Driver '{managed.instance_id}' started")
+            logger.debug(f"Driver '{managed.instance_id}' started")
             await managed.driver.start()
         except asyncio.CancelledError:
             managed.state = DriverState.STOPPING
@@ -129,7 +129,7 @@ class DriverManager:
                 managed.restart_count += 1
                 delay = RESTART_BACKOFF_BASE**managed.restart_count
                 managed.state = DriverState.RESTART_PENDING
-                logger.info(
+                logger.debug(
                     f"Restarting '{managed.instance_id}' in {delay:.0f}s "
                     f"(attempt {managed.restart_count}/{self._max_restart_attempts})"
                 )
@@ -207,7 +207,7 @@ class DriverManager:
         managed.restart_count = 0
         managed.last_error = None
         await self._start_driver(managed)
-        logger.info(f"Driver '{instance_id}' restarted")
+        logger.debug(f"Driver '{instance_id}' restarted")
 
     async def stop_all(self) -> None:
         if self._health_task and not self._health_task.done():

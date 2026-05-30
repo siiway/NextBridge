@@ -60,7 +60,7 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
 
         @client.event(ConnectedEv)
         async def on_connected(_c: NewAClient, _e: ConnectedEv) -> None:
-            self.logger.info("connected")
+            self.logger.debug("connected")
 
         @client.event(DisconnectedEv)
         async def on_disconnected(_c: NewAClient, _e: DisconnectedEv) -> None:
@@ -74,7 +74,7 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
 
         @client.event(PairStatusEv)
         async def on_pair(_c: NewAClient, evt: PairStatusEv) -> None:
-            self.logger.info(f"logged in as {evt.ID.User}")
+            self.logger.debug(f"logged in as {evt.ID.User}")
 
         @client.event(MessageEv)
         async def on_message(_c: NewAClient, evt: MessageEv) -> None:

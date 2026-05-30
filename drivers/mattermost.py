@@ -72,7 +72,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                 if resp.status == 200:
                     me = await resp.json()
                     self._bot_user_id = me.get("id", "")
-                    self.logger.info(
+                    self.logger.debug(
                         f"logged in as {me.get('username', '?')} ({self._bot_user_id})"
                     )
                 else:
@@ -85,7 +85,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         ws_url = (
             server.replace("https://", "wss://").replace("http://", "ws://")
         ) + "/api/v4/websocket"
-        self.logger.info(f"connecting to {ws_url}")
+        self.logger.debug(f"connecting to {ws_url}")
 
         try:
             while True:
@@ -98,7 +98,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
                                 "data": {"token": token},
                             }
                         )
-                        self.logger.info("connected")
+                        self.logger.debug("connected")
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 try:

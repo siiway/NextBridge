@@ -168,19 +168,22 @@ class _InterceptHandler(logging.Handler):
             level = loguru.logger.level(record.levelname).name
         except ValueError:
             level = record.levelno
-        frame = logging.currentframe()
-        depth = 2
-        while frame is not None:
-            frame = frame.f_back
-            depth += 1
-            if frame is None:
-                break
-            if frame.f_code.co_filename == logging.__file__:
-                continue
-            break
-        loguru.logger.opt(depth=depth, exception=record.exc_info).log(
-            level, record.getMessage()
+
+        noisy_prefixes = (
+            "apscheduler",
+            "httpcore",
+            "httpx",
+            "requests",
+            "telegram",
+            "urllib3",
         )
+        if record.name.startswith(noisy_prefixes) and level == "INFO":
+            level = "DEBUG"
+
+        loguru.logger.bind(
+            name=record.name,
+            source=f"{record.filename}:{record.lineno}",
+        ).opt(exception=record.exc_info).log(level, record.getMessage())
 
 
 def _configure_stdlib_logging() -> None:
@@ -190,6 +193,9 @@ def _configure_stdlib_logging() -> None:
 
     logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
     for name in ("httpx", "urllib3", "requests"):
+        logging.getLogger(name).handlers.clear()
+        logging.getLogger(name).propagate = True
+    for name in ("apscheduler", "httpcore", "telegram"):
         logging.getLogger(name).handlers.clear()
         logging.getLogger(name).propagate = True
     _stdlib_logging_configured = True

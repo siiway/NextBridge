@@ -234,7 +234,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app.add_handler(MessageHandler(_COMMAND_FILTER, self._on_command_message))
         self._app.add_error_handler(self._on_error)
 
-        self.logger.info("starting application and polling.")
+        self.logger.debug("starting application and polling.")
 
         # ensure bot's get_me is retried on failure
         # error in start/start_polling shouldn't happen, so let it crash if it does
@@ -249,21 +249,21 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     )
                     await asyncio.sleep(5)
         except asyncio.CancelledError:
-            self.logger.info("initialization cancelled.")
+            self.logger.debug("initialization cancelled.")
             return
         await self._app.start()
         assert self._app.updater is not None
-        self.logger.info("application started.")
+        self.logger.debug("application started.")
         await self._app.updater.start_polling(
             allowed_updates=Update.ALL_TYPES,
             timeout=10,
             bootstrap_retries=10,
         )
-        self.logger.info("polling started.")
+        self.logger.debug("polling started.")
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            self.logger.info("polling cancelled.")
+            self.logger.debug("polling cancelled.")
         finally:
             await self.stop()
 
