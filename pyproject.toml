@@ -36,8 +36,8 @@ dependencies = [
 ]
 
 [[tool.uv.index]]
-name = "ustc"
-url = "https://mirrors.ustc.edu.cn/pypi/web/simple/"
+name = "pypi"
+url = "https://pypi.org/simple"
 
 # Backup
 # [[tool.uv.index]]
