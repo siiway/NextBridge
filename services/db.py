@@ -579,11 +579,27 @@ class MessageDB:
     def get_user_id_by_name(self, instance_id: str, display_name: str) -> str | None:
         """Find a platform-specific user ID by their display name on that instance."""
         with self._session() as s:
-            return (
+            exact = (
                 s.execute(
                     select(UserMapping.platform_user_id).where(
                         UserMapping.instance_id == instance_id,
                         UserMapping.display_name == display_name,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if exact:
+                return exact
+
+            # Fallback to case-insensitive matching for user-entered names such
+            # as `/ping RhenCloud` vs stored `rhencloud`.
+            return (
+                s.execute(
+                    select(UserMapping.platform_user_id).where(
+                        UserMapping.instance_id == instance_id,
+                        func.lower(UserMapping.display_name)
+                        == func.lower(display_name),
                     )
                 )
                 .scalars()

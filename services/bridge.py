@@ -350,7 +350,7 @@ class Bridge:
                 return
 
             msg.text = f"@{ping_nickname}"
-            msg.mentions = [{"id": "", "name": ping_nickname}]
+            msg.mentions = [{"id": "", "name": ping_nickname, "from_ping": True}]
 
         # Handle internal commands
         command = self._parse_internal_command(msg.text)
@@ -562,6 +562,7 @@ class Bridge:
     ) -> str | None:
         mention_id = str(mention.get("id", "") or "")
         mention_name = str(mention.get("name", "") or "").strip()
+        from_ping = bool(mention.get("from_ping"))
 
         if mention_id:
             target_uid = msg_db().get_bound_user_id(
@@ -576,6 +577,15 @@ class Bridge:
             )
             if fuzzy_target_uid:
                 return fuzzy_target_uid
+
+        # /ping is an explicit cross-platform lookup request, so allow
+        # name-based match even when fuzzy_mention_match is disabled.
+        if from_ping and mention_name:
+            ping_target_uid = msg_db().get_user_id_by_name(
+                target_instance, mention_name
+            )
+            if ping_target_uid:
+                return ping_target_uid
 
         target_platform = target_instance
         if target_instance in self._senders:
