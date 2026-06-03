@@ -6,6 +6,43 @@
   <title>$title</title>
   <link rel="icon" href="https://icons.siiway.org/nextbridge/favicon/favicon.ico" />
   <link rel="shortcut icon" href="https://icons.siiway.org/nextbridge/favicon/favicon.ico" />
+  <script>
+    (function () {
+      var themeKey = "nextbridge.qq_forward.theme_mode";
+      var modeKey = "nextbridge.qq_forward.forward_mode";
+
+      function safeGet(key, fallback) {
+        try {
+          var value = localStorage.getItem(key);
+          return value || fallback;
+        } catch (error) {
+          return fallback;
+        }
+      }
+
+      function resolveTheme(mode) {
+        if (mode === "light" || mode === "dark") return mode;
+        return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+      }
+
+      var themeMode = safeGet(themeKey, "system");
+      if (themeMode !== "system" && themeMode !== "light" && themeMode !== "dark") {
+        themeMode = "system";
+      }
+
+      var forwardMode = safeGet(modeKey, "nested");
+      if (forwardMode !== "nested" && forwardMode !== "page") {
+        forwardMode = "nested";
+      }
+
+      var root = document.documentElement;
+      root.dataset.themeMode = themeMode;
+      root.dataset.theme = resolveTheme(themeMode);
+      root.dataset.forwardMode = forwardMode;
+    })();
+  </script>
   <style>
     :root {
       --bg-1: #f2f3f5;
@@ -36,8 +73,7 @@
       --nested-title: var(--ink);
       --nested-arrow: var(--muted);
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
+    html[data-theme="dark"] {
         --bg-1: #1e1e1e;
         --bg-2: #1e1e1e;
         --paper: #333333;
@@ -65,7 +101,35 @@
         --asset-disabled: #888888;
         --nested-title: var(--ink);
         --nested-arrow: var(--muted);
-      }
+    }
+    html[data-theme="light"] {
+      --bg-1: #f2f3f5;
+      --bg-2: #f2f3f5;
+      --paper: #ffffff;
+      --paper-strong: #ffffff;
+      --ink: #000000;
+      --muted: #888888;
+      --line: rgba(0, 0, 0, 0.1);
+      --accent: #555555;
+      --chip: rgba(0, 0, 0, 0.05);
+      --danger: #ff5252;
+      --danger-bg: rgba(255, 82, 82, .1);
+      --head-bg: #f2f3f5;
+      --head-title: #000000;
+      --countdown: #888888;
+      --status-bg: rgba(0, 0, 0, 0.05);
+      --status-text: #333333;
+      --status-destroyed-border: #ff5252;
+      --msg-time: #999999;
+      --content-bg: #ffffff;
+      --content-text: #000000;
+      --reply-title: #555555;
+      --fwd-image-bg: #ffffff;
+      --asset-color: var(--accent);
+      --asset-hover: #333333;
+      --asset-disabled: #aaaaaa;
+      --nested-title: var(--ink);
+      --nested-arrow: var(--muted);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -81,6 +145,9 @@
       margin: 0 auto;
       padding: 0;
     }
+    .page.is-hidden {
+      display: none;
+    }
     .head {
       background: var(--head-bg);
       padding: 18px 20px;
@@ -90,6 +157,137 @@
       top: 0;
       z-index: 10;
       border-bottom: 1px solid var(--line);
+    }
+    .settings-toggle {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      z-index: 70;
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--paper);
+      color: var(--head-title);
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+    }
+    .settings-toggle:hover {
+      background: var(--chip);
+    }
+    .settings-overlay,
+    .forward-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-1);
+    }
+    .settings-overlay {
+      z-index: 90;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+    .forward-overlay {
+      z-index: 80;
+      display: flex;
+      flex-direction: column;
+    }
+    .settings-overlay[hidden],
+    .forward-overlay[hidden] {
+      display: none;
+    }
+    .settings-dialog {
+      width: min(520px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, .28);
+      padding: 18px;
+    }
+    .settings-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .settings-title {
+      margin: 0;
+      font-size: 16px;
+      color: var(--head-title);
+    }
+    .settings-close,
+    .forward-back {
+      border: 1px solid var(--line);
+      background: var(--chip);
+      color: var(--head-title);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .settings-close {
+      padding: 6px 12px;
+    }
+    .settings-list {
+      display: grid;
+      gap: 14px;
+    }
+    .setting-row {
+      display: grid;
+      gap: 8px;
+    }
+    .setting-label {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .setting-select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--bg-1);
+      color: var(--ink);
+      padding: 10px 12px;
+    }
+    .setting-note {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .forward-overlay-bar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--head-bg);
+    }
+    .forward-back {
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      font-size: 18px;
+      flex: 0 0 auto;
+    }
+    .forward-overlay-title {
+      min-width: 0;
+      flex: 1;
+      font-size: 14px;
+      color: var(--head-title);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .forward-overlay-body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding-bottom: 24px;
+    }
+    body.is-modal-open {
+      overflow: hidden;
     }
     h1 {
       margin: 0;
@@ -367,7 +565,8 @@
   </style>
 </head>
 <body>
-  <main class="page">
+  <button type="button" class="settings-toggle" id="settings-toggle" aria-label="Settings">⚙</button>
+  <main class="page" id="forward-page-root">
     <section class="head">
       <h1>$title_html<span class="status-chip $page_state">$page_state_text</span></h1>
       <div class="meta">$meta_primary</div>
@@ -376,20 +575,276 @@
     </section>
     <section>$body</section>
   </main>
+  <div class="settings-overlay" id="settings-overlay" hidden>
+    <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings-head">
+        <h2 class="settings-title" id="settings-title"><span class="lang-zh">界面设置</span><span class="lang-en">Interface Settings</span></h2>
+        <button type="button" class="settings-close" id="settings-close"><span class="lang-zh">关闭</span><span class="lang-en">Close</span></button>
+      </div>
+      <div class="settings-list">
+        <label class="setting-row" for="theme-select">
+          <span class="setting-label"><span class="lang-zh">颜色模式</span><span class="lang-en">Color mode</span></span>
+          <select class="setting-select" id="theme-select">
+            <option value="system">跟随系统 / System</option>
+            <option value="light">亮色 / Light</option>
+            <option value="dark">暗色 / Dark</option>
+          </select>
+          <span class="setting-note"><span class="lang-zh">立即生效，并写入 LocalStorage。</span><span class="lang-en">Applied immediately and stored in LocalStorage.</span></span>
+        </label>
+        <label class="setting-row" for="forward-mode-select">
+          <span class="setting-label"><span class="lang-zh">合并转发显示方式</span><span class="lang-en">Forward display mode</span></span>
+          <select class="setting-select" id="forward-mode-select">
+            <option value="nested">嵌套 / Nested</option>
+            <option value="page">新页面 / Full screen</option>
+          </select>
+          <span class="setting-note"><span class="lang-zh">“新页面”会在点进嵌套消息时进入全屏查看。</span><span class="lang-en">Full screen opens nested forwards in an overlay viewer.</span></span>
+        </label>
+      </div>
+    </div>
+  </div>
+  <div class="forward-overlay" id="forward-overlay" hidden>
+    <div class="forward-overlay-bar">
+      <button type="button" class="forward-back" id="forward-back" aria-label="Back">←</button>
+      <div class="forward-overlay-title" id="forward-overlay-title"></div>
+    </div>
+    <div class="forward-overlay-body" id="forward-overlay-body"></div>
+  </div>
   <script>
     (function () {
       var lang = (navigator.language || '').toLowerCase();
       var langIsZh = lang.startsWith('zh');
       if (!langIsZh) document.documentElement.classList.add('lang-en');
 
+      var themeKey = "nextbridge.qq_forward.theme_mode";
+      var modeKey = "nextbridge.qq_forward.forward_mode";
+      var root = document.documentElement;
+      var body = document.body;
+      var pageRoot = document.getElementById("forward-page-root");
+      var settingsButton = document.getElementById("settings-toggle");
+      var settingsOverlay = document.getElementById("settings-overlay");
+      var settingsClose = document.getElementById("settings-close");
+      var themeSelect = document.getElementById("theme-select");
+      var modeSelect = document.getElementById("forward-mode-select");
+      var forwardOverlay = document.getElementById("forward-overlay");
+      var forwardOverlayBody = document.getElementById("forward-overlay-body");
+      var forwardOverlayTitle = document.getElementById("forward-overlay-title");
+      var forwardBack = document.getElementById("forward-back");
+      var forwardStack = [];
+
+      function safeGet(key, fallback) {
+        try {
+          var value = localStorage.getItem(key);
+          return value || fallback;
+        } catch (error) {
+          return fallback;
+        }
+      }
+
+      function safeSet(key, value) {
+        try {
+          localStorage.setItem(key, value);
+        } catch (error) {}
+      }
+
+      function resolveTheme(mode) {
+        if (mode === "light" || mode === "dark") return mode;
+        return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+      }
+
+      function applyTheme(mode) {
+        root.dataset.themeMode = mode;
+        root.dataset.theme = resolveTheme(mode);
+        if (themeSelect) themeSelect.value = mode;
+      }
+
+      function exitForwardView() {
+        if (!forwardOverlay || forwardOverlay.hidden) return;
+        var rootState = forwardStack[0] || null;
+        forwardStack = [];
+        forwardOverlay.hidden = true;
+        pageRoot.classList.remove("is-hidden");
+        if (forwardOverlayBody) forwardOverlayBody.innerHTML = "";
+        if (forwardOverlayTitle) forwardOverlayTitle.textContent = "";
+        updateBackButton();
+        if (rootState && Number.isFinite(rootState.scrollTop)) {
+          window.scrollTo(0, rootState.scrollTop);
+        }
+      }
+
+      function applyForwardMode(mode) {
+        root.dataset.forwardMode = mode;
+        if (modeSelect) modeSelect.value = mode;
+        if (mode !== "page") {
+          exitForwardView();
+        }
+      }
+
+      function syncSettings() {
+        var themeMode = safeGet(themeKey, "system");
+        if (themeMode !== "system" && themeMode !== "light" && themeMode !== "dark") {
+          themeMode = "system";
+        }
+        var forwardMode = safeGet(modeKey, "nested");
+        if (forwardMode !== "nested" && forwardMode !== "page") {
+          forwardMode = "nested";
+        }
+        applyTheme(themeMode);
+        applyForwardMode(forwardMode);
+      }
+
+      function openSettings() {
+        if (!settingsOverlay) return;
+        settingsOverlay.hidden = false;
+        body.classList.add("is-modal-open");
+      }
+
+      function closeSettings() {
+        if (!settingsOverlay) return;
+        settingsOverlay.hidden = true;
+        body.classList.remove("is-modal-open");
+      }
+
+      function getNestedBody(detailsEl) {
+        if (!detailsEl) return null;
+        return detailsEl.querySelector(":scope > .nested-forward-body") || detailsEl.querySelector(".nested-forward-body");
+      }
+
+      function getNestedTitle(detailsEl) {
+        if (!detailsEl) return langIsZh ? "嵌套合并转发" : "Nested Forward";
+        var titleEl = detailsEl.querySelector(":scope > .nested-forward-title") || detailsEl.querySelector(".nested-forward-title");
+        return titleEl ? titleEl.textContent.replace(/\s+/g, " ").trim() : (langIsZh ? "嵌套合并转发" : "Nested Forward");
+      }
+
+      function updateBackButton() {
+        if (!forwardBack) return;
+        forwardBack.hidden = !forwardOverlay || forwardOverlay.hidden;
+      }
+
+      function enterForwardView(detailsEl) {
+        if (!forwardOverlay || !forwardOverlayBody || !forwardOverlayTitle) return;
+        var bodyEl = getNestedBody(detailsEl);
+        if (!bodyEl) return;
+
+        var nextTitle = getNestedTitle(detailsEl);
+        var nextHtml = bodyEl.innerHTML;
+
+        if (forwardOverlay.hidden) {
+          forwardStack = [{ kind: "root", scrollTop: window.scrollY }];
+          pageRoot.classList.add("is-hidden");
+          forwardOverlay.hidden = false;
+        } else {
+          forwardStack.push({
+            kind: "view",
+            title: forwardOverlayTitle.textContent,
+            html: forwardOverlayBody.innerHTML,
+            scrollTop: forwardOverlayBody.scrollTop,
+          });
+        }
+
+        forwardOverlayTitle.textContent = nextTitle;
+        forwardOverlayBody.innerHTML = nextHtml;
+        forwardOverlayBody.scrollTop = 0;
+        updateBackButton();
+      }
+
+      function goBackForwardView() {
+        if (forwardStack.length <= 1) {
+          exitForwardView();
+          return;
+        }
+
+        forwardStack.pop();
+        var previous = forwardStack[forwardStack.length - 1];
+        if (!previous || previous.kind === "root") {
+          exitForwardView();
+          return;
+        }
+
+        forwardOverlayBody.innerHTML = previous.html;
+        forwardOverlayTitle.textContent = previous.title;
+        forwardOverlayBody.scrollTop = previous.scrollTop || 0;
+        updateBackButton();
+      }
+
+      syncSettings();
+
+      if (window.matchMedia) {
+        var media = window.matchMedia("(prefers-color-scheme: dark)");
+        var onMediaChange = function () {
+          if (root.dataset.themeMode === "system") {
+            applyTheme("system");
+          }
+        };
+        if (media.addEventListener) media.addEventListener("change", onMediaChange);
+        else if (media.addListener) media.addListener(onMediaChange);
+      }
+
+      if (settingsButton) {
+        settingsButton.setAttribute("aria-label", langIsZh ? "界面设置" : "Interface Settings");
+        settingsButton.title = langIsZh ? "界面设置" : "Interface Settings";
+        settingsButton.addEventListener("click", openSettings);
+      }
+
+      if (settingsClose) {
+        settingsClose.addEventListener("click", closeSettings);
+      }
+
+      if (settingsOverlay) {
+        settingsOverlay.addEventListener("click", function (event) {
+          if (event.target === settingsOverlay) closeSettings();
+        });
+      }
+
+      if (themeSelect) {
+        themeSelect.addEventListener("change", function () {
+          var mode = themeSelect.value;
+          if (mode !== "system" && mode !== "light" && mode !== "dark") return;
+          safeSet(themeKey, mode);
+          applyTheme(mode);
+        });
+      }
+
+      if (modeSelect) {
+        modeSelect.addEventListener("change", function () {
+          var mode = modeSelect.value;
+          if (mode !== "nested" && mode !== "page") return;
+          safeSet(modeKey, mode);
+          applyForwardMode(mode);
+        });
+      }
+
+      if (forwardBack) {
+        forwardBack.setAttribute("aria-label", langIsZh ? "返回上一层" : "Back");
+        forwardBack.title = langIsZh ? "返回上一层" : "Back";
+        forwardBack.addEventListener("click", goBackForwardView);
+      }
+
+      document.addEventListener("click", function (event) {
+        var titleEl = event.target.closest(".nested-forward-title");
+        if (!titleEl || root.dataset.forwardMode !== "page") return;
+        var detailsEl = titleEl.closest(".nested-forward");
+        if (!detailsEl) return;
+        event.preventDefault();
+        event.stopPropagation();
+        enterForwardView(detailsEl);
+      });
+
+      document.addEventListener("keydown", function (event) {
+        if (root.dataset.forwardMode !== "page") return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        var titleEl = event.target.closest(".nested-forward-title");
+        if (!titleEl) return;
+        var detailsEl = titleEl.closest(".nested-forward");
+        if (!detailsEl) return;
+        event.preventDefault();
+        enterForwardView(detailsEl);
+      });
+
       var countdown = document.getElementById("destroy-countdown");
-      if (!countdown) return;
-      var expiresAt = parseInt(countdown.getAttribute("data-expires-at") || "", 10);
-      if (!Number.isFinite(expiresAt) || expiresAt <= 0) return;
-      var destroyedAt = parseInt(
-        countdown.getAttribute("data-destroyed-at") || "",
-        10
-      );
+      var expiresAt = countdown ? parseInt(countdown.getAttribute("data-expires-at") || "", 10) : NaN;
+      var destroyedAt = countdown ? parseInt(countdown.getAttribute("data-destroyed-at") || "", 10) : NaN;
       var statusChip = document.querySelector(".status-chip");
       var timer = null;
 
@@ -423,29 +878,30 @@
         }
       }
 
-      if (Number.isFinite(destroyedAt) && destroyedAt > 0) {
-        countdown.textContent = langIsZh ? " · \u5df2\u9500\u6bc1" : " · Destroyed";
-        setDestroyed();
-        return;
-      }
-
-      function tick() {
-        var now = Math.floor(Date.now() / 1000);
-        var remain = expiresAt - now;
-        if (remain <= 0) {
+      if (countdown && Number.isFinite(expiresAt) && expiresAt > 0) {
+        if (Number.isFinite(destroyedAt) && destroyedAt > 0) {
           countdown.textContent = langIsZh ? " · \u5df2\u9500\u6bc1" : " · Destroyed";
           setDestroyed();
-          if (timer) clearInterval(timer);
-          return;
-        }
-        countdown.textContent = (
-          (langIsZh ? " · \u8ddd\u79bb\u9500\u6bc1\u7ea6 " : " · Destroy in approx. ")
-          + formatDuration(remain)
-        );
-      }
+        } else {
+          function tick() {
+            var now = Math.floor(Date.now() / 1000);
+            var remain = expiresAt - now;
+            if (remain <= 0) {
+              countdown.textContent = langIsZh ? " · \u5df2\u9500\u6bc1" : " · Destroyed";
+              setDestroyed();
+              if (timer) clearInterval(timer);
+              return;
+            }
+            countdown.textContent = (
+              (langIsZh ? " · \u8ddd\u79bb\u9500\u6bc1\u7ea6 " : " · Destroy in approx. ")
+              + formatDuration(remain)
+            );
+          }
 
-      tick();
-      timer = setInterval(tick, 1000);
+          tick();
+          timer = setInterval(tick, 1000);
+        }
+      }
     })();
   </script>
 </body>
