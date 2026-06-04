@@ -13,7 +13,7 @@ import services.logger as log
 import services.util as u
 from services import config_io
 from services.bridge import bridge
-from services.config_schema import GlobalConfig
+from services.config_schema import GlobalConfig, RulesFile
 from services.db import db_target_version, init_db
 from services.driver_context import DriverContext
 from services.driver_manager import DriverManager
@@ -79,6 +79,92 @@ def cmd_convert(src: str, dst: str) -> None:
         sys.exit(1)
 
     print(f"Converted {src_path} → {dst_path}")
+
+
+def cmd_validate(args: argparse.Namespace) -> None:
+    """Validate config / rules files for syntax correctness."""
+    data_path = Path(args.data_path or u.get_data_path())
+    manual_config = args.config is not None
+    manual_rules = args.rules is not None
+    any_manual = manual_config or manual_rules
+
+    if manual_config:
+        config_path = Path(args.config)
+        if not config_path.is_file():
+            print(f"Config file not found: {config_path}", file=sys.stderr)
+            sys.exit(2)
+        validate_config = True
+    elif not any_manual:
+        config_path = config_io.find_config(data_path)
+        validate_config = config_path is not None
+    else:
+        validate_config = False
+
+    if manual_rules:
+        rules_path = Path(args.rules)
+        if not rules_path.is_file():
+            print(f"Rules file not found: {rules_path}", file=sys.stderr)
+            sys.exit(2)
+        validate_rules = True
+    elif not any_manual:
+        rules_path = config_io.find_rules(data_path)
+        validate_rules = rules_path is not None
+    else:
+        validate_rules = False
+
+    has_errors = False
+
+    if validate_config:
+        assert config_path is not None
+        print(f"Validating config: {config_path}", flush=True)
+        try:
+            raw = config_io.load_config(config_path)
+        except Exception as exc:
+            print(f"Failed to parse config file: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        global_raw = raw.get("global", {})
+        try:
+            GlobalConfig.model_validate(global_raw)
+            print("  global: OK")
+        except ValidationError as exc:
+            print(f"  global: FAILED\n{exc}", file=sys.stderr)
+            has_errors = True
+
+        _discover_all_driver_modules()
+        from drivers.registry import all_drivers
+
+        registry = all_drivers()
+        for platform, (config_cls, _) in registry.items():
+            for inst_id, inst_raw in raw.get(platform, {}).items():
+                try:
+                    config_cls.model_validate(inst_raw)
+                    print(f"  {platform}.{inst_id}: OK")
+                except ValidationError as exc:
+                    print(f"  {platform}.{inst_id}: FAILED\n{exc}", file=sys.stderr)
+                    has_errors = True
+
+    if validate_rules:
+        assert rules_path is not None
+        print(f"Validating rules: {rules_path}", flush=True)
+        try:
+            data = config_io.load_config(rules_path)
+        except Exception as exc:
+            print(f"Failed to parse rules file: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            RulesFile.model_validate(data)
+            print("  rules: OK")
+        except ValidationError as exc:
+            print(f"  rules: FAILED\n{exc}", file=sys.stderr)
+            has_errors = True
+
+    if has_errors:
+        sys.exit(1)
+
+    print("Validation passed.")
+    sys.exit(0)
 
 
 async def main():
@@ -277,6 +363,22 @@ if __name__ == "__main__":
     conv.add_argument("src", help="Source config file (e.g. config.json)")
     conv.add_argument("dst", help="Destination config file (e.g. config.yaml)")
 
+    valid = subparsers.add_parser(
+        "validate",
+        help="Validate config and rules files for syntax correctness",
+    )
+    valid.add_argument(
+        "--config", "-c", help="Path to config file (optional, overrides default)"
+    )
+    valid.add_argument(
+        "--rules", "-r", help="Path to rules file (optional, overrides default)"
+    )
+    valid.add_argument(
+        "--data-path",
+        "-d",
+        help="Data directory for default discovery (defaults to NEXTBRIDGE_DATA_PATH or data/)",
+    )
+
     # Discover CLI hooks from all driver modules (built-in + plugins).
     # This imports every driver .py but only to pick up register_cli() calls;
     # the full driver startup happens later in main().
@@ -293,6 +395,10 @@ if __name__ == "__main__":
 
     if args.command == "convert":
         cmd_convert(args.src, args.dst)
+        sys.exit(0)
+
+    if args.command == "validate":
+        cmd_validate(args)
         sys.exit(0)
 
     # Dispatch plugin CLI subcommands.

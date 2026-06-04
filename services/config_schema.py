@@ -3,7 +3,7 @@ from __future__ import annotations
 from os import environ
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 import services.logger as log
 
@@ -313,3 +313,29 @@ class _DriverConfig(BaseModel):
 
     Defaults to following ``proxy`` when unset.
     """
+
+
+# ---------------------------------------------------------------------------
+# Rule validation models
+# ---------------------------------------------------------------------------
+
+
+class Rule(BaseModel):
+    """Pydantic model for a single routing rule."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str | None = None
+    type: Literal["connect", "forward"] | None = None
+    channels: dict[str, object] | None = None
+    from_: dict[str, object] | None = Field(None, alias="from")
+    to: dict[str, object] | None = None
+    msg: dict[str, object] | None = None
+
+
+class RulesFile(BaseModel):
+    """Pydantic model for the rules file (top-level container)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    rules: list[Rule] = []
