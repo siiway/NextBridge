@@ -28,6 +28,8 @@
 #   user_id        – Bot account user ID    (required for send_method="api")
 #   webhook_url    – Incoming Webhook URL   (required for send_method="webhook")
 #   listen_path    – HTTP path for the outgoing webhook listener (default: "/rocketchat/webhook")
+#   webhook_secret – Optional secret appended as an extra path segment
+#                    (host:port/<listen_path>/<webhook_secret>). Omitted when unset.
 #   webhook_token  – Outgoing webhook token for request verification (recommended)
 #   max_file_size  – Max bytes per attachment when sending (default: 50 MB)
 #
@@ -66,6 +68,7 @@ class RocketChatConfig(_DriverConfig):
     webhook_url: str = ""
     # Listener (receive side)
     listen_path: str = "/rocketchat/webhook"
+    webhook_secret: str = ""
     webhook_token: str = ""
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
@@ -108,8 +111,11 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
+        route_path, log_path = self.webhook_route(
+            self.config.listen_path, self.config.webhook_secret
+        )
         app = FastAPI()
-        app.add_api_route("/", self._handle_webhook, methods=["POST"])
+        app.add_api_route(route_path, self._handle_webhook, methods=["POST"])
         if self.http_server is None:
             self.logger.error(
                 f"Rocket.Chat [{self.instance_id}] shared HTTP server unavailable"
@@ -117,7 +123,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
         self.logger.info(
-            f"Rocket.Chat [{self.instance_id}] webhook mounted at {self.config.listen_path} "
+            f"Rocket.Chat [{self.instance_id}] webhook mounted at {log_path} "
             f"(send_method={self.config.send_method})"
         )
         try:

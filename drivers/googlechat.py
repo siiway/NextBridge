@@ -13,6 +13,8 @@
 #   service_account_file – Path to service account JSON key file (required*)
 #   service_account_json – Inline service account JSON string    (alternative)
 #   listen_path          – HTTP path  (default: "/google-chat/events")
+#   webhook_secret       – Optional secret appended as an extra path segment
+#                          (host:port/<listen_path>/<webhook_secret>); omitted when unset
 #   endpoint_url         – Full public URL of this endpoint, e.g.
 #                          "https://example.com/google-chat/events".
 #                          When set, incoming requests are verified against
@@ -53,6 +55,7 @@ class GoogleChatConfig(_DriverConfig):
     service_account_file: str = ""
     service_account_json: str = ""
     listen_path: str = "/google-chat/events"
+    webhook_secret: str = ""
     endpoint_url: str = ""
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
@@ -106,8 +109,11 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
+        route_path, log_path = self.webhook_route(
+            self.config.listen_path, self.config.webhook_secret
+        )
         app = FastAPI()
-        app.add_api_route("/", self._handle_event, methods=["POST"])
+        app.add_api_route(route_path, self._handle_event, methods=["POST"])
         if self.http_server is None:
             self.logger.error(
                 f"Google Chat [{self.instance_id}] shared HTTP server unavailable"
@@ -115,7 +121,7 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
         self.logger.info(
-            f"Google Chat [{self.instance_id}] webhook mounted at {self.config.listen_path}"
+            f"Google Chat [{self.instance_id}] webhook mounted at {log_path}"
         )
         try:
             await asyncio.Event().wait()

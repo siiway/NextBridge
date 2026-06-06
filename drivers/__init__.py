@@ -109,6 +109,34 @@ class BaseDriver(ABC, Generic[T]):
         self.http_server = http_server
 
     # ------------------------------------------------------------------
+    # Webhook helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def webhook_route(base_path: str, secret: str = "") -> tuple[str, str]:
+        """Compute the route path and a log-safe path for an inbound webhook.
+
+        Returns ``(route_path, log_path)``:
+
+        * ``route_path`` is where the sub-app registers its handler — ``"/"``
+          normally, or ``"/<secret>"`` when a secret is configured.  The driver
+          still mounts the sub-app at the unchanged *base_path*, so the full
+          webhook URL becomes ``host:port/<base_path>/<secret>``.
+        * ``log_path`` is a display of the full URL path with the secret masked
+          as ``***``.  The secret is never put into the log string, so this does
+          not rely on the logger's (length-based) sensitive-value redaction,
+          while the *base_path* stays visible.
+
+        When *secret* is empty the URL stays ``host:port/<base_path>`` and the
+        route is registered at ``"/"``.
+        """
+        secret = (secret or "").strip("/")
+        if not secret:
+            return "/", base_path
+        base = base_path.rstrip("/")
+        return f"/{secret}", f"{base}/***"
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 

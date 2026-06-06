@@ -14,6 +14,8 @@
 #   robot_code     – Bot robot code     (required for sending)
 #   signing_secret – Webhook signing secret (optional; skips verify if absent)
 #   listen_path    – HTTP path          (default: "/dingtalk/event")
+#   webhook_secret – Optional secret appended as an extra path segment
+#                    (host:port/<listen_path>/<webhook_secret>); omitted when unset
 #
 # Rule channel keys:
 #   open_conversation_id – DingTalk open conversation ID
@@ -56,6 +58,7 @@ class DingTalkConfig(_DriverConfig):
     robot_code: str
     signing_secret: str = ""
     listen_path: str = "/dingtalk/event"
+    webhook_secret: str = ""
     max_file_size: int = 20 * 1024 * 1024
 
 
@@ -83,8 +86,11 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         self._robot_client = RobotClient(cfg)
         self._session = aiohttp.ClientSession()
 
+        route_path, log_path = self.webhook_route(
+            self.config.listen_path, self.config.webhook_secret
+        )
         app = FastAPI()
-        app.add_api_route("/", self._handle_http, methods=["POST"])
+        app.add_api_route(route_path, self._handle_http, methods=["POST"])
         if self.http_server is None:
             self.logger.error(
                 f"DingTalk [{self.instance_id}] shared HTTP server unavailable"
@@ -92,7 +98,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
         self.logger.info(
-            f"DingTalk [{self.instance_id}] webhook mounted at {self.config.listen_path}"
+            f"DingTalk [{self.instance_id}] webhook mounted at {log_path}"
         )
 
         try:

@@ -4,8 +4,11 @@
 #           sync-only yunhu.Openapi helper class).
 #
 # Config keys (under yunhu.<instance_id>):
-#   token        – Bot token from the Yunhu control console (required)
-#   webhook_path – HTTP path for the webhook endpoint (default "/yunhu-webhook")
+#   token          – Bot token from the Yunhu control console (required)
+#   webhook_path   – HTTP path for the webhook endpoint (default "/yunhu-webhook")
+#   webhook_secret – Optional secret appended to the webhook URL as an extra
+#                    path segment (host:port/<webhook_path>/<webhook_secret>).
+#                    When unset the URL stays host:port/<webhook_path>.
 #   proxy_host   – Cloudflare Worker base URL for the media proxy.
 #                  /pfp?url=  is used for Yunhu CDN avatars (adds Referer).
 #                  /media?url= is used for external CDN URLs (e.g. Discord)
@@ -35,6 +38,7 @@ from drivers import BaseDriver
 class YunhuConfig(_DriverConfig):
     token: str = ""
     webhook_path: str = "/yunhu-webhook"
+    webhook_secret: str = ""
     proxy_host: str = "https://yh-proxy.siiway.top"
     max_file_size: int = 10 * 1024 * 1024
     proxy: str | None = UNSET
@@ -77,14 +81,17 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         self._session = aiohttp.ClientSession(connector=connector)
 
         path: str = self.config.webhook_path
+        # When a secret is configured the webhook URL becomes
+        # host:port/<webhook_path>/<webhook_secret>; otherwise it stays bare.
+        route_path, log_path = self.webhook_route(path, self.config.webhook_secret)
 
         app = FastAPI()
-        app.add_api_route("/", self._handle_webhook, methods=["POST"])
+        app.add_api_route(route_path, self._handle_webhook, methods=["POST"])
         if self.http_server is None:
             self.logger.error("shared HTTP server unavailable")
             return
         self.http_server.mount(self.instance_id, path, app)
-        self.logger.info(f"webhook mounted at {path}")
+        self.logger.info(f"webhook mounted at {log_path}")
 
         await asyncio.Event().wait()  # run indefinitely
 

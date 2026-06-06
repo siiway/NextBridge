@@ -16,6 +16,9 @@
 #   api_key       – Bot API key shown in the bot settings page (required)
 #   listen_path   – HTTP path for the webhook endpoint
 #                   (default: "/vocechat/webhook")
+#   webhook_secret – Optional secret appended as an extra path segment
+#                    (host:port/<listen_path>/<webhook_secret>). Omitted from
+#                    the URL when unset.
 #   max_file_size – Max bytes per attachment (default: 50 MB)
 #
 # Rule channel keys (one of):
@@ -43,6 +46,7 @@ class VoceChatConfig(_DriverConfig):
     server_url: str
     api_key: str
     listen_path: str = "/vocechat/webhook"
+    webhook_secret: str = ""
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
 
@@ -71,9 +75,12 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         )
         self.bridge.register_sender(self.instance_id, self.send)
 
+        route_path, log_path = self.webhook_route(
+            self.config.listen_path, self.config.webhook_secret
+        )
         app = FastAPI()
-        app.add_api_route("/", self._handle_health, methods=["GET"])
-        app.add_api_route("/", self._handle_event, methods=["POST"])
+        app.add_api_route(route_path, self._handle_health, methods=["GET"])
+        app.add_api_route(route_path, self._handle_event, methods=["POST"])
         if self.http_server is None:
             self.logger.error(
                 f"VoceChat [{self.instance_id}] shared HTTP server unavailable"
@@ -81,7 +88,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
         self.logger.info(
-            f"VoceChat [{self.instance_id}] webhook mounted at {self.config.listen_path}"
+            f"VoceChat [{self.instance_id}] webhook mounted at {log_path}"
         )
         try:
             await asyncio.Event().wait()

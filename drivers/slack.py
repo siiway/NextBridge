@@ -17,6 +17,8 @@
 #   incoming_webhook_url – Incoming Webhook URL for send_method="webhook"
 #   signing_secret       – Slack signing secret for Events API signature verification
 #   listen_path          – HTTP path for Events API (default: "/slack/events")
+#   webhook_secret       – Optional secret appended as an extra path segment
+#                          (host:port/<listen_path>/<webhook_secret>); omitted when unset
 #   max_file_size        – Max bytes per attachment when sending (default 50 MB)
 #
 # Rule channel keys:
@@ -56,6 +58,7 @@ class SlackConfig(_DriverConfig):
     incoming_webhook_url: str = ""
     signing_secret: str = ""
     listen_path: str = "/slack/events"
+    webhook_secret: str = ""
     max_file_size: int = 50 * 1024 * 1024
     proxy: str | None = UNSET
 
@@ -137,13 +140,16 @@ class SlackDriver(BaseDriver[SlackConfig]):
 
         # ------ Events API webhook receive -----------------------------------
         if signing_secret:
+            route_path, log_path = self.webhook_route(
+                listen_path, self.config.webhook_secret
+            )
             app = FastAPI()
-            app.add_api_route("/", self._handle_events_api, methods=["POST"])
+            app.add_api_route(route_path, self._handle_events_api, methods=["POST"])
             if self.http_server is None:
                 self.logger.error("shared HTTP server unavailable")
                 return
             self.http_server.mount(self.instance_id, listen_path, app)
-            self.logger.info(f"Events API mounted at {listen_path}")
+            self.logger.info(f"Events API mounted at {log_path}")
             try:
                 await asyncio.Event().wait()
             finally:

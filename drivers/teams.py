@@ -11,6 +11,8 @@
 #   app_id        – Azure bot application (client) ID     (required)
 #   app_secret    – Azure bot client secret               (required)
 #   listen_path   – HTTP path for the messaging endpoint  (default: "/api/messages")
+#   webhook_secret – Optional secret appended as an extra path segment
+#                    (host:port/<listen_path>/<webhook_secret>). Omitted when unset.
 #   max_file_size – Max bytes per attachment when sending (default 20 MB)
 #
 # Rule channel keys:
@@ -40,6 +42,7 @@ class TeamsConfig(_DriverConfig):
     app_id: str
     app_secret: str
     listen_path: str = "/api/messages"
+    webhook_secret: str = ""
     max_file_size: int = 20 * 1024 * 1024
     proxy: str | None = UNSET
 
@@ -70,13 +73,16 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
+        route_path, log_path = self.webhook_route(
+            self.config.listen_path, self.config.webhook_secret
+        )
         app = FastAPI()
-        app.add_api_route("/", self._handle_activity, methods=["POST"])
+        app.add_api_route(route_path, self._handle_activity, methods=["POST"])
         if self.http_server is None:
             self.logger.error("shared HTTP server unavailable")
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        self.logger.info(f"webhook mounted at {self.config.listen_path}")
+        self.logger.info(f"webhook mounted at {log_path}")
         try:
             await asyncio.Event().wait()
         finally:

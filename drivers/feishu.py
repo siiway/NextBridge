@@ -23,6 +23,8 @@
 #   verification_token   – Event verification token  (HTTP mode only)
 #   encrypt_key          – Event encryption key  (HTTP mode; leave "" to disable)
 #   listen_path          – HTTP path for events    (HTTP mode; default: "/event")
+#   webhook_secret       – Optional secret appended as an extra path segment
+#                          (host:port/<listen_path>/<webhook_secret>); omitted when unset
 #
 # Rule channel keys:
 #   chat_id – Feishu open chat ID, e.g. "oc_xxxxxxxxxxxxxxxxxx"
@@ -65,6 +67,7 @@ class FeishuConfig(_DriverConfig):
     verification_token: str = ""
     encrypt_key: str = ""
     listen_path: str = "/event"
+    webhook_secret: str = ""
     max_file_size: int = 50 * 1024 * 1024
 
 
@@ -187,15 +190,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
 
     async def _start_http_server(self) -> None:
         path = self.config.listen_path
+        route_path, log_path = self.webhook_route(path, self.config.webhook_secret)
 
         app = FastAPI()
-        app.add_api_route("/", self._handle_http, methods=["POST"])
+        app.add_api_route(route_path, self._handle_http, methods=["POST"])
         if self.http_server is None:
             self.logger.error("shared HTTP server unavailable")
             return
 
         self.http_server.mount(self.instance_id, path, app)
-        self.logger.info(f"HTTP webhook mounted at {path}")
+        self.logger.info(f"HTTP webhook mounted at {log_path}")
 
         await asyncio.Event().wait()
 
