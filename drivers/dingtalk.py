@@ -97,9 +97,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        self.logger.info(
-            f"DingTalk [{self.instance_id}] webhook mounted at {log_path}"
-        )
+        self.logger.info(f"DingTalk [{self.instance_id}] webhook mounted at {log_path}")
 
         try:
             await asyncio.Event().wait()

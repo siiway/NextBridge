@@ -87,9 +87,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        self.logger.info(
-            f"VoceChat [{self.instance_id}] webhook mounted at {log_path}"
-        )
+        self.logger.info(f"VoceChat [{self.instance_id}] webhook mounted at {log_path}")
         try:
             await asyncio.Event().wait()
         finally:
