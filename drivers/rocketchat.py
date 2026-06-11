@@ -341,7 +341,6 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         source_proxy: str | None,
         reply_to_id: str | None = None,
     ) -> None:
-
         if text.strip():
             await self._api_post_message(
                 server, room_id, text, alias, avatar, reply_to_id

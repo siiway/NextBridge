@@ -29,6 +29,7 @@
 import asyncio
 import html
 import io
+from typing import TYPE_CHECKING, TypedDict
 from urllib.parse import urlencode
 
 from PIL import Image, UnidentifiedImageError
@@ -44,6 +45,83 @@ from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
+
+if TYPE_CHECKING:
+    import httpcore
+    import httpx
+
+
+class _HTTPXRequestCommonKwargs(TypedDict, total=False):
+    pool_timeout: float | None
+    connect_timeout: float | None
+    read_timeout: float | None
+    write_timeout: float | None
+    media_write_timeout: float | None
+    proxy: str | httpx.Proxy | httpx.URL | None
+
+
+def _patch_httpcore_proxy_tunnel():
+    """Apply monkey-patch for httpcore connection pool poisoning via proxy TLS failures.
+
+    When a CONNECT-tunneled request fails during start_tls (e.g. ConnectError),
+    the tunnel's inner connection is left in an ACTIVE state but can never be
+    reused, permanently leaking a connection slot from the pool.
+    Once max_connections slots are leaked, every new request hits PoolTimeout.
+
+    See: https://github.com/encode/httpcore/discussions/921
+    """
+    try:
+        import httpcore._async.http_proxy as async_mod
+        import httpcore._sync.http_proxy as sync_mod
+    except ImportError:
+        return
+
+    _orig_async_handle = async_mod.AsyncTunnelHTTPConnection.handle_async_request
+
+    async def _patched_async_handle(
+        self: async_mod.AsyncTunnelHTTPConnection,
+        request: httpcore.Request,
+    ) -> httpcore.Response:
+        try:
+            return await _orig_async_handle(self, request)
+        except Exception:
+            if not getattr(self, "_connected", True):
+                try:
+                    await self._connection.aclose()
+                except Exception:
+                    pass
+            raise
+
+    setattr(
+        async_mod.AsyncTunnelHTTPConnection,
+        "handle_async_request",
+        _patched_async_handle,
+    )
+
+    _orig_sync_handle = sync_mod.TunnelHTTPConnection.handle_request
+
+    def _patched_sync_handle(
+        self: sync_mod.TunnelHTTPConnection,
+        request: httpcore.Request,
+    ) -> httpcore.Response:
+        try:
+            return _orig_sync_handle(self, request)
+        except Exception:
+            if not getattr(self, "_connected", True):
+                try:
+                    self._connection.close()
+                except Exception:
+                    pass
+            raise
+
+    setattr(
+        sync_mod.TunnelHTTPConnection,
+        "handle_request",
+        _patched_sync_handle,
+    )
+
+
+_patch_httpcore_proxy_tunnel()
 
 
 class TelegramConfig(_DriverConfig):
@@ -217,20 +295,23 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
-        # https://github.com/HKUDS/nanobot/blob/58389766a7ab307c7d5a31a1df36d1cacc625054/{file}#L143
-        req = HTTPXRequest(
-            pool_timeout=5.0,
-            connect_timeout=30.0,
-            read_timeout=30.0,
-            write_timeout=30.0,
-            media_write_timeout=30.0,
-            proxy=self._proxy,
-        )
+        # Use a dedicated connection pool for long-polling getUpdates
+        # to avoid starving the general request pool.
+        common_kwargs: _HTTPXRequestCommonKwargs = {
+            "pool_timeout": 5.0,
+            "connect_timeout": 30.0,
+            "read_timeout": 30.0,
+            "write_timeout": 30.0,
+            "media_write_timeout": 30.0,
+            "proxy": self._proxy,
+        }
+        get_updates_req = HTTPXRequest(connection_pool_size=1, **common_kwargs)
+        req = HTTPXRequest(**common_kwargs)
         self._app = (
             Application.builder()
             .token(self.config.bot_token)
             .request(req)
-            .get_updates_request(req)
+            .get_updates_request(get_updates_req)
             .build()
         )
         self._app.add_handler(MessageHandler(_CONTENT_FILTER, self._on_message))
