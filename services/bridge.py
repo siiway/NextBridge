@@ -355,14 +355,14 @@ class Bridge:
         # Handle internal commands
         command = self._parse_internal_command(msg.text)
         if command is not None:
-            if not self._is_allowed_command_source(msg):
-                logger.debug(
-                    f"Ignored command from non-configured channel: "
-                    f"instance={msg.instance_id} channel={msg.channel}"
-                )
-                return
-
             action, args = command
+            if not self._is_allowed_command_source(msg):
+                if action != "bind" or not msg.is_dm:
+                    logger.debug(
+                        f"Ignored command from non-configured channel: "
+                        f"instance={msg.instance_id} channel={msg.channel}"
+                    )
+                    return
             sender_info = self._senders.get(msg.instance_id)
             if action in ("", "help"):
                 if sender_info:
