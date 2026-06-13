@@ -513,6 +513,70 @@ class QqDriver(BaseDriver[QqConfig]):
 
         if data.get("message_type") == "group":
             await self._on_group_message(data)
+        elif data.get("message_type") == "private":
+            await self._on_private_message(data)
+
+    async def _on_private_message(self, event: dict):
+        if event.get("user_id") == event.get("self_id"):
+            return
+
+        user_id = str(event.get("user_id", ""))
+        sender = event.get("sender", {})
+        nickname = sender.get("nickname") or user_id
+        self.logger.debug(
+            f"NapCat [{self.instance_id}] private message from {nickname}({user_id})"
+        )
+
+        time = event.get("time")
+
+        segments = event.get("message", [])
+        if isinstance(segments, str):
+            text = segments
+            mentions = []
+        else:
+            text_parts = []
+            mentions = []
+            for seg in segments:
+                t = seg.get("type", "")
+                d = seg.get("data", {})
+                if t == "text":
+                    text_parts.append(d.get("text", ""))
+                elif t == "at":
+                    qq = str(d.get("qq", ""))
+                    if qq:
+                        mentions.append({"id": qq, "name": qq})
+                        text_parts.append(f"@{qq}")
+            text = "".join(text_parts)
+
+        if not text.strip():
+            self.logger.debug(
+                f"NapCat [{self.instance_id}] ignoring empty private message from {nickname}({user_id})"
+            )
+            return
+
+        avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
+        self_id = str(event.get("self_id", ""))
+
+        msg = NormalizedMessage(
+            platform=self.platform_name,
+            instance_id=self.instance_id,
+            channel={"user_id": user_id},
+            nickname=nickname,
+            user_id=user_id,
+            user_avatar=avatar_url,
+            text=text,
+            attachments=[],
+            message_id=str(event.get("message_id", "")),
+            reply_parent=None,
+            mentions=mentions,
+            source_self_id=self_id,
+            source_mentioned_self=False,
+            time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
+            source_proxy=self._media_proxy,
+            username="",
+            is_dm=True,
+        )
+        await self.bridge.on_message(msg)
 
     async def _on_group_message(self, event: dict):
         # NapCat echoes the bot's own sent messages back as real events;
@@ -1947,6 +2011,21 @@ class QqDriver(BaseDriver[QqConfig]):
                 return str(data["message_id"])
         return None
 
+    async def _api_send_private_msg(
+        self, user_id, message, *, timeout: float = 30.0
+    ) -> str | None:
+        """Send a private message via OneBot. Returns ``message_id`` on success or ``None``."""
+        resp = await self._call(
+            "send_private_msg",
+            {"user_id": int(user_id), "message": message},
+            timeout=timeout,
+        )
+        if resp and resp.get("status") == "ok":
+            data = resp.get("data") or {}
+            if "message_id" in data:
+                return str(data["message_id"])
+        return None
+
     async def _api_get_group_member_info(
         self, group_id, user_id, *, no_cache: bool = False
     ) -> dict | None:
@@ -2109,9 +2188,10 @@ class QqDriver(BaseDriver[QqConfig]):
         **kwargs,
     ):
         group_id = channel.get("group_id")
-        if not group_id:
+        user_id = channel.get("user_id")
+        if not group_id and not user_id:
             self.logger.warning(
-                f"NapCat [{self.instance_id}] send: no group_id in channel {channel}"
+                f"NapCat [{self.instance_id}] send: no group_id or user_id in channel {channel}"
             )
             return None
 
@@ -2120,6 +2200,13 @@ class QqDriver(BaseDriver[QqConfig]):
                 f"NapCat [{self.instance_id}] send: not connected, message dropped"
             )
             return None
+
+        if user_id and not group_id:
+            segments: list[dict] = []
+            if text:
+                segments.append({"type": "text", "data": {"text": text}})
+            msg_id = await self._api_send_private_msg(user_id, segments)
+            return [msg_id] if msg_id else None
 
         segments: list[dict] = []
         msg_ids: list[str] = []

@@ -38,6 +38,7 @@ class NormalizedMessage:
         None  # proxy URL for downloading attachments from source platform
     )
     username: str = ""  # user's platform-specific name
+    is_dm: bool = False  # whether this message is a direct/private message
 
     @property
     def user(self) -> str:

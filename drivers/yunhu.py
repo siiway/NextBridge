@@ -252,6 +252,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             message_id=str(mid) if mid else None,
             reply_parent=str(pid) if pid else None,
             source_proxy=self._media_proxy,
+            is_dm=chat_type == "user",
         )
         await self.bridge.on_message(msg)
 

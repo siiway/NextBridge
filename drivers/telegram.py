@@ -490,6 +490,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             time=msg.date.isoformat() if msg.date else None,
             source_proxy=self._media_proxy,
             username=username,
+            is_dm=msg.chat_id > 0,
         )
         await self.bridge.on_message(normalized)
 

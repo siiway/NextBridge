@@ -201,6 +201,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             mentions=mentions,
             source_proxy=self._media_proxy,
             username=message.author.name,
+            is_dm=server_id == "",
         )
         await self.bridge.on_message(msg)
 
