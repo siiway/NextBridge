@@ -32,6 +32,10 @@ import io
 from typing import TypedDict
 from urllib.parse import urlencode
 
+# Runtime import (not TYPE_CHECKING): httpx.Proxy / httpx.URL are referenced in
+# the _HTTPXRequestCommonKwargs annotation below, which is evaluated at import
+# time, so removing this import would raise NameError. httpx is a hard dependency
+# (declared in pyproject and required by python-telegram-bot).
 import httpx
 from PIL import Image, UnidentifiedImageError
 from telegram import LinkPreviewOptions, ReplyParameters, Update
@@ -68,6 +72,9 @@ def _patch_httpcore_proxy_tunnel():
     See: https://github.com/encode/httpcore/discussions/921
     """
     try:
+        # async_mod / sync_mod re-export httpcore's Request / Response types, so
+        # the patched handlers' annotations below stay aligned with httpcore
+        # without needing a separate (TYPE_CHECKING) httpcore import.
         import httpcore._async.http_proxy as async_mod
         import httpcore._sync.http_proxy as sync_mod
     except ImportError:
