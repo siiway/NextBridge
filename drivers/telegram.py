@@ -29,9 +29,10 @@
 import asyncio
 import html
 import io
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 from urllib.parse import urlencode
 
+import httpx
 from PIL import Image, UnidentifiedImageError
 from telegram import LinkPreviewOptions, ReplyParameters, Update
 from telegram.error import TelegramError
@@ -45,10 +46,6 @@ from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
-
-if TYPE_CHECKING:
-    import httpcore
-    import httpx
 
 
 class _HTTPXRequestCommonKwargs(TypedDict, total=False):
@@ -80,8 +77,8 @@ def _patch_httpcore_proxy_tunnel():
 
     async def _patched_async_handle(
         self: async_mod.AsyncTunnelHTTPConnection,
-        request: httpcore.Request,
-    ) -> httpcore.Response:
+        request: async_mod.Request,
+    ) -> async_mod.Response:
         try:
             return await _orig_async_handle(self, request)
         except Exception:
@@ -102,8 +99,8 @@ def _patch_httpcore_proxy_tunnel():
 
     def _patched_sync_handle(
         self: sync_mod.TunnelHTTPConnection,
-        request: httpcore.Request,
-    ) -> httpcore.Response:
+        request: sync_mod.Request,
+    ) -> sync_mod.Response:
         try:
             return _orig_sync_handle(self, request)
         except Exception:
