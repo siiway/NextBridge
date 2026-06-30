@@ -29,9 +29,14 @@
 import asyncio
 import html
 import io
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 from urllib.parse import urlencode
 
+# Runtime import (not TYPE_CHECKING): httpx.Proxy / httpx.URL are referenced in
+# the _HTTPXRequestCommonKwargs annotation below, which is evaluated at import
+# time, so removing this import would raise NameError. httpx is a hard dependency
+# (declared in pyproject and required by python-telegram-bot).
+import httpx
 from PIL import Image, UnidentifiedImageError
 from telegram import LinkPreviewOptions, ReplyParameters, Update
 from telegram.error import TelegramError
@@ -45,10 +50,6 @@ from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
-
-if TYPE_CHECKING:
-    import httpcore
-    import httpx
 
 
 class _HTTPXRequestCommonKwargs(TypedDict, total=False):
@@ -71,6 +72,9 @@ def _patch_httpcore_proxy_tunnel():
     See: https://github.com/encode/httpcore/discussions/921
     """
     try:
+        # async_mod / sync_mod re-export httpcore's Request / Response types, so
+        # the patched handlers' annotations below stay aligned with httpcore
+        # without needing a separate (TYPE_CHECKING) httpcore import.
         import httpcore._async.http_proxy as async_mod
         import httpcore._sync.http_proxy as sync_mod
     except ImportError:
@@ -80,8 +84,8 @@ def _patch_httpcore_proxy_tunnel():
 
     async def _patched_async_handle(
         self: async_mod.AsyncTunnelHTTPConnection,
-        request: httpcore.Request,
-    ) -> httpcore.Response:
+        request: async_mod.Request,
+    ) -> async_mod.Response:
         try:
             return await _orig_async_handle(self, request)
         except Exception:
@@ -102,8 +106,8 @@ def _patch_httpcore_proxy_tunnel():
 
     def _patched_sync_handle(
         self: sync_mod.TunnelHTTPConnection,
-        request: httpcore.Request,
-    ) -> httpcore.Response:
+        request: sync_mod.Request,
+    ) -> sync_mod.Response:
         try:
             return _orig_sync_handle(self, request)
         except Exception:
