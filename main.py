@@ -188,8 +188,6 @@ async def main():
 
     bridge.load_sensitive_values(raw)
 
-    enabled_platforms = [key for key in raw if key != "global"]
-
     # Load global configuration
     global_config = raw.get("global", {})
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
@@ -232,9 +230,20 @@ async def main():
     bridge.set_middleware(middleware)
     bridge.set_event_bus(event_bus)
 
-    # Discover and import driver modules (built-in, entrypoints, local)
+    # Discover and import driver modules (built-in, entrypoints, local, external)
     plugin_cfg = validated_global.plugins
-    load_all_drivers(enabled_platforms, plugin_cfg.paths or None)
+    drivers_cfg = plugin_cfg.drivers
+
+    if drivers_cfg.enabled:
+        enabled_platforms = list(drivers_cfg.enabled)
+    else:
+        enabled_platforms = [key for key in raw if key != "global"]
+
+    for ext_name in drivers_cfg.external:
+        if ext_name not in enabled_platforms:
+            enabled_platforms.append(ext_name)
+
+    load_all_drivers(enabled_platforms, drivers_cfg, plugin_cfg.paths or None)
     from drivers.registry import all_drivers
 
     logger.info("NextBridge starting...")

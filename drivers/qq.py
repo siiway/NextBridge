@@ -529,26 +529,12 @@ class QqDriver(BaseDriver[QqConfig]):
 
         time = event.get("time")
 
-        segments = event.get("message", [])
-        if isinstance(segments, str):
-            text = segments
-            mentions = []
-        else:
-            text_parts = []
-            mentions = []
-            for seg in segments:
-                t = seg.get("type", "")
-                d = seg.get("data", {})
-                if t == "text":
-                    text_parts.append(d.get("text", ""))
-                elif t == "at":
-                    qq = str(d.get("qq", ""))
-                    if qq:
-                        mentions.append({"id": qq, "name": qq})
-                        text_parts.append(f"@{qq}")
-            text = "".join(text_parts)
+        face_as_emoji: bool = self.config.cqface_mode == "emoji"
+        text, attachments, reply_id, mentions = await self._parse_message(
+            event, face_as_emoji=face_as_emoji
+        )
 
-        if not text.strip():
+        if not text.strip() and not attachments:
             self.logger.debug(
                 f"NapCat [{self.instance_id}] ignoring empty private message from {nickname}({user_id})"
             )
@@ -556,6 +542,7 @@ class QqDriver(BaseDriver[QqConfig]):
 
         avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
         self_id = str(event.get("self_id", ""))
+        source_mentioned_self = any(str(m.get("id", "")) == self_id for m in mentions)
 
         msg = NormalizedMessage(
             platform=self.platform_name,
@@ -565,12 +552,12 @@ class QqDriver(BaseDriver[QqConfig]):
             user_id=user_id,
             user_avatar=avatar_url,
             text=text,
-            attachments=[],
+            attachments=attachments,
             message_id=str(event.get("message_id", "")),
-            reply_parent=None,
+            reply_parent=reply_id,
             mentions=mentions,
             source_self_id=self_id,
-            source_mentioned_self=False,
+            source_mentioned_self=source_mentioned_self,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
             source_proxy=self._media_proxy,
             username="",
@@ -882,11 +869,14 @@ class QqDriver(BaseDriver[QqConfig]):
 
         return _DEFAULT_FORWARD_CQFACE_GIF_HOST
 
-    async def _upload_group_file_from_bytes(
+    async def _upload_file_from_bytes(
         self,
         data_bytes: bytes,
         filename: str,
-        group_id: str,
+        target_id: str,
+        *,
+        upload_api: str = "upload_group_file",
+        id_key: str = "group_id",
     ) -> bool:
         with tempfile.NamedTemporaryFile(
             prefix="nextbridge-qq-",
@@ -898,9 +888,9 @@ class QqDriver(BaseDriver[QqConfig]):
 
         try:
             resp = await self._call(
-                "upload_group_file",
+                upload_api,
                 {
-                    "group_id": int(group_id),
+                    id_key: int(target_id),
                     "file": tmp_path,
                     "name": filename,
                 },
@@ -908,7 +898,7 @@ class QqDriver(BaseDriver[QqConfig]):
             if resp and resp.get("status") == "ok":
                 return True
             self.logger.warning(
-                f"QQ [{self.instance_id}] upload_group_file failed for '{filename}': {resp}"
+                f"QQ [{self.instance_id}] {upload_api} failed for '{filename}': {resp}"
             )
             return False
         finally:
@@ -2201,12 +2191,13 @@ class QqDriver(BaseDriver[QqConfig]):
             )
             return None
 
-        if user_id and not group_id:
-            segments: list[dict] = []
-            if text:
-                segments.append({"type": "text", "data": {"text": text}})
-            msg_id = await self._api_send_private_msg(user_id, segments)
-            return [msg_id] if msg_id else None
+        is_group = bool(group_id)
+        assert group_id or user_id
+
+        async def _send_msg(segments):
+            if is_group:
+                return await self._api_send_group_msg(group_id, segments)
+            return await self._api_send_private_msg(user_id, segments)
 
         segments: list[dict] = []
         msg_ids: list[str] = []
@@ -2238,9 +2229,7 @@ class QqDriver(BaseDriver[QqConfig]):
             else:
                 t, c = rich_header.get("title", ""), rich_header.get("content", "")
                 prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-                msg_id = await self._api_send_group_msg(
-                    group_id, [{"type": "text", "data": {"text": prefix}}]
-                )
+                msg_id = await _send_msg([{"type": "text", "data": {"text": prefix}}])
                 if not msg_id:
                     self.logger.warning(
                         f"NapCat [{self.instance_id}] failed to send standalone rich header "
@@ -2272,8 +2261,11 @@ class QqDriver(BaseDriver[QqConfig]):
                         segments.append(
                             {"type": "text", "data": {"text": text[last_idx:idx]}}
                         )
-                    # Add mention segment
-                    segments.append({"type": "at", "data": {"qq": m["id"]}})
+                    # Add mention segment (converted to text in private chats)
+                    if is_group:
+                        segments.append({"type": "at", "data": {"qq": m["id"]}})
+                    else:
+                        segments.append({"type": "text", "data": {"text": mention_str}})
                     last_idx = idx + len(mention_str)
 
             # Add remaining text
@@ -2365,15 +2357,26 @@ class QqDriver(BaseDriver[QqConfig]):
                         data_bytes, _ = result
                         fname = att.name or "file"
 
-                        async def _do_upload(d=data_bytes, fn=fname, gid=group_id):
+                        async def _do_upload(d=data_bytes, fn=fname, is_grp=is_group):
+                            if is_grp:
+                                assert group_id is not None
+                                upload_api = "upload_group_file"
+                                id_key = "group_id"
+                                id_val = int(group_id)
+                            else:
+                                assert user_id is not None
+                                upload_api = "upload_private_file"
+                                id_key = "user_id"
+                                id_val = int(user_id)
+
                             if self._supports_stream_file_upload():
                                 mode = self._resolve_send_mode(len(d))
                                 if mode == "base64":
                                     b64 = base64.b64encode(d).decode()
                                     await self._call(
-                                        "upload_group_file",
+                                        upload_api,
                                         {
-                                            "group_id": int(gid),
+                                            id_key: id_val,
                                             "file": f"base64://{b64}",
                                             "name": fn,
                                         },
@@ -2382,16 +2385,15 @@ class QqDriver(BaseDriver[QqConfig]):
                                     file_path = await self._upload_file_stream(d, fn)
                                     if file_path:
                                         await self._call(
-                                            "upload_group_file",
+                                            upload_api,
                                             {
-                                                "group_id": int(gid),
+                                                id_key: id_val,
                                                 "file": file_path,
                                                 "name": fn,
                                             },
                                         )
                                     else:
-                                        await self._api_send_group_msg(
-                                            gid,
+                                        await _send_msg(
                                             [
                                                 {
                                                     "type": "text",
@@ -2402,13 +2404,14 @@ class QqDriver(BaseDriver[QqConfig]):
                                             ],
                                         )
                             else:
-                                if not await self._upload_group_file_from_bytes(
+                                if not await self._upload_file_from_bytes(
                                     d,
                                     fn,
-                                    str(gid),
+                                    str(id_val),
+                                    upload_api=upload_api,
+                                    id_key=id_key,
                                 ):
-                                    await self._api_send_group_msg(
-                                        gid,
+                                    await _send_msg(
                                         [
                                             {
                                                 "type": "text",
@@ -2443,16 +2446,19 @@ class QqDriver(BaseDriver[QqConfig]):
                 and standalone_segments
             ):
                 # If only reply segment remains, attach it to the first standalone segment
-                standalone_segments[0] = [main_segments[0], standalone_segments[0]]  # ty: ignore[invalid-assignment]
+                standalone_segments[0] = [
+                    main_segments[0],
+                    standalone_segments[0],
+                ]  # ty: ignore[invalid-assignment]
                 main_segments = []
             else:
-                msg_id = await self._api_send_group_msg(group_id, main_segments)
+                msg_id = await _send_msg(main_segments)
                 if msg_id:
                     msg_ids.append(msg_id)
 
         for seg in standalone_segments:
             msg_to_send = seg if isinstance(seg, list) else [seg]
-            msg_id = await self._api_send_group_msg(group_id, msg_to_send)
+            msg_id = await _send_msg(msg_to_send)
             if msg_id:
                 msg_ids.append(msg_id)
 

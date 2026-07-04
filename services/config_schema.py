@@ -169,11 +169,58 @@ class AdminApiConfig(BaseModel):
     Must be non-empty when ``enable`` is true."""
 
 
+class ExternalDriverConfig(BaseModel):
+    """Configuration for an external driver loaded from a pip package or file.
+
+    The driver module must call ``drivers.registry.register()`` at import
+    time — the same contract as built-in drivers.
+
+    Example::
+
+        global:
+          plugins:
+            drivers:
+              enabled:
+                - qq
+                - mycustom
+              external:
+                mycustom:
+                  module: "nextbridge_mycustom.driver"
+    """
+
+    module: str
+    """Python module path to import, e.g. ``"nextbridge_mycustom.driver"``."""
+
+
+class DriversConfig(BaseModel):
+    """Driver selection configuration.
+
+    Controls which built-in and external drivers are loaded at startup.
+
+    When ``enabled`` is **empty** (the default), NextBridge auto-discovers
+    drivers from the config file's top-level keys (backwards-compatible).
+    When ``enabled`` is **populated**, only the listed drivers are loaded.
+
+    External drivers listed under ``external`` are imported and registered
+    before any built-in driver of the same name, allowing third-party
+    packages to override or extend built-in functionality.
+    """
+
+    enabled: list[str] = []
+    """Driver names to load.  Empty = auto-discover from config file keys."""
+
+    external: dict[str, ExternalDriverConfig] = {}
+    """External driver imports, keyed by driver name."""
+
+
 class PluginConfig(BaseModel):
     """Plugin discovery and driver lifecycle configuration."""
 
     paths: list[str] = []
     """Local directories to scan for driver plugin ``.py`` files."""
+
+    drivers: DriversConfig = DriversConfig()
+    """Driver selection and external driver configuration."""
 
     auto_restart: CoercedBool = True
     """Automatically restart crashed drivers with exponential backoff."""

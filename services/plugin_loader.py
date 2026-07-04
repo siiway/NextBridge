@@ -1,9 +1,10 @@
 """Plugin discovery and loading.
 
 Sources (checked in order, later overrides earlier):
-  1. Built-in:      ``drivers/<platform>.py``
-  2. Entry points:  pip packages advertising ``nextbridge.drivers``
-  3. Local paths:   directories listed in ``global.plugins.paths``
+  1. External:     modules specified in ``global.plugins.drivers.external``
+  2. Built-in:     ``drivers/<platform>.py``
+  3. Entry points: pip packages advertising ``nextbridge.drivers``
+  4. Local paths:  directories listed in ``global.plugins.paths``
 """
 
 from __future__ import annotations
@@ -14,8 +15,12 @@ import importlib.util
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import services.logger as log
+
+if TYPE_CHECKING:
+    from services.config_schema import DriversConfig
 
 logger = log.get_logger("plugin_loader")
 
@@ -25,7 +30,7 @@ ENTRYPOINT_GROUP = "nextbridge.drivers"
 @dataclass
 class PluginInfo:
     name: str
-    source: str  # "builtin" | "entrypoint" | "local"
+    source: str  # "builtin" | "entrypoint" | "local" | "external"
     module_path: str
     package_name: str = ""
     package_version: str = ""
@@ -88,7 +93,7 @@ def _load_module(info: PluginInfo) -> None:
             return
         importlib.import_module(module_name)
 
-    elif info.source == "entrypoint":
+    elif info.source in ("entrypoint", "external"):
         importlib.import_module(info.module_path)
 
     elif info.source == "local":
@@ -104,25 +109,27 @@ def _load_module(info: PluginInfo) -> None:
         logger.info(f"Loaded local plugin: {info.name} from {path}")
 
 
-def load_all_drivers(
+def _resolve_drivers(
     enabled_platforms: list[str],
-    plugin_paths: list[str] | None = None,
+    drivers_cfg: DriversConfig,
+    plugin_paths: list[str] | None,
 ) -> dict[str, PluginInfo]:
-    """Discover and import all driver modules.
-
-    Returns a mapping of platform name to :class:`PluginInfo` for every
-    driver that was actually loaded.
-    """
+    """Build the ordered plugin map — external first (highest priority)."""
     all_plugins: dict[str, PluginInfo] = {}
 
-    for platform in enabled_platforms:
-        all_plugins[platform] = PluginInfo(
-            name=platform, source="builtin", module_path=f"drivers.{platform}"
+    for name in enabled_platforms:
+        all_plugins[name] = PluginInfo(
+            name=name, source="builtin", module_path=f"drivers.{name}"
+        )
+
+    for name, ext_cfg in drivers_cfg.external.items():
+        all_plugins[name] = PluginInfo(
+            name=name, source="external", module_path=ext_cfg.module
         )
 
     ep_plugins = discover_entrypoint_drivers()
     for name, info in ep_plugins.items():
-        if name in enabled_platforms:
+        if name in enabled_platforms and name not in drivers_cfg.external:
             all_plugins[name] = info
             logger.info(
                 f"Entry-point driver: {name} "
@@ -132,9 +139,34 @@ def load_all_drivers(
     if plugin_paths:
         local_plugins = discover_local_drivers(plugin_paths)
         for name, info in local_plugins.items():
-            if name in enabled_platforms:
+            if name in enabled_platforms and name not in drivers_cfg.external:
                 all_plugins[name] = info
                 logger.info(f"Local driver: {name} from {info.module_path}")
+
+    return all_plugins
+
+
+def load_all_drivers(
+    enabled_platforms: list[str],
+    drivers_cfg: DriversConfig | None = None,
+    plugin_paths: list[str] | None = None,
+) -> dict[str, PluginInfo]:
+    """Discover and import all driver modules.
+
+    Returns a mapping of platform name to :class:`PluginInfo` for every
+    driver that was actually loaded.
+
+    Args:
+        enabled_platforms: Driver names to activate.
+        drivers_cfg: Driver selection configuration (external imports, etc.).
+        plugin_paths: Local directories to scan for ``.py`` driver files.
+    """
+    from services.config_schema import DriversConfig
+
+    if drivers_cfg is None:
+        drivers_cfg = DriversConfig()
+
+    all_plugins = _resolve_drivers(enabled_platforms, drivers_cfg, plugin_paths)
 
     loaded: dict[str, PluginInfo] = {}
     for name, info in all_plugins.items():
