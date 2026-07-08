@@ -58,6 +58,7 @@ class Bridge:
     def __init__(self):
         self._rules: list[dict] = []
         self._senders: dict[str, tuple[str | None, Callable]] = {}
+        self._editors: dict[str, Callable] = {}
         self._sensitive: frozenset[str] = frozenset()
         self._middleware: MiddlewareChain | None = None
         self._event_bus: EventBus | None = None
@@ -151,6 +152,10 @@ class Bridge:
                 platform=platform,
                 connected=True,
             )
+
+    def register_editor(self, instance_id: str, edit_func: Callable):
+        self._editors[instance_id] = edit_func
+        logger.debug(f"Registered editor for instance: {instance_id}")
 
     def senders_snapshot(self) -> list[dict]:
         """Return a serialisable snapshot of registered senders."""
@@ -832,6 +837,111 @@ class Bridge:
             except Exception:
                 logger.exception(f"Failed to send to '{target_id}")
                 return
+
+    async def on_edit_message(self, msg: NormalizedMessage):
+        """Called by drivers when a message is edited on their platform."""
+        logger.info(f"on_edit_message: {msg!s}")
+        source_msg_id = msg.edit_target_id or msg.message_id
+        if not source_msg_id:
+            logger.debug("on_edit_message: no message id, skipping")
+            return
+
+        bridge_id = msg_db().get_bridge_id(msg.instance_id, source_msg_id)
+        if bridge_id is None:
+            logger.debug(
+                f"on_edit_message: no bridge mapping for {msg.instance_id}/{source_msg_id}"
+            )
+            return
+
+        rule_id = bridge_id.split(":")[0] if ":" in bridge_id else ""
+        rule = next(
+            (r for r in self._rules if str(r.get("id", "")) == rule_id),
+            None,
+        )
+
+        for rule in self._rules:
+            rid = str(rule.get("id", ""))
+            if not rid:
+                rid = config.stable_rule_hash(rule)
+            expected_bridge_id = f"{rid}:{msg.instance_id}:{source_msg_id}"
+            if expected_bridge_id != bridge_id:
+                continue
+            if rule.get("type") == "connect":
+                if self._matches_channel(msg, rule.get("channels", {})):
+                    await self._dispatch_edit(msg, rule, bridge_id)
+            else:
+                if self._matches_from(msg, rule.get("from", {})):
+                    await self._dispatch_edit(msg, rule, bridge_id)
+
+    async def _dispatch_edit(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+    ):
+        """Fan-out an edit to all target instances that have a mapped message."""
+        is_webhook = any("webhook_url" in ch for ch in rule.get("to", {}).values())
+        if rule.get("type") == "connect":
+            targets: dict = {
+                k: v
+                for k, v in rule.get("channels", {}).items()
+                if not self._should_skip_echo(
+                    k, {kk: vv for kk, vv in v.items() if kk != "msg"}, msg
+                )
+            }
+        else:
+            targets = {
+                k: v
+                for k, v in rule.get("to", {}).items()
+                if not self._should_skip_echo(k, v, msg)
+            }
+
+        for target_id, target_cfg in targets.items():
+            if rule.get("type") == "connect":
+                target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
+                merged_msg_cfg = {**rule.get("msg", {}), **target_cfg.get("msg", {})}
+                is_webhook = "webhook_url" in target_cfg
+                if is_webhook:
+                    merged_msg_cfg["webhook_url"] = target_cfg["webhook_url"]
+            else:
+                target_channel = target_cfg
+                merged_msg_cfg = rule.get("msg", {})
+                is_webhook = "webhook_url" in target_cfg
+
+            target_msg_id = msg_db().get_platform_msg_id(
+                bridge_id, target_id, target_channel
+            )
+            if not target_msg_id:
+                logger.debug(
+                    f"_dispatch_edit: no target msg id for {target_id}, skipping"
+                )
+                continue
+
+            editor = self._editors.get(target_id)
+            if editor is None:
+                logger.debug(
+                    f"_dispatch_edit: no editor registered for {target_id}, skipping"
+                )
+                continue
+
+            target_platform = self._senders.get(target_id, (None, None))[0]
+            formatted, extra = self._build_formatted(
+                msg, merged_msg_cfg, is_webhook=is_webhook
+            )
+            formatted_out, extra_out = self._normalize_target_cqface(
+                target_platform, formatted, extra
+            )
+
+            if self._is_sensitive(formatted_out):
+                logger.warning(
+                    f"Edit to '{target_id}' blocked: text contains sensitive value."
+                )
+                continue
+
+            try:
+                await editor(target_channel, target_msg_id, formatted_out, **extra_out)
+            except Exception:
+                logger.exception(f"Failed to edit message on '{target_id}'")
 
 
 # Shared singleton used by all drivers

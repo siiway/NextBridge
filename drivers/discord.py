@@ -105,6 +105,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
+        self.bridge.register_editor(self.instance_id, self.edit)
         if self._proxy:
             self.logger.debug(f"using proxy {self._proxy}")
             self._session = aiohttp.ClientSession(
@@ -134,14 +135,23 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         @self._client.event
         async def on_message(message: discord.Message):
             if message.author.bot:
-                # self.logger.debug(
-                #     f"ignoring bot message from {message.author}"
-                # )
                 return
             await self._on_message(message)
 
+        @self._client.event
+        async def on_message_edit(before: discord.Message, after: discord.Message):
+            if after.author.bot:
+                return
+            await self._on_message_edit(after)
+
         # Blocks until the bot disconnects
         await self._client.start(self._bot_token)
+
+    async def stop(self):
+        if self._client and not self._client.is_closed():
+            await self._client.close()
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     # ------------------------------------------------------------------
     # Receive
@@ -204,6 +214,35 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             is_dm=server_id == "",
         )
         await self.bridge.on_message(msg)
+
+    async def _on_message_edit(self, message: discord.Message):
+        server_id = str(message.guild.id) if message.guild else ""
+        channel_id = str(message.channel.id)
+        text = message.clean_content
+        if not text.strip():
+            return
+        from services.message import NormalizedMessage as NM
+
+        avatar = (
+            str(message.author.display_avatar.url)
+            if message.author.display_avatar
+            else ""
+        )
+        msg = NM(
+            platform="discord",
+            instance_id=self.instance_id,
+            channel={"server_id": server_id, "channel_id": channel_id},
+            nickname=message.author.display_name,
+            user_id=str(message.author.id),
+            user_avatar=avatar,
+            text=text,
+            message_id=str(message.id),
+            edit_target_id=str(message.id),
+            is_edit=True,
+            username=message.author.name,
+            is_dm=server_id == "",
+        )
+        await self.bridge.on_edit_message(msg)
 
     # ------------------------------------------------------------------
     # CQ face emoji resolution
@@ -621,6 +660,74 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         except Exception:
             self.logger.exception("send error")
         return None
+
+    # ------------------------------------------------------------------
+    # Edit
+    # ------------------------------------------------------------------
+
+    async def edit(self, channel: dict, message_id: str, text: str, **kwargs):
+        """Edit a previously sent message by ID."""
+        webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
+
+        has_cqface = bool(re.search(r":cqface\d+:", text))
+        rich_header = kwargs.get("rich_header")
+
+        if webhook_url and self._session is not None:
+            if has_cqface:
+                text = cqface.replace_cqface_tokens(text)
+            if rich_header:
+                text = apply_rich_header(text, rich_header, style="markdown")
+            if self.config.sanitize_mass_mentions:
+                text, _ = _sanitize_mass_mentions(text)
+            base = webhook_url.split("?")[0].rstrip("/")
+            edit_url = f"{base}/messages/{message_id}"
+            payload = {"content": text}
+            try:
+                async with self._session.patch(edit_url, json=payload) as resp:
+                    if resp.status not in (200, 204):
+                        body = await resp.text()
+                        self.logger.error(f"webhook edit error {resp.status}: {body}")
+            except Exception:
+                self.logger.exception(f"edit: webhook PATCH failed for {message_id}")
+            return
+
+        if self._client is None:
+            self.logger.debug("edit: no webhook_url and no bot client, skipping")
+            return
+
+        channel_id = channel.get("channel_id")
+        if not channel_id:
+            self.logger.warning("edit: no channel_id")
+            return
+
+        ch = self._client.get_channel(int(channel_id))
+        if ch is None:
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                self.logger.warning(f"edit: could not fetch channel {channel_id}: {e}")
+                return
+
+        if not isinstance(ch, discord.abc.Messageable):
+            return
+
+        try:
+            msg_obj = await ch.fetch_message(int(message_id))  # type: ignore[attr-defined]
+        except Exception as e:
+            self.logger.warning(f"edit: could not fetch message {message_id}: {e}")
+            return
+
+        if has_cqface:
+            text = self._expand_cqface_emojis(text)
+        if rich_header:
+            text = apply_rich_header(text, rich_header, style="markdown")
+        if self.config.sanitize_mass_mentions:
+            text, _ = _sanitize_mass_mentions(text)
+
+        try:
+            await msg_obj.edit(content=text)
+        except Exception:
+            self.logger.exception(f"edit: failed to edit message {message_id}")
 
 
 register("discord", DiscordConfig, DiscordDriver)

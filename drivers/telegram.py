@@ -194,16 +194,20 @@ def _attachment_fallback_label(
 
 
 _CONTENT_FILTER = (
-    filters.TEXT
-    | filters.PHOTO
-    | filters.VIDEO
-    | filters.VOICE
-    | filters.AUDIO
-    | filters.Document.ALL
-    | filters.ANIMATION
-) & ~filters.COMMAND
+    (
+        filters.TEXT
+        | filters.PHOTO
+        | filters.VIDEO
+        | filters.VOICE
+        | filters.AUDIO
+        | filters.Document.ALL
+        | filters.ANIMATION
+    )
+    & ~filters.COMMAND
+    & ~filters.UpdateType.EDITED_MESSAGE
+)
 
-_COMMAND_FILTER = filters.COMMAND
+_COMMAND_FILTER = filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE
 
 
 class TelegramDriver(BaseDriver[TelegramConfig]):
@@ -232,6 +236,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         )
         self._app.add_handler(MessageHandler(_CONTENT_FILTER, self._on_message))
         self._app.add_handler(MessageHandler(_COMMAND_FILTER, self._on_command_message))
+        self._app.add_handler(
+            MessageHandler(filters.UpdateType.EDITED_MESSAGE, self._on_edited_message)
+        )
         self._app.add_error_handler(self._on_error)
 
         self.logger.debug("starting application and polling.")
@@ -252,6 +259,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             self.logger.debug("initialization cancelled.")
             return
         await self._app.start()
+        self.bridge.register_editor(self.instance_id, self.edit)
         assert self._app.updater is not None
         self.logger.debug("application started.")
         await self._app.updater.start_polling(
@@ -494,6 +502,41 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         )
         await self.bridge.on_message(normalized)
 
+    async def _on_edited_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        msg = update.edited_message
+        if not msg:
+            return
+        text = msg.text or msg.caption or ""
+        if not text.strip():
+            return
+        chat_id = str(msg.chat_id)
+        from_user = msg.from_user
+        user_id = str(from_user.id) if from_user else ""
+        nickname = (
+            (from_user.full_name or from_user.username or user_id)
+            if from_user
+            else user_id
+        )
+        username = from_user.username or "" if from_user else ""
+        normalized = NormalizedMessage(
+            platform="telegram",
+            instance_id=self.instance_id,
+            channel={"chat_id": chat_id},
+            nickname=nickname,
+            user_id=user_id,
+            text=text,
+            message_id=str(msg.message_id),
+            edit_target_id=str(msg.message_id),
+            is_edit=True,
+            time=msg.edit_date.isoformat() if msg.edit_date else None,
+            source_proxy=self._media_proxy,
+            username=username,
+            is_dm=msg.chat_id > 0,
+        )
+        await self.bridge.on_edit_message(normalized)
+
     # ------------------------------------------------------------------
     # Send
     # ------------------------------------------------------------------
@@ -683,6 +726,54 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         except Exception as e:
             self.logger.error(f"send failed: {e}")
             return None
+
+    # ------------------------------------------------------------------
+    # Edit
+    # ------------------------------------------------------------------
+
+    async def edit(self, channel: dict, message_id: str, text: str, **kwargs):
+        """Edit a previously sent message by ID."""
+        chat_id = channel.get("chat_id")
+        if not chat_id or self._app is None:
+            return
+        parse_mode: str | None = None
+        link_preview_opts: LinkPreviewOptions | None = None
+        rich_header = kwargs.get("rich_header")
+        if rich_header:
+            host = self.config.rich_header_host.rstrip("/")
+            if host:
+                params: dict = {
+                    "title": rich_header.get("title", ""),
+                    "content": rich_header.get("content", ""),
+                }
+                if av := rich_header.get("avatar", ""):
+                    params["avatar"] = av
+                from urllib.parse import urlencode
+
+                rh_url = f"{host}/richheader?{urlencode(params)}"
+                link_preview_opts = LinkPreviewOptions(
+                    url=rh_url,
+                    prefer_small_media=True,
+                    show_above_text=True,
+                )
+            else:
+                header = telegram_richheader_html(
+                    rich_header.get("title", ""),
+                    rich_header.get("content", ""),
+                )
+                body = html.escape(text) if text else ""
+                text = f"{header}\n{body}" if body else header
+                parse_mode = "HTML"
+        try:
+            await self._app.bot.edit_message_text(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                text=log.replace_sensitive(text),
+                parse_mode=parse_mode,
+                link_preview_options=link_preview_opts,
+            )
+        except Exception as e:
+            self.logger.warning(f"edit failed for message {message_id}: {e}")
 
 
 register("telegram", TelegramConfig, TelegramDriver)

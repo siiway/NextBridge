@@ -39,6 +39,10 @@ class NormalizedMessage:
     )
     username: str = ""  # user's platform-specific name
     is_dm: bool = False  # whether this message is a direct/private message
+    is_edit: bool = False  # whether this is a message edit event
+    edit_target_id: str | None = (
+        None  # platform message ID being edited (same as message_id on edit)
+    )
 
     @property
     def user(self) -> str:
