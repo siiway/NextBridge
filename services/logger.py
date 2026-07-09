@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import sys
 import os
 from datetime import datetime
@@ -205,3 +206,10 @@ def set_console_level(level: str) -> None:
         filter=_masking_filter,
     )
     logger.debug(f"Console log level set to: {level}")
+
+
+def set_stdlib_levels(project_level: str, third_party_level: str = "INFO") -> None:
+    """Apply verbose stdlib logging only to NextBridge modules."""
+    logging.getLogger().setLevel(third_party_level)
+    for name in ("drivers", "services", "main"):
+        logging.getLogger(name).setLevel(project_level)

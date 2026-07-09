@@ -122,6 +122,7 @@ async def main():
 
     # Logging configuration
     log.set_console_level(validated_global.log.level)
+    log.set_stdlib_levels(validated_global.log.level)
     log.set_log_dir(validated_global.log.dir)
     log.set_log_rotation(
         rotation_size=validated_global.log.rotation_size,
