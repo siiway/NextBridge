@@ -45,8 +45,8 @@ data/
 *.db
 *.log
 
-# Lock files (will be regenerated)
-uv.lock
+# Lock files
+# 注意: uv.lock 需保留, 供 `uv sync --frozen` 使用
 pnpm-lock.yaml
 
 # Other
