@@ -24,6 +24,8 @@ import io
 import json
 from pathlib import Path
 import re
+from html import unescape
+from urllib.parse import urlparse
 
 import discord
 import aiohttp
@@ -52,6 +54,8 @@ class DiscordConfig(_DriverConfig):
     allow_mentions_users: CoercedBool = True
     allow_mentions_roles: CoercedBool = False
     sanitize_mass_mentions: CoercedBool = True
+    auto_link_image_hosts: list[str] = ["discordmedia.com", "tenor.com"]
+    auto_link_image_show_original_url: CoercedBool = True
     proxy: str | None = UNSET
 
     @field_validator("cqface_webhook_fallback", mode="before")
@@ -64,15 +68,43 @@ class DiscordConfig(_DriverConfig):
                 return normalized
         return value
 
+    @field_validator("auto_link_image_hosts", mode="before")
+    def _normalize_auto_link_image_hosts(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = [part.strip() for part in value.split(",")]
+        if isinstance(value, list):
+            return [str(item).strip().lower() for item in value if str(item).strip()]
+        return value
+
 
 _CQFACE_RE = re.compile(r":cqface(\d+):")
 _MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
+_SINGLE_URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+_META_IMAGE_RE = re.compile(
+    r'<meta\s+[^>]*(?:property|name)=["\'](?:og:image|twitter:image)["\'][^>]*\bcontent=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_META_IMAGE_REVERSE = re.compile(
+    r'<meta\s+[^>]*\bcontent=["\']([^"\']+)["\'][^>]*(?:property|name)=["\'](?:og:image|twitter:image)["\']',
+    re.IGNORECASE,
+)
 
 
 def _sanitize_mass_mentions(text: str) -> tuple[str, bool]:
     """Neutralize @everyone/@here so they cannot trigger mass pings."""
     sanitized, count = _MASS_MENTION_RE.subn(lambda m: f"@ {m.group(1)}", text)
     return sanitized, count > 0
+
+
+def _host_matches(host: str, allowed_hosts: list[str]) -> bool:
+    host = host.lower().strip(".")
+    for allowed in allowed_hosts:
+        allowed = allowed.lower().strip(".")
+        if host == allowed or host.endswith(f".{allowed}"):
+            return True
+    return False
 
 
 class DiscordDriver(BaseDriver[DiscordConfig]):
@@ -181,6 +213,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 Attachment(type=att_type, url=att.url, name=att.filename, size=att.size)
             )
 
+        if not attachments:
+            text, attachments = await self._extract_auto_link_image(text)
+
         if not text.strip() and not attachments:
             self.logger.debug(f"ignoring empty message from {message.author}")
             return
@@ -243,6 +278,60 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             is_dm=server_id == "",
         )
         await self.bridge.on_edit_message(msg)
+
+    async def _extract_auto_link_image(self, text: str) -> tuple[str, list[Attachment]]:
+        link = text.strip()
+        if not link or not _SINGLE_URL_RE.match(link):
+            return text, []
+
+        parsed = urlparse(link)
+        if not parsed.hostname or not _host_matches(
+            parsed.hostname, self.config.auto_link_image_hosts
+        ):
+            return text, []
+        if self._session is None:
+            return text, []
+
+        image_url = await self._resolve_link_image_url(link)
+        if not image_url:
+            return text, []
+
+        bridged_text = text if self.config.auto_link_image_show_original_url else ""
+        name = Path(urlparse(image_url).path).name or "image"
+        return bridged_text, [Attachment(type="image", url=image_url, name=name)]
+
+    async def _resolve_link_image_url(self, url: str) -> str | None:
+        assert self._session is not None
+        try:
+            async with self._session.get(
+                url,
+                proxy=self._media_proxy,
+                allow_redirects=True,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status >= 400:
+                    return None
+                content_type = resp.headers.get("content-type", "").lower()
+                final_url = str(resp.url)
+                if content_type.startswith("image/"):
+                    return final_url
+                if "html" not in content_type:
+                    return None
+                body = await resp.text(errors="ignore")
+        except Exception as exc:
+            logger.debug(
+                f"Discord [{self.instance_id}] auto link image resolve failed for {url}: {exc}"
+            )
+            return None
+
+        for pattern in (_META_IMAGE_RE, _META_IMAGE_REVERSE):
+            match = pattern.search(body)
+            if not match:
+                continue
+            image_url = unescape(match.group(1)).strip()
+            if image_url.startswith(("http://", "https://")):
+                return image_url
+        return None
 
     # ------------------------------------------------------------------
     # CQ face emoji resolution

@@ -19,3 +19,12 @@ entry = "uv"
 args = ["run", "ty", "check"]
 language = "system"
 pass_filenames = false
+
+# uv.lock 变动时, 同步导出 requirements.txt 并加入本次提交
+[[repos.hooks]]
+id = "uv-export-requirements"
+name = "uv export requirements.txt"
+entry = "bash -c 'uv export --no-dev > requirements.txt && git add requirements.txt'"
+language = "system"
+files = "^uv\\.lock$"
+pass_filenames = false

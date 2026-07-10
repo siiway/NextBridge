@@ -338,3 +338,10 @@ def set_show_source(mode: str) -> None:
     if mode not in ("auto", "always", "never"):
         raise ValueError(f"Invalid show_source mode: {mode!r}")
     _show_source_mode = mode
+
+
+def set_stdlib_levels(project_level: str, third_party_level: str = "INFO") -> None:
+    """Apply verbose stdlib logging only to NextBridge modules."""
+    logging.getLogger().setLevel(third_party_level)
+    for name in ("drivers", "services", "main"):
+        logging.getLogger(name).setLevel(project_level)
