@@ -71,6 +71,11 @@ class QqConfig(_DriverConfig):
     # - true/unset: render by default gif host
     # - string: use custom gif host base URL
     forward_render_cqface_gif: bool | str = True
+    # QQ has no native "edit message" API. When an edit is bridged from another
+    # platform (e.g. Discord/Telegram), simulate it by sending a NEW message that
+    # quotes (replies to) the original bridged message and prepends `edit_prefix`.
+    edit_via_reply: bool = True
+    edit_prefix: str = "[编辑]"
     proxy: str | None = UNSET
 
 
@@ -187,6 +192,8 @@ class QqDriver(BaseDriver[QqConfig]):
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
+        if self.config.edit_via_reply:
+            self.bridge.register_editor(self.instance_id, self.edit)
         self._ensure_forward_http_mount()
         self._ensure_forward_gc_task()
 
@@ -2466,6 +2473,32 @@ class QqDriver(BaseDriver[QqConfig]):
             await upload_func()
 
         return msg_ids if msg_ids else None
+
+    async def edit(self, channel: dict, message_id: str, text: str, **kwargs):
+        """Bridge an edit from another platform onto QQ.
+
+        QQ (OneBot 11) has no native "edit message" API, so an edit cannot be
+        applied in place. Instead we simulate it by sending a NEW message that
+        quotes (replies to) the original bridged message and prepends
+        ``edit_prefix`` so it is visually distinguishable from a normal message.
+        """
+        if not self.config.edit_via_reply:
+            return None
+
+        prefix = (self.config.edit_prefix or "").strip()
+        body = text or ""
+        if prefix:
+            new_text = f"{prefix} {body}" if body else prefix
+        else:
+            new_text = body
+
+        # Reply to the original bridged message so the edit is shown in context.
+        # Do not mutate the caller's kwargs; strip any attachments the editor
+        # path does not carry.
+        send_kwargs = {k: v for k, v in kwargs.items() if k != "attachments"}
+        send_kwargs["reply_to_id"] = message_id
+
+        return await self.send(channel, new_text, **send_kwargs)
 
 
 register("qq", QqConfig, QqDriver)

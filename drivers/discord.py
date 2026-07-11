@@ -319,7 +319,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     return None
                 body = await resp.text(errors="ignore")
         except Exception as exc:
-            logger.debug(
+            self.logger.debug(
                 f"Discord [{self.instance_id}] auto link image resolve failed for {url}: {exc}"
             )
             return None

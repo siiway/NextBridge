@@ -23,3 +23,7 @@ docs/
 
 # ruff
 .ruff_cache/
+
+# nix and direnv
+.direnv/
+result
