@@ -59,6 +59,7 @@ class Bridge:
         self._rules: list[dict] = []
         self._senders: dict[str, tuple[str | None, Callable]] = {}
         self._editors: dict[str, Callable] = {}
+        self._deleters: dict[str, Callable] = {}
         self._sensitive: frozenset[str] = frozenset()
         self._middleware: MiddlewareChain | None = None
         self._event_bus: EventBus | None = None
@@ -156,6 +157,10 @@ class Bridge:
     def register_editor(self, instance_id: str, edit_func: Callable):
         self._editors[instance_id] = edit_func
         logger.debug(f"Registered editor for instance: {instance_id}")
+
+    def register_deleter(self, instance_id: str, delete_func: Callable):
+        self._deleters[instance_id] = delete_func
+        logger.debug(f"Registered deleter for instance: {instance_id}")
 
     def senders_snapshot(self) -> list[dict]:
         """Return a serialisable snapshot of registered senders."""
@@ -942,6 +947,94 @@ class Bridge:
                 await editor(target_channel, target_msg_id, formatted_out, **extra_out)
             except Exception:
                 logger.exception(f"Failed to edit message on '{target_id}'")
+
+    async def on_recall_message(self, msg: NormalizedMessage):
+        """Called by drivers when a message is recalled/deleted on their platform."""
+        logger.info(f"on_recall_message: {msg!s}")
+        source_msg_id = msg.recall_target_id or msg.message_id
+        if not source_msg_id:
+            logger.debug("on_recall_message: no message id, skipping")
+            return
+
+        bridge_id = msg_db().get_bridge_id(msg.instance_id, source_msg_id)
+        if bridge_id is None:
+            logger.debug(
+                f"on_recall_message: no bridge mapping for {msg.instance_id}/{source_msg_id}"
+            )
+            return
+
+        dispatched = False
+        for rule in self._rules:
+            rid = str(rule.get("id", ""))
+            if not rid:
+                rid = config.stable_rule_hash(rule)
+            expected_bridge_id = f"{rid}:{msg.instance_id}:{source_msg_id}"
+            if expected_bridge_id != bridge_id:
+                continue
+            if rule.get("type") == "connect":
+                if self._matches_channel(msg, rule.get("channels", {})):
+                    await self._dispatch_recall(msg, rule, bridge_id)
+                    dispatched = True
+            else:
+                if self._matches_from(msg, rule.get("from", {})):
+                    await self._dispatch_recall(msg, rule, bridge_id)
+                    dispatched = True
+
+        # Clean up the mappings once the recall has been fanned out. The
+        # per-driver suppression sets are the real loop guard; this is hygiene
+        # and stops stale rows from mapping to now-deleted messages.
+        if dispatched:
+            msg_db().delete_mapping_by_bridge_id(bridge_id)
+
+    async def _dispatch_recall(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+    ):
+        """Fan-out a recall to all target instances that have a mapped message."""
+        if rule.get("type") == "connect":
+            targets: dict = {
+                k: v
+                for k, v in rule.get("channels", {}).items()
+                if not self._should_skip_echo(
+                    k, {kk: vv for kk, vv in v.items() if kk != "msg"}, msg
+                )
+            }
+        else:
+            targets = {
+                k: v
+                for k, v in rule.get("to", {}).items()
+                if not self._should_skip_echo(k, v, msg)
+            }
+
+        for target_id, target_cfg in targets.items():
+            if rule.get("type") == "connect":
+                target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
+            else:
+                target_channel = target_cfg
+
+            target_msg_ids = msg_db().get_platform_msg_ids(
+                bridge_id, target_id, target_channel
+            )
+            if not target_msg_ids:
+                logger.debug(
+                    f"_dispatch_recall: no target msg id for {target_id}, skipping"
+                )
+                continue
+
+            deleter = self._deleters.get(target_id)
+            if deleter is None:
+                logger.debug(
+                    f"_dispatch_recall: no deleter registered for {target_id}, skipping"
+                )
+                continue
+
+            for target_msg_id in target_msg_ids:
+                try:
+                    await deleter(target_channel, target_msg_id)
+                except Exception:
+                    logger.exception(f"Failed to recall message on '{target_id}'")
 
 
 # Shared singleton used by all drivers

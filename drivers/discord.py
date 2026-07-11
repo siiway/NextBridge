@@ -54,6 +54,7 @@ class DiscordConfig(_DriverConfig):
     allow_mentions_users: CoercedBool = True
     allow_mentions_roles: CoercedBool = False
     sanitize_mass_mentions: CoercedBool = True
+    enable_recall: CoercedBool = True
     auto_link_image_hosts: list[str] = ["discordmedia.com", "tenor.com"]
     auto_link_image_show_original_url: CoercedBool = True
     proxy: str | None = UNSET
@@ -118,6 +119,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._proxy = get_proxy(config.proxy)
         # face_id (str) → "<:name:id>" resolved Discord emoji string
         self._emoji_cache: dict[str, str] = {}
+        # Message IDs we deleted ourselves (bridged recalls). Used to ignore the
+        # raw delete event Discord dispatches back so we don't loop.
+        self._recall_suppress: set[str] = set()
         # name → emoji_id index built lazily from discord_emojis.json
         self._emoji_db: dict[str, str] | None = None
 
@@ -138,6 +142,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
         self.bridge.register_editor(self.instance_id, self.edit)
+        if self.config.enable_recall:
+            self.bridge.register_deleter(self.instance_id, self.delete)
         if self._proxy:
             self.logger.debug(f"using proxy {self._proxy}")
             self._session = aiohttp.ClientSession(
@@ -175,6 +181,12 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             if after.author.bot:
                 return
             await self._on_message_edit(after)
+
+        @self._client.event
+        async def on_raw_message_delete(
+            payload: discord.RawMessageDeleteEvent,
+        ):
+            await self._on_raw_message_delete(payload)
 
         # Blocks until the bot disconnects
         await self._client.start(self._bot_token)
@@ -278,6 +290,37 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             is_dm=server_id == "",
         )
         await self.bridge.on_edit_message(msg)
+
+    async def _on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        """Bridge a Discord message deletion as a recall.
+
+        Uses the *raw* event so deletions of messages not in the client cache
+        are still detected.
+        """
+        if not self.config.enable_recall:
+            return
+
+        message_id = str(payload.message_id)
+        # Ignore deletions we performed ourselves (bridged recalls) to avoid a
+        # loop where our own delete triggers another recall dispatch.
+        if message_id in self._recall_suppress:
+            self._recall_suppress.discard(message_id)
+            return
+
+        server_id = str(payload.guild_id) if payload.guild_id else ""
+        channel_id = str(payload.channel_id)
+        from services.message import NormalizedMessage as NM
+
+        msg = NM(
+            platform="discord",
+            instance_id=self.instance_id,
+            channel={"server_id": server_id, "channel_id": channel_id},
+            message_id=message_id,
+            recall_target_id=message_id,
+            is_recall=True,
+            is_dm=server_id == "",
+        )
+        await self.bridge.on_recall_message(msg)
 
     async def _extract_auto_link_image(self, text: str) -> tuple[str, list[Attachment]]:
         link = text.strip()
@@ -817,6 +860,72 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             await msg_obj.edit(content=text)
         except Exception:
             self.logger.exception(f"edit: failed to edit message {message_id}")
+
+    # ------------------------------------------------------------------
+    # Delete / recall
+    # ------------------------------------------------------------------
+
+    async def delete(self, channel: dict, message_id: str, **kwargs):
+        """Delete (recall) a previously sent message by ID."""
+        if not self.config.enable_recall or not message_id:
+            return
+
+        # Suppress the raw delete event Discord dispatches back for this action.
+        self._recall_suppress.add(str(message_id))
+
+        webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
+
+        if webhook_url and self._session is not None:
+            base = webhook_url.split("?")[0].rstrip("/")
+            delete_url = f"{base}/messages/{message_id}"
+            try:
+                async with self._session.delete(delete_url) as resp:
+                    if resp.status not in (200, 204, 404):
+                        body = await resp.text()
+                        self.logger.error(f"webhook delete error {resp.status}: {body}")
+            except Exception:
+                self._recall_suppress.discard(str(message_id))
+                self.logger.exception(f"delete: webhook DELETE failed for {message_id}")
+            return
+
+        if self._client is None:
+            self._recall_suppress.discard(str(message_id))
+            self.logger.debug("delete: no webhook_url and no bot client, skipping")
+            return
+
+        channel_id = channel.get("channel_id")
+        if not channel_id:
+            self._recall_suppress.discard(str(message_id))
+            self.logger.warning("delete: no channel_id")
+            return
+
+        ch = self._client.get_channel(int(channel_id))
+        if ch is None:
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                self._recall_suppress.discard(str(message_id))
+                self.logger.warning(
+                    f"delete: could not fetch channel {channel_id}: {e}"
+                )
+                return
+
+        if not isinstance(ch, discord.abc.Messageable):
+            self._recall_suppress.discard(str(message_id))
+            return
+
+        try:
+            msg_obj = await ch.fetch_message(int(message_id))  # type: ignore[attr-defined]
+        except Exception as e:
+            self._recall_suppress.discard(str(message_id))
+            self.logger.warning(f"delete: could not fetch message {message_id}: {e}")
+            return
+
+        try:
+            await msg_obj.delete()
+        except Exception:
+            self._recall_suppress.discard(str(message_id))
+            self.logger.exception(f"delete: failed to delete message {message_id}")
 
 
 register("discord", DiscordConfig, DiscordDriver)

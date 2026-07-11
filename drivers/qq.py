@@ -76,6 +76,10 @@ class QqConfig(_DriverConfig):
     # quotes (replies to) the original bridged message and prepends `edit_prefix`.
     edit_via_reply: bool = True
     edit_prefix: str = "[编辑]"
+    # Message recall/delete bridging. When enabled, a recall on QQ is fanned out
+    # to other platforms, and a recall bridged from another platform deletes the
+    # corresponding QQ message via the native `delete_msg` API.
+    enable_recall: bool = True
     proxy: str | None = UNSET
 
 
@@ -185,6 +189,9 @@ class QqDriver(BaseDriver[QqConfig]):
         self._forward_gc_task: asyncio.Task | None = None
         self._forward_mount_registered = False
         self._event_tasks: set[asyncio.Task] = set()
+        # Message IDs we deleted ourselves (bridged recalls). Used to ignore the
+        # recall notice NapCat echoes back so we don't loop.
+        self._recall_suppress: set[str] = set()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -194,6 +201,8 @@ class QqDriver(BaseDriver[QqConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
         if self.config.edit_via_reply:
             self.bridge.register_editor(self.instance_id, self.edit)
+        if self.config.enable_recall:
+            self.bridge.register_deleter(self.instance_id, self.delete)
         self._ensure_forward_http_mount()
         self._ensure_forward_gc_task()
 
@@ -515,13 +524,66 @@ class QqDriver(BaseDriver[QqConfig]):
         if data.get("post_type") is None:
             return
 
-        if data.get("post_type") != "message":
+        post_type = data.get("post_type")
+
+        if post_type == "notice":
+            await self._on_notice(data)
+            return
+
+        if post_type != "message":
             return
 
         if data.get("message_type") == "group":
             await self._on_group_message(data)
         elif data.get("message_type") == "private":
             await self._on_private_message(data)
+
+    async def _on_notice(self, event: dict):
+        """Handle OneBot notice events (currently: message recalls)."""
+        if not self.config.enable_recall:
+            return
+
+        notice_type = event.get("notice_type")
+        if notice_type not in ("group_recall", "friend_recall"):
+            return
+
+        message_id = str(event.get("message_id", ""))
+        if not message_id:
+            return
+
+        # Ignore recalls we initiated ourselves (the notice NapCat echoes back
+        # for our own delete_msg call) to avoid an infinite recall loop.
+        if message_id in self._recall_suppress:
+            self._recall_suppress.discard(message_id)
+            return
+
+        self_id = str(event.get("self_id", ""))
+        # The author of the recalled message. When it is the bot itself the
+        # recalled message is a bridged copy, so skip to avoid loops.
+        author_id = str(event.get("user_id", ""))
+        if author_id and author_id == self_id:
+            return
+
+        if notice_type == "group_recall":
+            channel = {"group_id": str(event.get("group_id", ""))}
+        else:
+            channel = {"user_id": author_id}
+
+        self.logger.debug(
+            f"NapCat [{self.instance_id}] recall notice ({notice_type}) "
+            f"for message {message_id}"
+        )
+
+        msg = NormalizedMessage(
+            platform=self.platform_name,
+            instance_id=self.instance_id,
+            channel=channel,
+            message_id=message_id,
+            recall_target_id=message_id,
+            is_recall=True,
+            source_self_id=self_id,
+        )
+        await self.bridge.on_recall_message(msg)
 
     async def _on_private_message(self, event: dict):
         if event.get("user_id") == event.get("self_id"):
@@ -2023,6 +2085,15 @@ class QqDriver(BaseDriver[QqConfig]):
                 return str(data["message_id"])
         return None
 
+    async def _api_delete_msg(self, message_id, *, timeout: float = 30.0) -> bool:
+        """Recall a message via OneBot ``delete_msg``. Returns True on success."""
+        resp = await self._call(
+            "delete_msg",
+            {"message_id": int(message_id)},
+            timeout=timeout,
+        )
+        return bool(resp and resp.get("status") == "ok")
+
     async def _api_get_group_member_info(
         self, group_id, user_id, *, no_cache: bool = False
     ) -> dict | None:
@@ -2499,6 +2570,27 @@ class QqDriver(BaseDriver[QqConfig]):
         send_kwargs["reply_to_id"] = message_id
 
         return await self.send(channel, new_text, **send_kwargs)
+
+    async def delete(self, channel: dict, message_id: str, **kwargs):
+        """Bridge a recall from another platform onto QQ via ``delete_msg``."""
+        if not self.config.enable_recall:
+            return None
+        if not message_id:
+            return None
+
+        # Suppress the recall notice NapCat will echo back for this deletion so
+        # we don't treat our own action as a new recall to bridge.
+        self._recall_suppress.add(str(message_id))
+        try:
+            ok = await self._api_delete_msg(message_id)
+        except Exception:
+            self._recall_suppress.discard(str(message_id))
+            raise
+        if not ok:
+            self.logger.warning(
+                f"NapCat [{self.instance_id}] failed to recall message {message_id}"
+            )
+        return ok
 
 
 register("qq", QqConfig, QqDriver)

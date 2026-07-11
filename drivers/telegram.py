@@ -137,6 +137,10 @@ class TelegramConfig(_DriverConfig):
     avatar_proxy_host: str = ""  # Base URL for avatar proxy (e.g. "https://avatarproxy.yourname.workers.dev")
     photo_padding_color: str | None = "#000000"
     sanitize_accidental_mentions: CoercedBool = True
+    # When enabled, a recall bridged from another platform deletes the matching
+    # Telegram message. Note: the Telegram Bot API cannot notify us when a user
+    # deletes a message, so recalls cannot be *detected* from Telegram sources.
+    enable_recall: CoercedBool = True
     proxy: str | None = UNSET
 
 
@@ -345,6 +349,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             return
         await self._app.start()
         self.bridge.register_editor(self.instance_id, self.edit)
+        if self.config.enable_recall:
+            self.bridge.register_deleter(self.instance_id, self.delete)
         assert self._app.updater is not None
         self.logger.debug("application started.")
         await self._app.updater.start_polling(
@@ -394,6 +400,13 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             prefix = "nb"
         return root == prefix
 
+    def _is_recall_command_text(self, text: str) -> bool:
+        command_text = (text or "").strip()
+        if not command_text.startswith("/"):
+            return False
+        root = command_text[1:].split(maxsplit=1)[0].split("@", 1)[0].lower()
+        return root == "recall"
+
     async def _on_command_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
@@ -401,11 +414,63 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         if not msg or not msg.text:
             return
 
+        # /recall: user-driven recall notification (workaround for the Bot API
+        # not delivering deletion updates). Reply to a message with /recall to
+        # signal that it should be recalled everywhere.
+        if self._is_recall_command_text(msg.text):
+            await self._on_recall_command(update, context)
+            return
+
         # Only forward NextBridge built-in commands (/ping and /<prefix> ...).
         if not self._is_nextbridge_command_text(msg.text):
             return
 
         await self._on_message(update, context)
+
+    async def _on_recall_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        if not self.config.enable_recall:
+            return
+        msg = update.message
+        if not msg:
+            return
+        chat_id = str(msg.chat_id)
+        reply = msg.reply_to_message
+        if not reply:
+            if self._app:
+                try:
+                    await self._app.bot.send_message(
+                        chat_id=int(chat_id),
+                        text="用法：回复要撤回的消息并发送 /recall。",
+                        reply_to_message_id=msg.message_id,
+                    )
+                except Exception as e:
+                    self.logger.warning(f"recall usage hint failed: {e}")
+            return
+
+        target_id = str(reply.message_id)
+        normalized = NormalizedMessage(
+            platform="telegram",
+            instance_id=self.instance_id,
+            channel={"chat_id": chat_id},
+            message_id=target_id,
+            recall_target_id=target_id,
+            is_recall=True,
+            is_dm=msg.chat_id > 0,
+        )
+        await self.bridge.on_recall_message(normalized)
+
+        # Also remove the original message and the /recall command message on
+        # Telegram itself (best-effort; requires delete permission).
+        if self._app:
+            for mid in (reply.message_id, msg.message_id):
+                try:
+                    await self._app.bot.delete_message(
+                        chat_id=int(chat_id), message_id=mid
+                    )
+                except Exception as e:
+                    self.logger.warning(f"recall: delete message {mid} failed: {e}")
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = update.message
@@ -859,6 +924,30 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             )
         except Exception as e:
             self.logger.warning(f"edit failed for message {message_id}: {e}")
+
+    # ------------------------------------------------------------------
+    # Delete / recall
+    # ------------------------------------------------------------------
+
+    async def delete(self, channel: dict, message_id: str, **kwargs):
+        """Delete (recall) a previously sent message by ID.
+
+        Note: the Telegram Bot API provides no update when a user deletes a
+        message, so a recall can be *applied* to Telegram but never *detected*
+        from a Telegram source.
+        """
+        if not self.config.enable_recall:
+            return
+        chat_id = channel.get("chat_id")
+        if not chat_id or self._app is None or not message_id:
+            return
+        try:
+            await self._app.bot.delete_message(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+            )
+        except Exception as e:
+            self.logger.warning(f"delete failed for message {message_id}: {e}")
 
 
 register("telegram", TelegramConfig, TelegramDriver)

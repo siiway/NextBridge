@@ -787,6 +787,55 @@ class MessageDB:
             # instead of raising MultipleResultsFound.
             return s.execute(base_stmt).scalars().first()
 
+    def get_platform_msg_ids(
+        self, bridge_id: str, instance_id: str, channel_id=None
+    ) -> list[str]:
+        """Return ALL platform message IDs for a bridge ID and target instance.
+
+        A single source message may fan out into several target messages (e.g.
+        a long message split into parts). Recall needs every one of them.
+        """
+        with self._session() as s:
+            base_stmt = select(MessageMapping.platform_msg_id).where(
+                MessageMapping.bridge_id == bridge_id,
+                MessageMapping.instance_id == instance_id,
+            )
+
+            if channel_id:
+                normalized = self._normalize_channel_id(channel_id)
+                strict_hits = list(
+                    s.execute(
+                        base_stmt.where(MessageMapping.channel_id == normalized)
+                    ).scalars()
+                )
+                if strict_hits:
+                    return strict_hits
+
+                legacy = str(channel_id)
+                if legacy != normalized:
+                    legacy_hits = list(
+                        s.execute(
+                            base_stmt.where(MessageMapping.channel_id == legacy)
+                        ).scalars()
+                    )
+                    if legacy_hits:
+                        return legacy_hits
+
+            return list(s.execute(base_stmt).scalars())
+
+    def delete_mapping_by_bridge_id(self, bridge_id: str) -> int:
+        """Delete all message mappings tied to a bridge ID (used after recall)."""
+        try:
+            with self._session() as s:
+                result = s.execute(
+                    delete(MessageMapping).where(MessageMapping.bridge_id == bridge_id)
+                )
+                s.commit()
+                return int(getattr(result, "rowcount", 0) or 0)
+        except Exception as e:
+            logger.error(f"Failed to delete message mapping: {e}")
+            return 0
+
     # ------------------------------------------------------------------
     # Aggregate helpers (used by control-plane drivers like Workbench)
     # ------------------------------------------------------------------

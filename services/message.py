@@ -43,6 +43,10 @@ class NormalizedMessage:
     edit_target_id: str | None = (
         None  # platform message ID being edited (same as message_id on edit)
     )
+    is_recall: bool = False  # whether this is a message recall/delete event
+    recall_target_id: str | None = (
+        None  # platform message ID being recalled (same as message_id on recall)
+    )
 
     @property
     def user(self) -> str:
