@@ -288,6 +288,7 @@ _CONTENT_FILTER = (
         | filters.AUDIO
         | filters.Document.ALL
         | filters.ANIMATION
+        | filters.Sticker.ALL
     )
     & ~filters.COMMAND
     & ~filters.UpdateType.EDITED_MESSAGE
@@ -614,6 +615,29 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         size=msg.animation.file_size or -1,
                     )
                 )
+            elif msg.sticker:
+                if msg.sticker.is_animated or msg.sticker.is_video:
+                    # animated/video stickers can't be sent as static images
+                    if msg.sticker.emoji:
+                        text = msg.sticker.emoji
+                else:
+                    try:
+                        f = await msg.sticker.get_file()
+                        assert f.file_path is not None
+                        attachments.append(
+                            Attachment(
+                                type="image",
+                                url=f.file_path,
+                                name="sticker.webp",
+                                size=msg.sticker.file_size or -1,
+                            )
+                        )
+                    except Exception as e:
+                        self.logger.warning(
+                            f"failed to fetch sticker, falling back to emoji: {e}"
+                        )
+                        if msg.sticker.emoji:
+                            text = msg.sticker.emoji
             elif msg.document:
                 f = await msg.document.get_file()
                 assert f.file_path is not None
