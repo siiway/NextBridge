@@ -180,6 +180,14 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         async def on_message_edit(before: discord.Message, after: discord.Message):
             if after.author.bot:
                 return
+            # Discord fires MESSAGE_UPDATE for reasons other than a real content
+            # edit, e.g. a message being pinned/unpinned or an embed/preview
+            # being auto-generated for a link. In those cases the actual text is
+            # unchanged, so treating them as edits would spuriously mark the
+            # bridged message as "edited" on other platforms. Only bridge the
+            # edit when the visible content actually changed.
+            if not self._is_content_edit(before, after):
+                return
             await self._on_message_edit(after)
 
         @self._client.event
@@ -261,6 +269,25 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             is_dm=server_id == "",
         )
         await self.bridge.on_message(msg)
+
+    @staticmethod
+    def _is_content_edit(before: discord.Message, after: discord.Message) -> bool:
+        """Return whether a MESSAGE_UPDATE reflects a real content edit.
+
+        Discord dispatches ``on_message_edit`` for events that are not user
+        edits, most notably pinning/unpinning a message (标注) and the
+        auto-generated link embeds/previews. Those updates leave the message
+        text and attachments untouched, so we compare the meaningful fields and
+        ignore updates that only change ``pinned``/``embeds``.
+        """
+        if before.content != after.content:
+            return True
+        # Attachments can change on a genuine edit (e.g. removing an image).
+        before_atts = {a.id for a in before.attachments}
+        after_atts = {a.id for a in after.attachments}
+        if before_atts != after_atts:
+            return True
+        return False
 
     async def _on_message_edit(self, message: discord.Message):
         server_id = str(message.guild.id) if message.guild else ""
