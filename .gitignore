@@ -24,6 +24,8 @@ docs/
 # ruff
 .ruff_cache/
 
+.uv-cache/
+
 # nix and direnv
 .direnv/
 result

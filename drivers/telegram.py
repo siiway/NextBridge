@@ -817,7 +817,12 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
 
-                if att.type == "image":
+                # Animated GIFs must be sent via send_animation; send_photo would
+                # flatten them to a static image. Skip the photo preprocessing
+                # (which re-encodes to PNG/JPEG) so the animation is preserved.
+                is_gif = att.type == "image" and mime == "image/gif"
+
+                if att.type == "image" and not is_gif:
                     data_bytes, fname = _prepare_photo_for_telegram(
                         data_bytes,
                         fname,
@@ -841,6 +846,14 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
                 try:
                     match att.type:
+                        case "image" if is_gif:
+                            sent = await self._app.bot.send_animation(
+                                chat_id=cid,
+                                animation=bio,
+                                caption=caption,
+                                parse_mode=parse_mode,
+                                reply_parameters=reply_params,
+                            )
                         case "image":
                             sent = await self._app.bot.send_photo(
                                 chat_id=cid,

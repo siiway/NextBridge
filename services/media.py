@@ -24,6 +24,28 @@ _sessions: dict[str | None, aiohttp.ClientSession] = {}
 _ffmpeg_available: bool | None = None
 
 
+def _sniff_image_mime(data: bytes) -> str | None:
+    """Detect the real image MIME type from magic bytes.
+
+    QQ (and some other platforms) deliver animated stickers as ``image``
+    segments whose filename hint / server Content-Type claims ``.jpg`` even
+    though the bytes are actually a GIF.  Magic bytes are authoritative, so we
+    use them to correct a mislabeled or generic MIME type before deciding the
+    outbound filename.
+    """
+    if len(data) < 12:
+        return None
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 def _looks_like_amr(data: bytes) -> bool:
     # AMR-NB/AMR-WB magic headers
     return data.startswith(b"#!AMR\n") or data.startswith(b"#!AMR-WB\n")
@@ -204,6 +226,17 @@ async def fetch_attachment(
         if converted:
             return converted
 
+    # Correct a mislabeled/generic image MIME using magic bytes so that the
+    # outbound filename gets the right extension (e.g. QQ animated stickers that
+    # arrive named ".jpg" but are actually GIF, which would otherwise render as
+    # a static image on the receiving platform).
+    sniffed = _sniff_image_mime(data)
+    if sniffed and sniffed != mime:
+        logger.debug(
+            f"media.fetch_attachment: {att.name!r} MIME {mime!r} -> {sniffed!r} (magic bytes)"
+        )
+        mime = sniffed
+
     return data, mime
 
 
@@ -222,6 +255,21 @@ def filename_for(name: str, content_type: str) -> str:
         "audio/amr": "amr",
     }
     if name:
+        # For image types, align the filename extension with the actual MIME so
+        # that receiving platforms (Discord etc.) render the file correctly.
+        # QQ, for example, delivers animated stickers named ".jpg" whose bytes
+        # are really GIF; keeping ".jpg" makes them show up as a static image.
+        # Restricted to images so video/voice hints (e.g. Telegram animations
+        # named ".gif" but served as mp4) are left untouched.
+        img_ext = _mime_ext.get(content_type)
+        if img_ext and content_type.startswith("image/"):
+            base, dot, cur = name.rpartition(".")
+            if dot:
+                cur_norm = "jpg" if cur.lower() == "jpeg" else cur.lower()
+                if cur_norm != img_ext:
+                    return f"{base}.{img_ext}"
+                return name
+            return f"{name}.{img_ext}"
         # Platforms like Yunhu CDN serve all images with a .tmp extension.
         # Replace it with an extension derived from the actual MIME type so
         # that receiving platforms (Discord etc.) render the file correctly.
