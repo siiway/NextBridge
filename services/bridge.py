@@ -841,7 +841,7 @@ class Bridge:
                 continue
             except Exception:
                 logger.exception(f"Failed to send to '{target_id}")
-                return
+                continue
 
     async def on_edit_message(self, msg: NormalizedMessage):
         """Called by drivers when a message is edited on their platform."""
