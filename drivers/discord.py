@@ -81,6 +81,7 @@ class DiscordConfig(_DriverConfig):
 
 
 _CQFACE_RE = re.compile(r":cqface(\d+):")
+_DISCORD_EMOJI_RE = re.compile(r"<a?:(\w+):(\d+)>")
 _MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 _SINGLE_URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 _META_IMAGE_RE = re.compile(
@@ -97,6 +98,21 @@ def _sanitize_mass_mentions(text: str) -> tuple[str, bool]:
     """Neutralize @everyone/@here so they cannot trigger mass pings."""
     sanitized, count = _MASS_MENTION_RE.subn(lambda m: f"@ {m.group(1)}", text)
     return sanitized, count > 0
+
+
+def _extract_custom_emojis(text: str) -> tuple[str, list[Attachment]]:
+    attachments = []
+
+    def _replace_emoji(m: re.Match) -> str:
+        name = m.group(1)
+        eid = m.group(2)
+        ext = "gif" if m.group(0).startswith("<a") else "png"
+        url = f"https://cdn.discordapp.com/emojis/{eid}.{ext}"
+        attachments.append(Attachment(type="image", url=url, name=f"{name}.{ext}"))
+        return ""
+
+    cleaned = _DISCORD_EMOJI_RE.sub(_replace_emoji, text)
+    return cleaned, attachments
 
 
 def _host_matches(host: str, allowed_hosts: list[str]) -> bool:
@@ -232,6 +248,36 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             attachments.append(
                 Attachment(type=att_type, url=att.url, name=att.filename, size=att.size)
             )
+
+        for sticker in message.stickers:
+            if sticker.format in (
+                discord.StickerFormatType.png,
+                discord.StickerFormatType.apng,
+            ):
+                attachments.append(
+                    Attachment(
+                        type="image", url=sticker.url, name=f"{sticker.name}.png"
+                    )
+                )
+            elif sticker.format == discord.StickerFormatType.gif:
+                attachments.append(
+                    Attachment(
+                        type="image", url=sticker.url, name=f"{sticker.name}.gif"
+                    )
+                )
+            elif sticker.format == discord.StickerFormatType.lottie:
+                label = sticker.name
+                if text.strip():
+                    text += f"\n[Sticker: {label}]"
+                else:
+                    text = f"[Sticker: {label}]"
+                self.logger.debug(
+                    f"sticker '{label}' is Lottie format, cannot bridge as image"
+                )
+
+        if text:
+            text, emoji_attachments = _extract_custom_emojis(text)
+            attachments.extend(emoji_attachments)
 
         if not attachments:
             text, attachments = await self._extract_auto_link_image(text)
