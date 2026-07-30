@@ -62,4 +62,8 @@ ignore = [
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.15.6", "ty>=0.0.23"]
+dev = ["ruff>=0.15.6", "ty>=0.0.23", "pytest>=8.0.0", "pytest-asyncio>=0.21.0,<1.0"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
