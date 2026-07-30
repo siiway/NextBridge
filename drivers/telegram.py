@@ -39,7 +39,13 @@ from urllib.parse import urlencode
 # (declared in pyproject and required by python-telegram-bot).
 import httpx
 from PIL import Image, UnidentifiedImageError
-from telegram import LinkPreviewOptions, ReplyParameters, Update
+from telegram import (
+    InputMediaPhoto,
+    InputMediaVideo,
+    LinkPreviewOptions,
+    ReplyParameters,
+    Update,
+)
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -801,6 +807,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
         source_proxy = self._source_proxy_from_kwargs(kwargs)
         try:
+            # Phase 1: download and prepare all attachments
+            prepared: list[dict] = []
             for att in attachments or []:
                 if not att.url and att.data is None:
                     continue
@@ -809,17 +817,12 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     att, self.config.max_file_size, source_proxy
                 )
                 if not result:
-                    # Oversized or failed — append as text (escape if in HTML mode)
                     label = att.name or att.url or ""
                     text += _attachment_fallback_label(att.type, label, parse_mode)
                     continue
 
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
-
-                # Animated GIFs must be sent via send_animation; send_photo would
-                # flatten them to a static image. Skip the photo preprocessing
-                # (which re-encodes to PNG/JPEG) so the animation is preserved.
                 is_gif = att.type == "image" and mime == "image/gif"
 
                 if att.type == "image" and not is_gif:
@@ -833,7 +836,6 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         text += _attachment_fallback_label("image", label, parse_mode)
                         continue
 
-                # validate photo data
                 if not data_bytes or len(data_bytes) == 0:
                     self.logger.warning(f"Empty image data for {fname}, skipping")
                     label = att.name or att.url or ""
@@ -842,22 +844,78 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
 
                 bio = io.BytesIO(data_bytes)
                 bio.name = fname
-                caption = text if not caption_used else None
+                prepared.append(
+                    {
+                        "type": att.type,
+                        "is_gif": is_gif,
+                        "bio": bio,
+                        "label": att.name or att.url or fname,
+                    }
+                )
+
+            # Phase 2: split into groupable (image/video non-GIF) and individual
+            groupable = [
+                p
+                for p in prepared
+                if p["type"] in ("image", "video") and not p["is_gif"]
+            ]
+            individual = [
+                p
+                for p in prepared
+                if not (p["type"] in ("image", "video") and not p["is_gif"])
+            ]
+
+            caption_used = False
+
+            # Send groupable in batches via send_media_group (max 10 per batch)
+            for i in range(0, len(groupable), 10):
+                batch = groupable[i : i + 10]
+                media_list: list[InputMediaPhoto | InputMediaVideo] = []
+                for j, item in enumerate(batch):
+                    cap = text if j == 0 and not caption_used else None
+                    if item["type"] == "image":
+                        media_list.append(
+                            InputMediaPhoto(
+                                media=item["bio"],
+                                caption=cap,
+                                parse_mode=parse_mode,
+                            )
+                        )
+                    else:
+                        media_list.append(
+                            InputMediaVideo(
+                                media=item["bio"],
+                                caption=cap,
+                                parse_mode=parse_mode,
+                            )
+                        )
 
                 try:
-                    match att.type:
-                        case "image" if is_gif:
+                    sent_messages = await self._app.bot.send_media_group(
+                        chat_id=cid,
+                        media=media_list,
+                        reply_parameters=reply_params,
+                    )
+                    for m in sent_messages:
+                        if m.message_id:
+                            msg_ids.append(str(m.message_id))
+                    caption_used = True
+                except Exception as e:
+                    for item in batch:
+                        text += _attachment_fallback_label(
+                            item["type"], item["label"], parse_mode
+                        )
+                    self.logger.warning(f"media group send failed: {e}")
+
+            # Send non-groupable items individually
+            for item in individual:
+                caption = text if not caption_used else None
+                try:
+                    match item["type"]:
+                        case "image":  # GIF animation
                             sent = await self._app.bot.send_animation(
                                 chat_id=cid,
-                                animation=bio,
-                                caption=caption,
-                                parse_mode=parse_mode,
-                                reply_parameters=reply_params,
-                            )
-                        case "image":
-                            sent = await self._app.bot.send_photo(
-                                chat_id=cid,
-                                photo=bio,
+                                animation=item["bio"],
                                 caption=caption,
                                 parse_mode=parse_mode,
                                 reply_parameters=reply_params,
@@ -865,7 +923,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         case "voice":
                             sent = await self._app.bot.send_voice(
                                 chat_id=cid,
-                                voice=bio,
+                                voice=item["bio"],
                                 caption=caption,
                                 parse_mode=parse_mode,
                                 reply_parameters=reply_params,
@@ -873,7 +931,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         case "video":
                             sent = await self._app.bot.send_video(
                                 chat_id=cid,
-                                video=bio,
+                                video=item["bio"],
                                 caption=caption,
                                 parse_mode=parse_mode,
                                 reply_parameters=reply_params,
@@ -881,7 +939,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         case _:
                             sent = await self._app.bot.send_document(
                                 chat_id=cid,
-                                document=bio,
+                                document=item["bio"],
                                 caption=caption,
                                 parse_mode=parse_mode,
                                 reply_parameters=reply_params,
@@ -891,10 +949,10 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         msg_ids.append(str(sent.message_id))
                     caption_used = True
                 except Exception as e:
-                    label = att.name or att.url or fname
-                    text += _attachment_fallback_label(att.type, label, parse_mode)
-                    self.logger.warning(f"attachment send failed ({att.type}): {e}")
-                    continue
+                    text += _attachment_fallback_label(
+                        item["type"], item["label"], parse_mode
+                    )
+                    self.logger.warning(f"attachment send failed ({item['type']}): {e}")
 
             # Send text-only if no attachments consumed it
             if text and not caption_used:
