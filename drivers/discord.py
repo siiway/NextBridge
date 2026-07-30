@@ -40,7 +40,7 @@ from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header, parse_richheader_tag
 from services.util import get_data_path
 from services.config_schema import _DriverConfig, CoercedBool
-from services.config import get_proxy, UNSET
+from services.config import get_proxy, get as get_config, UNSET
 from drivers import BaseDriver
 
 
@@ -160,13 +160,21 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self.bridge.register_editor(self.instance_id, self.edit)
         if self.config.enable_recall:
             self.bridge.register_deleter(self.instance_id, self.delete)
+
+        ssl_verify = get_config("global.ssl_verify", True)
+        if ssl_verify is None:
+            ssl_verify = True
+        connector = None
+        if not ssl_verify or self._proxy:
+            connector = aiohttp.TCPConnector(ssl=False)
+
         if self._proxy:
             self.logger.debug(f"using proxy {self._proxy}")
             self._session = aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(ssl=False), proxy=self._proxy
+                connector=connector, proxy=self._proxy
             )
         else:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(connector=connector)
 
         if not self._bot_token:
             self.logger.warning(
@@ -176,10 +184,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         intents = discord.Intents.default()
         intents.message_content = True
-        if self._proxy:
-            self._client = discord.Client(intents=intents, proxy=self._proxy)
-        else:
-            self._client = discord.Client(intents=intents)
+        self._client = discord.Client(
+            intents=intents, connector=connector, proxy=self._proxy
+        )
 
         @self._client.event
         async def on_ready():
@@ -249,6 +256,89 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 Attachment(type=att_type, url=att.url, name=att.filename, size=att.size)
             )
 
+        is_forward = False
+        if (
+            message.reference
+            and message.reference.type == discord.MessageReferenceType.forward
+        ):
+            is_forward = True
+            resolved = message.reference.resolved
+            if resolved is None and message.reference.message_id is not None:
+                try:
+                    ref_channel_id = message.reference.channel_id
+                    if ref_channel_id and message.guild:
+                        ch = message.guild.get_channel(ref_channel_id)
+                        if ch is None:
+                            ch = await message.guild.fetch_channel(ref_channel_id)
+                        if isinstance(
+                            ch,
+                            (discord.TextChannel, discord.Thread, discord.VoiceChannel),
+                        ):
+                            resolved = await ch.fetch_message(
+                                message.reference.message_id
+                            )
+                except Exception as e:
+                    self.logger.debug(f"failed to fetch forwarded message: {e}")
+            if resolved is not None and not isinstance(
+                resolved, discord.DeletedReferencedMessage
+            ):
+                fwd_text = resolved.clean_content
+                fwd_author = resolved.author.display_name
+
+                forward_block = (
+                    f"转发消息 | From @{fwd_author}:\n{fwd_text}"
+                    if fwd_text
+                    else f"转发消息 | From @{fwd_author}"
+                )
+                text = (text + "\n" + forward_block) if text.strip() else forward_block
+
+                for att in resolved.attachments:
+                    ct = att.content_type or ""
+                    if ct.startswith("image/"):
+                        att_type = "image"
+                    elif ct.startswith("video/"):
+                        att_type = "video"
+                    elif ct.startswith("audio/"):
+                        att_type = "voice"
+                    else:
+                        att_type = "file"
+                    attachments.append(
+                        Attachment(
+                            type=att_type,
+                            url=att.url,
+                            name=att.filename,
+                            size=att.size,
+                        )
+                    )
+
+                for sticker in resolved.stickers:
+                    if sticker.format in (
+                        discord.StickerFormatType.png,
+                        discord.StickerFormatType.apng,
+                        discord.StickerFormatType.gif,
+                    ):
+                        ext = (
+                            "gif"
+                            if sticker.format == discord.StickerFormatType.gif
+                            else "png"
+                        )
+                        attachments.append(
+                            Attachment(
+                                type="image",
+                                url=sticker.url,
+                                name=f"{sticker.name}.{ext}",
+                            )
+                        )
+                    elif sticker.format == discord.StickerFormatType.lottie:
+                        label = sticker.name
+                        if text.strip():
+                            text += f"\n[Forwarded Sticker: {label}]"
+                        else:
+                            text = f"[Forwarded Sticker: {label}]"
+            else:
+                forward_block = "转发消息 | (原消息已被删除)"
+                text = (text + "\n" + forward_block) if text.strip() else forward_block
+
         for sticker in message.stickers:
             if sticker.format in (
                 discord.StickerFormatType.png,
@@ -307,7 +397,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             attachments=attachments,
             message_id=str(message.id),
             reply_parent=str(message.reference.message_id)
-            if message.reference
+            if message.reference and not is_forward
             else None,
             mentions=mentions,
             source_proxy=self._media_proxy,
