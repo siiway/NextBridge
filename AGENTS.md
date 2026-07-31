@@ -4,8 +4,9 @@
 2. 项目使用 `uv` 作为包管理器，依赖须写入 `pyproject.toml` 而非 `requirements.txt` 或 `uv.lock`
 3. 项目可用 lint/type check: `ruff check --fix` & `ruff format` & `ty check` (未在虚拟环境可能需要 `uv run ...`)
 4. 在 增/删/改 功能时，同步修改对应的中文 & 英文文档部分 (`docs/` 下)
-5. 在增加新 driver 时，需要在 `README.md` 的 `Special Thanks` 部分增加 driver 使用的库 (没有则不管)
-6. 在达到 1.0 版本之前，不需要考虑代码的旧版本兼容性 (但是需要记忆下破坏性修改，以便在 release notes 中提及)
+5. 在进行功能/行为性更改（非底层或对用户无影响逻辑更改）后，及时更新文档以反映最新状态
+6. 在增加新 driver 时，需要在 `README.md` 的 `Special Thanks` 部分增加 driver 使用的库 (没有则不管)
+7. 在达到 1.0 版本之前，不需要考虑代码的旧版本兼容性 (但是需要记忆下破坏性修改，以便在 release notes 中提及)
 
 # 可用的 driver api 文档
 

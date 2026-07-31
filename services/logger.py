@@ -60,7 +60,7 @@ _show_source_mode: str = "always"
 
 def register_sensitive(values: frozenset[str]) -> None:
     _sensitive.clear()
-    _sensitive.update(v for v in values if len(v) >= 8)
+    _sensitive.update(v for v in values if len(v) >= 1)
 
 
 def replace_sensitive(msg: str) -> str:

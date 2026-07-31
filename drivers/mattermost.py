@@ -153,7 +153,7 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
             try:
                 mentioned_uids = json.loads(raw_mentions)
                 for uid in mentioned_uids:
-                    # Resolve name
+                    name = uid
                     try:
                         name, _ = await self._get_user_info(uid, server)
                     except Exception:

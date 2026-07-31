@@ -29,6 +29,7 @@
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 
 import aiohttp
@@ -440,8 +441,10 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         mime: str,
     ) -> None:
         """Upload a file via the Google Chat multipart media upload endpoint."""
-        assert self._session is not None  # Type narrowing - session is set in start()
-        boundary = "gc_nb_boundary"
+        if self._session is None:
+            self.logger.warning("_post_media: session is not ready")
+            return
+        boundary = uuid.uuid4().hex
         meta = json.dumps({}).encode()
         body = (
             f"--{boundary}\r\nContent-Type: application/json\r\n\r\n".encode()
@@ -475,7 +478,9 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             )
 
     async def _post_message(self, url: str, headers: dict, body: dict) -> None:
-        assert self._session is not None  # Type narrowing - session is set in start()
+        if self._session is None:
+            self.logger.warning("_post_message: session is not ready")
+            return
         try:
             async with self._session.post(url, json=body, headers=headers) as resp:
                 if resp.status not in (200, 201):

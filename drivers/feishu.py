@@ -142,7 +142,11 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         app_id = self.config.app_id
         app_secret = self.config.app_secret
         handler = self._handler
-        assert handler is not None  # Type narrowing - handler is set in start()
+        if handler is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _start_long_connection: handler not started"
+            )
+            return
         instance_id = self.instance_id
 
         def _ws_thread() -> None:
@@ -204,7 +208,11 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         await asyncio.Event().wait()
 
     async def _handle_http(self, request: Request) -> Response:
-        assert self._handler is not None  # Type narrowing - handler is set in start()
+        if self._handler is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _handle_http: handler not started"
+            )
+            return Response(status_code=503)
         handler = self._handler
         body = await request.body()
         # Create RawRequest with correct parameter names for lark-oapi
@@ -236,9 +244,17 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         if open_id in self._user_cache:
             return self._user_cache[open_id]
 
-        assert self._client is not None  # Type narrowing - client is set in start()
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _fetch_user_info: client not started"
+            )
+            return (open_id, "")
         client = self._client
-        assert client.contact is not None
+        if client.contact is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _fetch_user_info: contact api unavailable"
+            )
+            return (open_id, "")
         name, avatar = open_id, ""
         try:
             req = (
@@ -294,9 +310,17 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         self, message_id: str, file_key: str, resource_type: str
     ) -> bytes | None:
         """Download a message resource (image/file) from Feishu."""
-        assert self._client is not None  # Type narrowing - client is set in start()
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _download_resource: client not started"
+            )
+            return None
         client = self._client
-        assert client.im is not None
+        if client.im is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _download_resource: im api unavailable"
+            )
+            return None
         try:
             req = (
                 GetMessageResourceRequest.builder()
@@ -506,8 +530,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
     async def _send_feishu_msg(
         self, chat_id: str, msg_type: str, content: str, reply_to_id: str | None = None
     ) -> str | None:
-        assert self._client is not None  # Type narrowing - client is set in start()
-        assert self._client.im is not None
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _send_feishu_msg: client not started"
+            )
+            return None
+        if self._client.im is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _send_feishu_msg: im api unavailable"
+            )
+            return None
         im = self._client.im
 
         loop = asyncio.get_running_loop()
@@ -553,8 +585,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         return None
 
     async def _upload_image(self, data: bytes) -> str | None:
-        assert self._client is not None  # Type narrowing - client is set in start()
-        assert self._client.im is not None
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _upload_image: client not started"
+            )
+            return None
+        if self._client.im is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _upload_image: im api unavailable"
+            )
+            return None
         im = self._client.im
         body = (
             CreateImageRequestBody.builder()
@@ -574,8 +614,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         return None
 
     async def _upload_file(self, data: bytes, fname: str) -> str | None:
-        assert self._client is not None  # Type narrowing - client is set in start()
-        assert self._client.im is not None
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _upload_file: client not started"
+            )
+            return None
+        if self._client.im is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _upload_file: im api unavailable"
+            )
+            return None
         im = self._client.im
         body = (
             CreateFileRequestBody.builder()

@@ -183,13 +183,6 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                 )
                 self.logger.debug("Crypto store initialized")
 
-                # Try to delete old crypto store data to avoid corrupted sessions
-                try:
-                    await self._crypto_store.delete()
-                    self.logger.debug("Old crypto store data deleted")
-                except Exception as e:
-                    self.logger.debug(f"No old crypto store data to delete: {e}")
-
                 # Initialize state store
                 self.logger.debug("Using in-memory state store")
                 self._state_store = CustomStateStore()
@@ -202,7 +195,17 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     crypto_store=self._crypto_store,
                     state_store=cast(StateStore, self._state_store),
                 )
-                await self._crypto.load()
+                try:
+                    await self._crypto.load()
+                except Exception as e:
+                    self.logger.warning(
+                        f"Failed to load crypto sessions; clearing and retrying: {e}"
+                    )
+                    try:
+                        await self._crypto_store.delete()
+                    except Exception:
+                        pass
+                    await self._crypto.load()
                 self.logger.debug("Olm machine initialized")
 
                 # Set up state store and crypto on the client

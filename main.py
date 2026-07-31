@@ -55,7 +55,9 @@ def _discover_all_driver_modules() -> None:
         try:
             importlib.import_module(module_name)
         except Exception:
-            pass
+            logger.opt(exception=True).warning(
+                f"Failed to import driver module: {module_name}"
+            )
 
 
 def cmd_convert(src: str, dst: str) -> None:
@@ -115,8 +117,10 @@ def cmd_validate(args: argparse.Namespace) -> None:
     has_errors = False
 
     if validate_config:
-        assert config_path is not None
-        print(f"Validating config: {config_path}", flush=True)
+        if config_path is None:
+            print("Bug: config_path is None after conditional check", file=sys.stderr)
+            sys.exit(1)
+        logger.info(f"Validating config: {config_path.name}")
         try:
             raw = config_io.load_config(config_path)
         except Exception as exc:
@@ -145,8 +149,10 @@ def cmd_validate(args: argparse.Namespace) -> None:
                     has_errors = True
 
     if validate_rules:
-        assert rules_path is not None
-        print(f"Validating rules: {rules_path}", flush=True)
+        if rules_path is None:
+            print("Bug: rules_path is None after conditional check", file=sys.stderr)
+            sys.exit(1)
+        logger.info(f"Validating rules: {rules_path.name}")
         try:
             data = config_io.load_config(rules_path)
         except Exception as exc:
@@ -399,7 +405,7 @@ if __name__ == "__main__":
         try:
             hook(subparsers)
         except Exception:
-            pass
+            logger.opt(exception=True).warning("CLI hook registration failed")
 
     args = parser.parse_args()
 

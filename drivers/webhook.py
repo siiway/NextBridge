@@ -80,7 +80,7 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
             self.logger.warning("session not ready, message dropped")
             return
 
-        rich_header = kwargs.pop("rich_header", None)
+        rich_header = kwargs.get("rich_header")
         if rich_header:
             text = apply_rich_header(text, rich_header, style="plain")
 
@@ -98,8 +98,8 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
             ],
         }
 
-        # Merge any extra msg config keys (webhook_title, webhook_avatar, custom fields...)
-        payload.update(kwargs)
+        # Merge any extra msg config keys, excluding bridge-internal keys
+        payload.update({k: v for k, v in kwargs.items() if k != "rich_header"})
 
         headers = {"Content-Type": "application/json", **self.config.headers}
 

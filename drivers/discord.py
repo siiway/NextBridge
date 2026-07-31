@@ -190,7 +190,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         @self._client.event
         async def on_ready():
-            assert self._client is not None  # Type narrowing
+            if self._client is None:
+                self.logger.warning(
+                    f"Discord [{self.instance_id}] on_ready: client not started"
+                )
+                return
             self.logger.debug(f"logged in as {self._client.user}")
 
         @self._client.event
@@ -507,7 +511,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         return bridged_text, [Attachment(type="image", url=image_url, name=name)]
 
     async def _resolve_link_image_url(self, url: str) -> str | None:
-        assert self._session is not None
+        if self._session is None:
+            return None
         try:
             async with self._session.get(
                 url,

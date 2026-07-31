@@ -232,9 +232,9 @@ class Bridge:
 
     async def _handle_bind_setup_command(self, msg: NormalizedMessage):
         """Generate a 6-digit binding code for the user."""
-        import random
+        import secrets
 
-        code = f"{random.randint(100000, 999999)}"
+        code = f"{secrets.randbelow(900000) + 100000}"
         msg_db().create_binding_code(code, msg.instance_id, msg.user_id)
 
         sender_info = self._senders.get(msg.instance_id)

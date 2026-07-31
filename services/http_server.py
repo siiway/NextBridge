@@ -162,21 +162,29 @@ class HttpServerManager:
                 dependencies=[Depends(self._check_admin_auth)],
             )
             async def _drivers_status() -> JSONResponse:
-                assert self._driver_manager is not None
-                return JSONResponse({"drivers": self._driver_manager.get_status()})
+                dm = self._driver_manager
+                if dm is None:
+                    raise HTTPException(
+                        status_code=503, detail="Driver manager not available"
+                    )
+                return JSONResponse({"drivers": dm.get_status()})
 
             @root.post(
                 "/_nextbridge/admin/reload/{instance_id}",
                 dependencies=[Depends(self._check_admin_auth)],
             )
             async def _reload_driver(instance_id: str) -> JSONResponse:
-                assert self._driver_manager is not None
-                if instance_id not in self._driver_manager.drivers:
+                dm = self._driver_manager
+                if dm is None:
+                    raise HTTPException(
+                        status_code=503, detail="Driver manager not available"
+                    )
+                if instance_id not in dm.drivers:
                     return JSONResponse(
                         {"error": f"unknown driver: {instance_id}"},
                         status_code=404,
                     )
-                await self._driver_manager.restart_driver(instance_id)
+                await dm.restart_driver(instance_id)
                 return JSONResponse({"status": "restarted", "instance_id": instance_id})
 
             logger.info(

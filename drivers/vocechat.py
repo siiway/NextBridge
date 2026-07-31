@@ -346,7 +346,11 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
     async def _post_message(
         self, url: str, body: bytes, content_type: str, reply_to_id: str | None = None
     ) -> str | None:
-        assert self._session is not None
+        if self._session is None:
+            self.logger.warning(
+                f"VoceChat [{self.instance_id}] _post_message: session not started"
+            )
+            return None
         # VoceChat bot API handles replies via parent_mid in a JSON wrapper or
         # as a query parameter for some endpoints. Let's try parent_mid query param.
         if reply_to_id:
