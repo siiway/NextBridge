@@ -138,6 +138,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         # Message IDs we deleted ourselves (bridged recalls). Used to ignore the
         # raw delete event Discord dispatches back so we don't loop.
         self._recall_suppress: set[str] = set()
+        # Message IDs we pinned ourselves (bridged pins). Used to ignore the
+        # MESSAGE_UPDATE event Discord dispatches back so we don't loop.
+        self._pin_suppress: set[str] = set()
         # name → emoji_id index built lazily from discord_emojis.json
         self._emoji_db: dict[str, str] | None = None
 
@@ -160,6 +163,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self.bridge.register_editor(self.instance_id, self.edit)
         if self.config.enable_recall:
             self.bridge.register_deleter(self.instance_id, self.delete)
+        self.bridge.register_pinner(self.instance_id, self.pin)
+        self.bridge.register_unpinner(self.instance_id, self.unpin)
 
         ssl_verify = get_config("global.ssl_verify", True)
         if ssl_verify is None:
@@ -205,7 +210,23 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         @self._client.event
         async def on_message_edit(before: discord.Message, after: discord.Message):
-            if after.author.bot:
+            # Detect pin/unpin events. `before` is None when the message is
+            # not in the internal cache; `after` may be partial but still
+            # carries the `pinned` field for pin/unpin updates.
+            try:
+                is_pin_change = (
+                    before is not None and before.pinned != after.pinned
+                ) or (before is None and after.pinned is not None)
+            except (AttributeError, ValueError):
+                is_pin_change = False
+            if is_pin_change:
+                await self._on_message_pin(after, after.pinned)
+                return
+            # Skip bot messages for edit detection
+            try:
+                if after.author.bot:
+                    return
+            except (AttributeError, ValueError):
                 return
             # Discord fires MESSAGE_UPDATE for reasons other than a real content
             # edit, e.g. a message being pinned/unpinned or an embed/preview
@@ -213,7 +234,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             # unchanged, so treating them as edits would spuriously mark the
             # bridged message as "edited" on other platforms. Only bridge the
             # edit when the visible content actually changed.
-            if not self._is_content_edit(before, after):
+            if before is not None and not self._is_content_edit(before, after):
                 return
             await self._on_message_edit(after)
 
@@ -457,6 +478,36 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             is_dm=server_id == "",
         )
         await self.bridge.on_edit_message(msg)
+
+    async def _on_message_pin(self, message: discord.Message, pinned: bool):
+        msg_id = str(message.id)
+        if pinned and msg_id in self._pin_suppress:
+            self._pin_suppress.discard(msg_id)
+            return
+        server_id = str(message.guild.id) if message.guild else ""
+        channel_id = str(message.channel.id)
+        from services.message import NormalizedMessage as NM
+
+        if pinned:
+            msg = NM(
+                platform="discord",
+                instance_id=self.instance_id,
+                channel={"server_id": server_id, "channel_id": channel_id},
+                message_id=msg_id,
+                pin_target_id=msg_id,
+                is_pin=True,
+            )
+            await self.bridge.on_pin_message(msg)
+        else:
+            msg = NM(
+                platform="discord",
+                instance_id=self.instance_id,
+                channel={"server_id": server_id, "channel_id": channel_id},
+                message_id=msg_id,
+                unpin_target_id=msg_id,
+                is_unpin=True,
+            )
+            await self.bridge.on_unpin_message(msg)
 
     async def _on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
         """Bridge a Discord message deletion as a recall.
@@ -1032,6 +1083,65 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     # ------------------------------------------------------------------
     # Delete / recall
     # ------------------------------------------------------------------
+
+    async def pin(self, channel: dict, target_msg_id: str):
+        if self._client is None:
+            self.logger.debug("pin: no bot client, skipping")
+            return
+
+        channel_id = channel.get("channel_id")
+        if not channel_id:
+            self.logger.warning("pin: no channel_id")
+            return
+
+        ch = self._client.get_channel(int(channel_id))
+        if ch is None:
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                self.logger.warning(f"pin: could not fetch channel {channel_id}: {e}")
+                return
+
+        if not isinstance(ch, discord.abc.Messageable):
+            return
+
+        try:
+            msg_obj = await ch.fetch_message(int(target_msg_id))
+            self._pin_suppress.add(target_msg_id)
+            await msg_obj.pin()
+        except discord.Forbidden:
+            self.logger.warning(f"pin: no permission to pin in {channel_id}")
+        except Exception as e:
+            self.logger.warning(f"pin: failed to pin message {target_msg_id}: {e}")
+
+    async def unpin(self, channel: dict, target_msg_id: str):
+        if self._client is None:
+            self.logger.debug("unpin: no bot client, skipping")
+            return
+
+        channel_id = channel.get("channel_id")
+        if not channel_id:
+            self.logger.warning("unpin: no channel_id")
+            return
+
+        ch = self._client.get_channel(int(channel_id))
+        if ch is None:
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                self.logger.warning(f"unpin: could not fetch channel {channel_id}: {e}")
+                return
+
+        if not isinstance(ch, discord.abc.Messageable):
+            return
+
+        try:
+            msg_obj = await ch.fetch_message(int(target_msg_id))
+            await msg_obj.unpin()
+        except discord.Forbidden:
+            self.logger.warning(f"unpin: no permission to unpin in {channel_id}")
+        except Exception as e:
+            self.logger.warning(f"unpin: failed to unpin message {target_msg_id}: {e}")
 
     async def delete(self, channel: dict, message_id: str, **kwargs):
         """Delete (recall) a previously sent message by ID."""

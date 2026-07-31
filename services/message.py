@@ -47,6 +47,12 @@ class NormalizedMessage:
     recall_target_id: str | None = (
         None  # platform message ID being recalled (same as message_id on recall)
     )
+    is_pin: bool = False  # whether this is a message pin event
+    pin_target_id: str | None = (
+        None  # platform message ID being pinned (same as message_id on pin)
+    )
+    is_unpin: bool = False  # whether this is a message unpin event
+    unpin_target_id: str | None = None  # platform message ID being unpinned
 
     @property
     def user(self) -> str:

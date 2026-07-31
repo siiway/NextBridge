@@ -192,6 +192,8 @@ class QqDriver(BaseDriver[QqConfig]):
         # Message IDs we deleted ourselves (bridged recalls). Used to ignore the
         # recall notice NapCat echoes back so we don't loop.
         self._recall_suppress: set[str] = set()
+        self._essence_msg_ids: dict[str, set[str]] = {}
+        self._essence_poll_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -203,6 +205,8 @@ class QqDriver(BaseDriver[QqConfig]):
             self.bridge.register_editor(self.instance_id, self.edit)
         if self.config.enable_recall:
             self.bridge.register_deleter(self.instance_id, self.delete)
+        self.bridge.register_pinner(self.instance_id, self.pin)
+        self.bridge.register_unpinner(self.instance_id, self.unpin)
         self._ensure_forward_http_mount()
         self._ensure_forward_gc_task()
 
@@ -539,11 +543,16 @@ class QqDriver(BaseDriver[QqConfig]):
             await self._on_private_message(data)
 
     async def _on_notice(self, event: dict):
-        """Handle OneBot notice events (currently: message recalls)."""
+        """Handle OneBot notice events (recall, essence/pin)."""
+        notice_type = event.get("notice_type")
+
+        if notice_type == "essence":
+            await self._on_essence_notice(event)
+            return
+
         if not self.config.enable_recall:
             return
 
-        notice_type = event.get("notice_type")
         if notice_type not in ("group_recall", "friend_recall"):
             return
 
@@ -584,6 +593,89 @@ class QqDriver(BaseDriver[QqConfig]):
             source_self_id=self_id,
         )
         await self.bridge.on_recall_message(msg)
+
+    async def _on_essence_notice(self, event: dict):
+        sub_type = event.get("sub_type")
+        message_id = str(event.get("message_id", ""))
+        group_id = str(event.get("group_id", ""))
+        if not message_id or not group_id:
+            self.logger.info(
+                f"NapCat [{self.instance_id}] essence notice missing fields: "
+                f"sub_type={sub_type} event={event}"
+            )
+            return
+
+        channel = {"group_id": group_id}
+        self_id = str(event.get("self_id", ""))
+
+        self.logger.info(
+            f"NapCat [{self.instance_id}] essence notice ({sub_type}) "
+            f"for message {message_id} in group {group_id}"
+        )
+
+        if sub_type == "delete":
+            msg = NormalizedMessage(
+                platform=self.platform_name,
+                instance_id=self.instance_id,
+                channel=channel,
+                message_id=message_id,
+                unpin_target_id=message_id,
+                is_unpin=True,
+                source_self_id=self_id,
+            )
+            await self.bridge.on_unpin_message(msg)
+        elif sub_type == "add":
+            self._essence_msg_ids.setdefault(group_id, set()).add(message_id)
+            self._ensure_essence_polling_task()
+
+            msg = NormalizedMessage(
+                platform=self.platform_name,
+                instance_id=self.instance_id,
+                channel=channel,
+                message_id=message_id,
+                pin_target_id=message_id,
+                is_pin=True,
+                source_self_id=self_id,
+            )
+            await self.bridge.on_pin_message(msg)
+
+    def _ensure_essence_polling_task(self) -> None:
+        if self._essence_poll_task and not self._essence_poll_task.done():
+            return
+        self._essence_poll_task = asyncio.create_task(self._essence_poll_loop())
+
+    async def _essence_poll_loop(self) -> None:
+        while True:
+            await asyncio.sleep(60)
+            for group_id in list(self._essence_msg_ids.keys()):
+                try:
+                    items = await self._api_get_essence_msg_list(group_id)
+                except Exception as e:
+                    self.logger.debug(f"essence poll failed for group {group_id}: {e}")
+                    continue
+
+                current_ids = {str(item.get("message_id", "")) for item in items}
+                prev_ids = self._essence_msg_ids.get(group_id, set())
+
+                removed = prev_ids - current_ids
+                if not removed:
+                    continue
+
+                self._essence_msg_ids[group_id] = current_ids
+                for mid in removed:
+                    self.logger.info(
+                        f"NapCat [{self.instance_id}] essence removed (poll) "
+                        f"for message {mid} in group {group_id}"
+                    )
+                    msg = NormalizedMessage(
+                        platform=self.platform_name,
+                        instance_id=self.instance_id,
+                        channel={"group_id": group_id},
+                        message_id=mid,
+                        unpin_target_id=mid,
+                        is_unpin=True,
+                    )
+                    await self.bridge.on_unpin_message(msg)
 
     async def _on_private_message(self, event: dict):
         if event.get("user_id") == event.get("self_id"):
@@ -2085,6 +2177,40 @@ class QqDriver(BaseDriver[QqConfig]):
                 return str(data["message_id"])
         return None
 
+    async def _api_set_essence_msg(
+        self, message_id, group_id, *, timeout: float = 30.0
+    ) -> bool:
+        resp = await self._call(
+            "set_essence_msg",
+            {"message_id": int(message_id), "group_id": int(group_id)},
+            timeout=timeout,
+        )
+        return bool(resp and resp.get("status") == "ok")
+
+    async def _api_delete_essence_msg(
+        self, message_id, group_id, *, timeout: float = 30.0
+    ) -> bool:
+        resp = await self._call(
+            "delete_essence_msg",
+            {"message_id": int(message_id), "group_id": int(group_id)},
+            timeout=timeout,
+        )
+        return bool(resp and resp.get("status") == "ok")
+
+    async def _api_get_essence_msg_list(
+        self, group_id, *, timeout: float = 30.0
+    ) -> list[dict]:
+        resp = await self._call(
+            "get_essence_msg_list",
+            {"group_id": int(group_id)},
+            timeout=timeout,
+        )
+        if resp and resp.get("status") == "ok":
+            return (
+                (resp.get("data") or []) if isinstance(resp.get("data"), list) else []
+            )
+        return []
+
     async def _api_delete_msg(self, message_id, *, timeout: float = 30.0) -> bool:
         """Recall a message via OneBot ``delete_msg``. Returns True on success."""
         resp = await self._call(
@@ -2570,6 +2696,34 @@ class QqDriver(BaseDriver[QqConfig]):
         send_kwargs["reply_to_id"] = message_id
 
         return await self.send(channel, new_text, **send_kwargs)
+
+    async def pin(self, channel: dict, target_msg_id: str):
+        group_id = channel.get("group_id")
+        if not group_id:
+            self.logger.debug("pin: no group_id in channel")
+            return
+        try:
+            ok = await self._api_set_essence_msg(target_msg_id, group_id)
+            if not ok:
+                self.logger.warning(
+                    f"NapCat [{self.instance_id}] failed to pin message {target_msg_id}"
+                )
+        except Exception as e:
+            self.logger.warning(f"pin: failed to pin message {target_msg_id}: {e}")
+
+    async def unpin(self, channel: dict, target_msg_id: str):
+        group_id = channel.get("group_id")
+        if not group_id:
+            self.logger.debug("unpin: no group_id in channel")
+            return
+        try:
+            ok = await self._api_delete_essence_msg(target_msg_id, group_id)
+            if not ok:
+                self.logger.warning(
+                    f"NapCat [{self.instance_id}] failed to unpin message {target_msg_id}"
+                )
+        except Exception as e:
+            self.logger.warning(f"unpin: failed to unpin message {target_msg_id}: {e}")
 
     async def delete(self, channel: dict, message_id: str, **kwargs):
         """Bridge a recall from another platform onto QQ via ``delete_msg``."""

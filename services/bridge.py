@@ -60,6 +60,8 @@ class Bridge:
         self._senders: dict[str, tuple[str | None, Callable]] = {}
         self._editors: dict[str, Callable] = {}
         self._deleters: dict[str, Callable] = {}
+        self._pinners: dict[str, Callable] = {}
+        self._unpinners: dict[str, Callable] = {}
         self._sensitive: frozenset[str] = frozenset()
         self._middleware: MiddlewareChain | None = None
         self._event_bus: EventBus | None = None
@@ -161,6 +163,14 @@ class Bridge:
     def register_deleter(self, instance_id: str, delete_func: Callable):
         self._deleters[instance_id] = delete_func
         logger.debug(f"Registered deleter for instance: {instance_id}")
+
+    def register_pinner(self, instance_id: str, pin_func: Callable):
+        self._pinners[instance_id] = pin_func
+        logger.debug(f"Registered pinner for instance: {instance_id}")
+
+    def register_unpinner(self, instance_id: str, unpin_func: Callable):
+        self._unpinners[instance_id] = unpin_func
+        logger.debug(f"Registered unpinner for instance: {instance_id}")
 
     def senders_snapshot(self) -> list[dict]:
         """Return a serialisable snapshot of registered senders."""
@@ -863,20 +873,21 @@ class Bridge:
             (r for r in self._rules if str(r.get("id", "")) == rule_id),
             None,
         )
+        if rule is None:
+            rule = next(
+                (r for r in self._rules if config.stable_rule_hash(r) == rule_id),
+                None,
+            )
+        if rule is None:
+            logger.debug(f"on_edit_message: no rule found for bridge_id {bridge_id}")
+            return
 
-        for rule in self._rules:
-            rid = str(rule.get("id", ""))
-            if not rid:
-                rid = config.stable_rule_hash(rule)
-            expected_bridge_id = f"{rid}:{msg.instance_id}:{source_msg_id}"
-            if expected_bridge_id != bridge_id:
-                continue
-            if rule.get("type") == "connect":
-                if self._matches_channel(msg, rule.get("channels", {})):
-                    await self._dispatch_edit(msg, rule, bridge_id)
-            else:
-                if self._matches_from(msg, rule.get("from", {})):
-                    await self._dispatch_edit(msg, rule, bridge_id)
+        if rule.get("type") == "connect":
+            if self._matches_channel(msg, rule.get("channels", {})):
+                await self._dispatch_edit(msg, rule, bridge_id)
+        else:
+            if self._matches_from(msg, rule.get("from", {})):
+                await self._dispatch_edit(msg, rule, bridge_id)
 
     async def _dispatch_edit(
         self,
@@ -963,28 +974,28 @@ class Bridge:
             )
             return
 
-        dispatched = False
-        for rule in self._rules:
-            rid = str(rule.get("id", ""))
-            if not rid:
-                rid = config.stable_rule_hash(rule)
-            expected_bridge_id = f"{rid}:{msg.instance_id}:{source_msg_id}"
-            if expected_bridge_id != bridge_id:
-                continue
-            if rule.get("type") == "connect":
-                if self._matches_channel(msg, rule.get("channels", {})):
-                    await self._dispatch_recall(msg, rule, bridge_id)
-                    dispatched = True
-            else:
-                if self._matches_from(msg, rule.get("from", {})):
-                    await self._dispatch_recall(msg, rule, bridge_id)
-                    dispatched = True
+        rule_id = bridge_id.split(":")[0] if ":" in bridge_id else ""
+        rule = next(
+            (r for r in self._rules if str(r.get("id", "")) == rule_id),
+            None,
+        )
+        if rule is None:
+            rule = next(
+                (r for r in self._rules if config.stable_rule_hash(r) == rule_id),
+                None,
+            )
+        if rule is None:
+            logger.debug(f"on_recall_message: no rule found for bridge_id {bridge_id}")
+            return
 
-        # Clean up the mappings once the recall has been fanned out. The
-        # per-driver suppression sets are the real loop guard; this is hygiene
-        # and stops stale rows from mapping to now-deleted messages.
-        if dispatched:
-            msg_db().delete_mapping_by_bridge_id(bridge_id)
+        if rule.get("type") == "connect":
+            if self._matches_channel(msg, rule.get("channels", {})):
+                await self._dispatch_recall(msg, rule, bridge_id)
+                msg_db().delete_mapping_by_bridge_id(bridge_id)
+        else:
+            if self._matches_from(msg, rule.get("from", {})):
+                await self._dispatch_recall(msg, rule, bridge_id)
+                msg_db().delete_mapping_by_bridge_id(bridge_id)
 
     async def _dispatch_recall(
         self,
@@ -1035,6 +1046,178 @@ class Bridge:
                     await deleter(target_channel, target_msg_id)
                 except Exception:
                     logger.exception(f"Failed to recall message on '{target_id}'")
+
+    async def on_pin_message(self, msg: NormalizedMessage):
+        """Called by drivers when a message is pinned on their platform."""
+        logger.info(f"on_pin_message: {msg!s}")
+        source_msg_id = msg.pin_target_id or msg.message_id
+        if not source_msg_id:
+            logger.debug("on_pin_message: no message id, skipping")
+            return
+
+        bridge_id = msg_db().get_bridge_id(msg.instance_id, source_msg_id)
+        if bridge_id is None:
+            logger.debug(
+                f"on_pin_message: no bridge mapping for "
+                f"{msg.instance_id}/{source_msg_id}"
+            )
+            return
+
+        rule_id = bridge_id.split(":")[0] if ":" in bridge_id else ""
+        rule = next(
+            (r for r in self._rules if str(r.get("id", "")) == rule_id),
+            None,
+        )
+        if rule is None:
+            rule = next(
+                (r for r in self._rules if config.stable_rule_hash(r) == rule_id),
+                None,
+            )
+        if rule is None:
+            logger.debug(f"on_pin_message: no rule found for bridge_id {bridge_id}")
+            return
+
+        if rule.get("type") == "connect":
+            if self._matches_channel(msg, rule.get("channels", {})):
+                await self._dispatch_pin(msg, rule, bridge_id)
+        else:
+            if self._matches_from(msg, rule.get("from", {})):
+                await self._dispatch_pin(msg, rule, bridge_id)
+
+    async def _dispatch_pin(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+    ):
+        """Fan-out a pin to all target instances that have a mapped message."""
+        if rule.get("type") == "connect":
+            targets: dict = {
+                k: v
+                for k, v in rule.get("channels", {}).items()
+                if not self._should_skip_echo(
+                    k, {kk: vv for kk, vv in v.items() if kk != "msg"}, msg
+                )
+            }
+        else:
+            targets = {
+                k: v
+                for k, v in rule.get("to", {}).items()
+                if not self._should_skip_echo(k, v, msg)
+            }
+
+        for target_id, target_cfg in targets.items():
+            if rule.get("type") == "connect":
+                target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
+            else:
+                target_channel = target_cfg
+
+            target_msg_id = msg_db().get_platform_msg_id(
+                bridge_id, target_id, target_channel
+            )
+            if not target_msg_id:
+                logger.debug(
+                    f"_dispatch_pin: no target msg id for {target_id}, skipping"
+                )
+                continue
+
+            pinner = self._pinners.get(target_id)
+            if pinner is None:
+                logger.debug(
+                    f"_dispatch_pin: no pinner registered for {target_id}, skipping"
+                )
+                continue
+
+            try:
+                await pinner(target_channel, target_msg_id)
+            except Exception:
+                logger.exception(f"Failed to pin message on '{target_id}'")
+
+    async def on_unpin_message(self, msg: NormalizedMessage):
+        """Called by drivers when a message is unpinned on their platform."""
+        logger.info(f"on_unpin_message: {msg!s}")
+        source_msg_id = msg.unpin_target_id or msg.message_id
+        if not source_msg_id:
+            logger.debug("on_unpin_message: no message id, skipping")
+            return
+
+        bridge_id = msg_db().get_bridge_id(msg.instance_id, source_msg_id)
+        if bridge_id is None:
+            logger.debug(
+                f"on_unpin_message: no bridge mapping for "
+                f"{msg.instance_id}/{source_msg_id}"
+            )
+            return
+
+        rule_id = bridge_id.split(":")[0] if ":" in bridge_id else ""
+        rule = next(
+            (r for r in self._rules if str(r.get("id", "")) == rule_id),
+            None,
+        )
+        if rule is None:
+            rule = next(
+                (r for r in self._rules if config.stable_rule_hash(r) == rule_id),
+                None,
+            )
+        if rule is None:
+            logger.debug(f"on_unpin_message: no rule found for bridge_id {bridge_id}")
+            return
+
+        if rule.get("type") == "connect":
+            if self._matches_channel(msg, rule.get("channels", {})):
+                await self._dispatch_unpin(msg, rule, bridge_id)
+        else:
+            if self._matches_from(msg, rule.get("from", {})):
+                await self._dispatch_unpin(msg, rule, bridge_id)
+
+    async def _dispatch_unpin(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+    ):
+        """Fan-out an unpin to all target instances that have a mapped message."""
+        if rule.get("type") == "connect":
+            targets: dict = {
+                k: v
+                for k, v in rule.get("channels", {}).items()
+                if not self._should_skip_echo(
+                    k, {kk: vv for kk, vv in v.items() if kk != "msg"}, msg
+                )
+            }
+        else:
+            targets = {
+                k: v
+                for k, v in rule.get("to", {}).items()
+                if not self._should_skip_echo(k, v, msg)
+            }
+
+        for target_id, target_cfg in targets.items():
+            if rule.get("type") == "connect":
+                target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
+            else:
+                target_channel = target_cfg
+
+            target_msg_id = msg_db().get_platform_msg_id(
+                bridge_id, target_id, target_channel
+            )
+            if not target_msg_id:
+                logger.debug(
+                    f"_dispatch_unpin: no target msg id for {target_id}, skipping"
+                )
+                continue
+
+            unpinner = self._unpinners.get(target_id)
+            if unpinner is None:
+                logger.debug(
+                    f"_dispatch_unpin: no unpinner registered for {target_id}, skipping"
+                )
+                continue
+
+            try:
+                await unpinner(target_channel, target_msg_id)
+            except Exception:
+                logger.exception(f"Failed to unpin message on '{target_id}'")
 
 
 # Shared singleton used by all drivers

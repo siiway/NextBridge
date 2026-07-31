@@ -335,6 +335,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app.add_handler(
             MessageHandler(filters.UpdateType.EDITED_MESSAGE, self._on_edited_message)
         )
+        self._app.add_handler(
+            MessageHandler(filters.StatusUpdate.PINNED_MESSAGE, self._on_pinned_message)
+        )
         self._app.add_error_handler(self._on_error)
 
         self.logger.debug("starting application and polling.")
@@ -358,6 +361,8 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self.bridge.register_editor(self.instance_id, self.edit)
         if self.config.enable_recall:
             self.bridge.register_deleter(self.instance_id, self.delete)
+        self.bridge.register_pinner(self.instance_id, self.pin)
+        self.bridge.register_unpinner(self.instance_id, self.unpin)
         assert self._app.updater is not None
         self.logger.debug("application started.")
         await self._app.updater.start_polling(
@@ -717,6 +722,25 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         )
         await self.bridge.on_edit_message(normalized)
 
+    async def _on_pinned_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        msg = update.message
+        if not msg or not msg.pinned_message:
+            return
+        chat_id = str(msg.chat_id)
+        pinned = msg.pinned_message
+
+        normalized = NormalizedMessage(
+            platform="telegram",
+            instance_id=self.instance_id,
+            channel={"chat_id": chat_id},
+            message_id=str(pinned.message_id),
+            pin_target_id=str(pinned.message_id),
+            is_pin=True,
+        )
+        await self.bridge.on_pin_message(normalized)
+
     # ------------------------------------------------------------------
     # Send
     # ------------------------------------------------------------------
@@ -1043,6 +1067,34 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             )
         except Exception as e:
             self.logger.warning(f"delete failed for message {message_id}: {e}")
+
+    # ------------------------------------------------------------------
+    # Pin
+    # ------------------------------------------------------------------
+
+    async def pin(self, channel: dict, target_msg_id: str):
+        chat_id = channel.get("chat_id")
+        if not chat_id or self._app is None or not target_msg_id:
+            return
+        try:
+            await self._app.bot.pin_chat_message(
+                chat_id=int(chat_id),
+                message_id=int(target_msg_id),
+            )
+        except Exception as e:
+            self.logger.warning(f"pin failed for message {target_msg_id}: {e}")
+
+    async def unpin(self, channel: dict, target_msg_id: str):
+        chat_id = channel.get("chat_id")
+        if not chat_id or self._app is None or not target_msg_id:
+            return
+        try:
+            await self._app.bot.unpin_chat_message(
+                chat_id=int(chat_id),
+                message_id=int(target_msg_id),
+            )
+        except Exception as e:
+            self.logger.warning(f"unpin failed for message {target_msg_id}: {e}")
 
 
 register("telegram", TelegramConfig, TelegramDriver)
