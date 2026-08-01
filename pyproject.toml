@@ -33,6 +33,7 @@ dependencies = [
     "uvicorn>=0.43.0",
     "fresholm>=0.2.4",
     "tzlocal>=5.3.1",
+    "psycopg2-binary>=2.9",
 ]
 
 [[tool.uv.index]]

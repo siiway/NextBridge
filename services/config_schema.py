@@ -54,6 +54,18 @@ class DatabaseConfig(BaseModel):
     pool_recycle: int = 3600
     """Recycle connections after this many seconds (default: 1 hour)."""
 
+    sslmode: str | None = None
+    """PostgreSQL SSL mode (e.g. ``require``, ``prefer``, ``disable``).
+    Only applies to PostgreSQL backends."""
+
+    connect_timeout: int | None = None
+    """PostgreSQL connection timeout in seconds.
+    Only applies to PostgreSQL backends."""
+
+    application_name: str | None = None
+    """PostgreSQL application name for connection identification.
+    Only applies to PostgreSQL backends."""
+
 
 class LoggingConfig(BaseModel):
     """Logging configuration for controlling log output and rotation."""

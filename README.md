@@ -50,6 +50,7 @@
  - slack-sdk
  - google-auth
  - neonize
+ - psycopg2
 
 ## License
 

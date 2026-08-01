@@ -29,3 +29,6 @@ docs/
 # nix and direnv
 .direnv/
 result
+
+# 本地 PostgreSQL 数据目录
+.pgdata/

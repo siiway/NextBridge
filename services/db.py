@@ -174,6 +174,21 @@ class MessageDB:
         if url.startswith("sqlite:///"):
             engine_kwargs["connect_args"] = {"check_same_thread": False}
 
+        # PostgreSQL-specific settings
+        elif url.startswith("postgresql"):
+            pg_connect_args = {}
+            sslmode = db_config.get("sslmode")
+            if sslmode:
+                pg_connect_args["sslmode"] = sslmode
+            connect_timeout = db_config.get("connect_timeout")
+            if connect_timeout is not None:
+                pg_connect_args["connect_timeout"] = int(connect_timeout)
+            app_name = db_config.get("application_name")
+            if app_name:
+                pg_connect_args["application_name"] = app_name
+            if pg_connect_args:
+                engine_kwargs["connect_args"] = pg_connect_args
+
         # Pool settings for non-SQLite databases
         else:
             if "pool_size" in db_config:
