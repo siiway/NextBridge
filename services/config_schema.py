@@ -167,6 +167,17 @@ class HttpConfig(BaseModel):
         return val
 
 
+class WebuiConfig(BaseModel):
+    """WebUI management plane configuration."""
+
+    enable: CoercedBool = True
+    """Serve the WebUI management plane at ``/nb-webui`` on the shared HTTP server.
+
+    Credentials are stored separately in ``data/webui.json`` (never in this file).
+    Disable here if you do not want the panel exposed at all.
+    """
+
+
 class AdminApiConfig(BaseModel):
     """Admin API configuration (driver status, reload, etc.)."""
 
@@ -297,6 +308,9 @@ class GlobalConfig(BaseModel):
 
     http: HttpConfig = HttpConfig()
     """Shared HTTP server configuration for mounted driver webhooks."""
+
+    webui: WebuiConfig = WebuiConfig()
+    """WebUI management plane configuration."""
 
     plugins: PluginConfig = PluginConfig()
     """Plugin discovery and driver lifecycle configuration."""

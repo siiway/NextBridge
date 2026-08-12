@@ -119,6 +119,12 @@ def get(key: str, default: Any = None) -> Any:
     return value
 
 
+def invalidate_cache():
+    """Drop the in-memory config cache so the next ``get()`` re-reads from disk."""
+    global _config_cache
+    _config_cache = None
+
+
 def set(key: str, value):
     """
     Set a config value and write it back to the file.

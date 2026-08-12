@@ -35,6 +35,23 @@
 
 [![Todo](https://glint.siiway.org/api/shared/58f09c61cf844a2393dcefad1263fe45/todo-list.svg?theme=dark&maxItems=25)](https://glint.siiway.org/shared/58f09c61cf844a2393dcefad1263fe45)
 
+## WebUI Management Plane
+
+NextBridge ships with a built-in WebUI management plane at `http://<host>:<port>/nb-webui`
+(default port `9080`), where you can edit the global config, platform instances, and
+bridge rules from your browser. Config and rules files are auto-generated with safe
+defaults on first startup.
+
+The frontend is built from the separate [nb-webui](https://github.com/LeiSureLyYrsc/nb-webui)
+repository — build it and drop the output into this repo's `dist/` directory.
+
+> [!IMPORTANT]
+> The default WebUI account is `admin` / `admin`, and the password **must** be
+> changed on first login before the panel can be used. If the shared HTTP server
+> is exposed to the internet, protect it with HTTPS / a reverse proxy.
+
+Docs: <https://nextbridge.siiway.org>
+
 ## Special Thanks
 
  - NapCat
