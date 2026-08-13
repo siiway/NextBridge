@@ -35,6 +35,7 @@ from pydantic import BaseModel, ValidationError
 import services.config as config
 import services.config_io as config_io
 import services.logger as log
+from drivers.registry import get_meta
 from services.config_schema import GlobalConfig, RulesFile
 
 logger = log.get_logger("webui")
@@ -162,6 +163,9 @@ class WebuiAuth:
         self._data["password_salt"] = _b64url(salt)
         self._data["password_hash"] = _b64url(self._hash_password(new, salt))
         self._data["must_change_password"] = False
+        # Rotate the session secret so any bearer tokens issued before this
+        # password change are invalidated immediately.
+        self._data["session_secret"] = secrets.token_hex(32)
         self._save(self._data)
         return True, ""
 
@@ -196,9 +200,25 @@ class _LoginRateLimiter:
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
         self._attempts: dict[str, deque[float]] = {}
+        self._last_prune: float = time.time()
+
+    def _prune_stale_ips(self, now: float) -> None:
+        """Periodically drop IPs whose last attempt is older than the window.
+
+        Bounds the size of ``_attempts`` for long-lived processes so the
+        per-IP state does not grow without limit.
+        """
+        if now - self._last_prune < self.window_seconds:
+            return
+        cutoff = now - self.window_seconds
+        stale = [ip for ip, q in self._attempts.items() if not q or q[-1] < cutoff]
+        for ip in stale:
+            self._attempts.pop(ip, None)
+        self._last_prune = now
 
     def allowed(self, ip: str) -> bool:
         now = time.time()
+        self._prune_stale_ips(now)
         queue = self._attempts.setdefault(ip, deque())
         while queue and now - queue[0] > self.window_seconds:
             queue.popleft()
@@ -382,10 +402,30 @@ def build_webui_app(
             schema = config_cls.model_json_schema()
             _apply_descriptions(schema, _collect_field_docstrings(config_cls))
             drivers[name] = schema
-            meta[name] = {"description": (config_cls.__doc__ or "").strip()}
+            dm = get_meta(name)
+            meta[name] = {
+                "description": (config_cls.__doc__ or "").strip(),
+                "display_name": dm.get("display_name", name),
+                "icon": dm.get("icon", ""),
+                "channel_fields": dm.get("channel_fields", []),
+            }
         global_schema = GlobalConfig.model_json_schema()
         _apply_descriptions(global_schema, _collect_field_docstrings(GlobalConfig))
         return {"global": global_schema, "drivers": drivers, "meta": meta}
+
+    @app.get("/api/instances", dependencies=[Depends(_require_auth)])
+    async def instances() -> dict[str, Any]:
+        """返回所有已配置的实例列表 (实例 ID → 平台类型)."""
+        result: dict[str, str] = {}
+        try:
+            raw = config_io.load_config(config_path)
+            for key, value in raw.items():
+                if key != "global" and isinstance(value, dict):
+                    for inst_id in value:
+                        result[inst_id] = key
+        except Exception:
+            pass
+        return {"instances": result}
 
     # ------------------------------------------------------------------
     # Config file
