@@ -1,23 +1,39 @@
-"""Unified config file I/O supporting JSON, YAML, and TOML.
+"""Unified config file I/O supporting YAML, TOML, and JSON5.
 
 Format is always inferred from the file extension:
-  .json        → JSON
   .yaml / .yml → YAML  (requires pyyaml)
   .toml        → TOML  (read: stdlib tomllib; write: tomli-w)
+  .json / .jsonc / .json5 → JSON5 (requires pyjson5)
+
+Search priority (first found wins): yaml → toml → json
 """
 
 from __future__ import annotations
 
-import json
 import tomllib
 from pathlib import Path
 from typing import Any
 
 _YAML_EXTS = {".yaml", ".yml"}
 _TOML_EXTS = {".toml"}
+_JSON_EXTS = {".json", ".jsonc", ".json5"}
 
-_CONFIG_NAMES = ["config.json", "config.yaml", "config.yml", "config.toml"]
-_RULES_NAMES = ["rules.json", "rules.yaml", "rules.yml", "rules.toml"]
+_CONFIG_NAMES = [
+    "config.yaml",
+    "config.yml",
+    "config.toml",
+    "config.json",
+    "config.jsonc",
+    "config.json5",
+]
+_RULES_NAMES = [
+    "rules.yaml",
+    "rules.yml",
+    "rules.toml",
+    "rules.json",
+    "rules.jsonc",
+    "rules.json5",
+]
 
 
 def find_config(directory: Path) -> Path | None:
@@ -38,6 +54,13 @@ def find_rules(directory: Path) -> Path | None:
     return None
 
 
+def _load_json5(path: Path) -> dict[str, Any]:
+    """Load a JSON/JSONC/JSON5 file using pyjson5."""
+    import pyjson5
+
+    return pyjson5.loads(path.read_text(encoding="utf-8"))
+
+
 def load_config(path: Path) -> dict[str, Any]:
     """Load a config file; format is inferred from the file extension."""
     ext = path.suffix.lower()
@@ -49,9 +72,8 @@ def load_config(path: Path) -> dict[str, Any]:
     if ext in _TOML_EXTS:
         with open(path, "rb") as f:
             return tomllib.load(f)
-    # Default: JSON
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    # Default: JSON/JSONC/JSON5
+    return _load_json5(path)
 
 
 def save_config(data: dict[str, Any], path: Path) -> None:
@@ -72,6 +94,8 @@ def save_config(data: dict[str, Any], path: Path) -> None:
         with open(path, "wb") as f:
             tomli_w.dump(data, f)
         return
-    # Default: JSON
+    # Default: JSON5 (write standard JSON, compatible with JSON5 parsers)
+    import json
+
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
