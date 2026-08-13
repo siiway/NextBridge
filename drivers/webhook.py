@@ -39,8 +39,11 @@ from drivers import BaseDriver
 
 class WebhookConfig(_DriverConfig):
     url: str
+    """Webhook 目标 URL."""
     method: Literal["POST", "PUT", "PATCH"] = "POST"
+    """HTTP 请求方法: POST / PUT / PATCH."""
     headers: dict[str, str] = Field(default_factory=dict)
+    """自定义 HTTP 请求头."""
     proxy: str | None = UNSET
 
 
@@ -114,4 +117,6 @@ class WebhookDriver(BaseDriver[WebhookConfig]):
             self.logger.error(f"send failed: {e}")
 
 
-register("webhook", WebhookConfig, WebhookDriver)
+register(
+    "webhook", WebhookConfig, WebhookDriver, display_name="Webhook", icon="webhook"
+)

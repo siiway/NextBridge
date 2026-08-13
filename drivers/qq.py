@@ -46,40 +46,59 @@ from services.message_format import parse_richheader_tag
 
 class QqConfig(_DriverConfig):
     protocol: Literal["napcat", "lagrange", "onebot_v11"] = "napcat"
+    """使用的 QQ 协议实现: napcat / lagrange / onebot_v11."""
     ws_url: str = "ws://127.0.0.1:3001"
+    """OneBot 正向 WebSocket 连接地址."""
     ws_token: str = ""
+    """WebSocket 鉴权 Token."""
     ws_ssl_verify: bool = True
+    """是否验证 WebSocket 的 SSL 证书."""
     max_file_size: int = 10 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 10MB."""
     file_send_mode: Literal["stream", "base64"] = "stream"
+    """文件发送模式: stream (流式) / base64."""
     cqface_mode: Literal["gif", "emoji"] = "gif"
+    """CQ 码表情处理模式: gif (动图) / emoji (emoji)."""
     stream_threshold: int = 0
+    """流式发送阈值 (字节), 超过此大小使用流式发送."""
     forward_render_enabled: bool = False
+    """是否启用合并转发渲染为 HTML."""
     forward_render_ttl_seconds: int = 180 * 24 * 60 * 60
+    """合并转发渲染结果的缓存有效期 (秒), 默认 180 天."""
     forward_render_mount_path: str = "/qq-forward"
+    """合并转发渲染结果的挂载路径."""
     forward_render_persist_enabled: bool = False
+    """是否持久化保存合并转发渲染结果."""
     # Merged-forward image rendering method:
     # - "url": store bytes in DB and serve via bridge URL (default)
     # - "base64": embed data URI directly in HTML
     forward_render_image_method: Literal["url", "base64"] = "url"
+    """合并转发渲染中的图片引用方式: url / base64."""
     forward_render_asset_ttl_seconds: int = 14 * 24 * 60 * 60
+    """渲染资源 (图片等) 的缓存有效期 (秒), 默认 14 天."""
     # Preferred public URL prefix for forward links. When set, forward links are
     # generated as: {forward_render_base_url}/{page_id}
     # (mount path is NOT appended automatically).
     forward_render_base_url: str = ""
+    """合并转发渲染结果的基础 URL, 用于生成外部可访问链接."""
     # Merged-forward face rendering strategy:
     # - false: render by cqface mapping (unicode)
     # - true/unset: render by default gif host
     # - string: use custom gif host base URL
     forward_render_cqface_gif: bool | str = True
+    """合并转发渲染中 CQ 表情的动图模式."""
     # QQ has no native "edit message" API. When an edit is bridged from another
     # platform (e.g. Discord/Telegram), simulate it by sending a NEW message that
     # quotes (replies to) the original bridged message and prepends `edit_prefix`.
     edit_via_reply: bool = True
+    """是否通过回复消息来编辑消息."""
     edit_prefix: str = "[编辑]"
+    """编辑消息时添加的前缀文本."""
     # Message recall/delete bridging. When enabled, a recall on QQ is fanned out
     # to other platforms, and a recall bridged from another platform deletes the
     # corresponding QQ message via the native `delete_msg` API.
     enable_recall: bool = True
+    """是否启用消息撤回功能."""
     proxy: str | None = UNSET
 
 
@@ -2747,4 +2766,14 @@ class QqDriver(BaseDriver[QqConfig]):
         return ok
 
 
-register("qq", QqConfig, QqDriver)
+register(
+    "qq",
+    QqConfig,
+    QqDriver,
+    display_name="QQ",
+    icon="qq",
+    channel_fields=[
+        {"key": "group_id", "label": "群号", "description": "QQ群号"},
+        {"key": "user_id", "label": "用户QQ号", "description": "QQ用户ID"},
+    ],
+)

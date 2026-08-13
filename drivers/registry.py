@@ -12,24 +12,43 @@ from typing import Any, Callable
 from pydantic import BaseModel
 
 _REGISTRY: dict[str, tuple[type[BaseModel], type]] = {}
+_META: dict[str, dict[str, Any]] = {}
 
 _CLI_HOOKS: list[Callable[..., Any]] = []
 
 
-def register(name: str, config_cls: type[BaseModel], driver_cls: type) -> None:
+def register(
+    name: str,
+    config_cls: type[BaseModel],
+    driver_cls: type,
+    *,
+    display_name: str = "",
+    icon: str = "",
+    channel_fields: list[dict[str, str]] | None = None,
+) -> None:
     """Register a driver under *name*.
 
     Args:
         name:       Platform key used in the config file  (e.g. ``"qq"``).
         config_cls: Pydantic model class for per-instance config validation.
         driver_cls: ``BaseDriver`` subclass to instantiate.
+        display_name: Human-readable platform name (e.g. ``"QQ"``, ``"Telegram"``).
+        icon:       Icon identifier for the frontend.
+        channel_fields: List of supported channel field definitions, each
+            with ``{"key": ..., "label": ...}``.
     """
     _REGISTRY[name] = (config_cls, driver_cls)
+    _META[name] = {
+        "display_name": display_name or name,
+        "icon": icon or "",
+        "channel_fields": channel_fields or [],
+    }
 
 
 def unregister(name: str) -> bool:
     """Remove a driver from the registry.  Returns ``True`` if it existed."""
-    return _REGISTRY.pop(name, None) is not None
+    _REGISTRY.pop(name, None)
+    return _META.pop(name, None) is not None
 
 
 def all_drivers() -> dict[str, tuple[type[BaseModel], type]]:
@@ -41,6 +60,16 @@ def all_drivers() -> dict[str, tuple[type[BaseModel], type]]:
 def get_driver(name: str) -> tuple[type[BaseModel], type] | None:
     """Look up a single driver by platform name."""
     return _REGISTRY.get(name)
+
+
+def get_meta(name: str) -> dict[str, Any]:
+    """Return metadata for a driver by name, or empty dict if not found."""
+    return _META.get(name, {})
+
+
+def all_meta() -> dict[str, dict[str, Any]]:
+    """Return a snapshot of ``{name: meta_dict}`` for every registered driver."""
+    return dict(_META)
 
 
 def register_cli(hook: Callable[..., Any]) -> None:

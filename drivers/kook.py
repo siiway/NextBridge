@@ -33,7 +33,9 @@ from services.message_format import apply_rich_header
 
 class KookConfig(_DriverConfig):
     token: str
+    """KOOK Bot Token."""
     max_file_size: int = 25 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 25MB."""
     proxy: str | None = UNSET
 
 
@@ -210,4 +212,13 @@ class KookDriver(BaseDriver[KookConfig]):
             self.logger.error(f"send failed: {e}")
 
 
-register("kook", KookConfig, KookDriver)
+register(
+    "kook",
+    KookConfig,
+    KookDriver,
+    display_name="KOOK",
+    icon="kook",
+    channel_fields=[
+        {"key": "channel_id", "label": "频道ID", "description": "KOOK 文字频道 ID"}
+    ],
+)

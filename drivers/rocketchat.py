@@ -60,17 +60,26 @@ from drivers import BaseDriver
 
 class RocketChatConfig(_DriverConfig):
     send_method: str = "api"  # "api" or "webhook"
+    """消息发送方式: api (REST API) / webhook."""
     # API send mode (and receive attachment downloads)
     server_url: str = ""
+    """Rocket.Chat 服务器地址 (send_method=\"api\" 时需要)."""
     auth_token: str = ""
+    """Rocket.Chat 认证 Token."""
     user_id: str = ""
+    """Rocket.Chat 用户 ID."""
     # Webhook send mode
     webhook_url: str = ""
+    """Rocket.Chat Webhook URL (send_method=\"webhook\" 时需要)."""
     # Listener (receive side)
     listen_path: str = "/rocketchat/webhook"
+    """Rocket.Chat Webhook 监听路径."""
     webhook_secret: str = ""
+    """Webhook 验签密钥."""
     webhook_token: str = ""
+    """Webhook 令牌."""
     max_file_size: int = 50 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 50MB."""
     proxy: str | None = UNSET
 
     @model_validator(mode="after")
@@ -524,4 +533,17 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             )
 
 
-register("rocketchat", RocketChatConfig, RocketChatDriver)
+register(
+    "rocketchat",
+    RocketChatConfig,
+    RocketChatDriver,
+    display_name="Rocket.Chat",
+    icon="rocketchat",
+    channel_fields=[
+        {
+            "key": "room_id",
+            "label": "房间ID",
+            "description": 'Rocket.Chat 房间 ID (send_method="api" 时必需), 如 "GENERAL"',
+        }
+    ],
+)

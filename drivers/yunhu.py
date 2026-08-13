@@ -37,10 +37,15 @@ from drivers import BaseDriver
 
 class YunhuConfig(_DriverConfig):
     token: str = ""
+    """语核 Bot Token."""
     webhook_path: str = "/yunhu-webhook"
+    """语核 Webhook 监听路径."""
     webhook_secret: str = ""
+    """Webhook 验签密钥."""
     proxy_host: str = "https://yh-proxy.siiway.top"
+    """语核 API 代理地址."""
     max_file_size: int = 10 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 10MB."""
     proxy: str | None = UNSET
 
 
@@ -416,4 +421,18 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         return msg_ids if msg_ids else None
 
 
-register("yunhu", YunhuConfig, YunhuDriver)
+register(
+    "yunhu",
+    YunhuConfig,
+    YunhuDriver,
+    display_name="语核",
+    icon="yunhu",
+    channel_fields=[
+        {"key": "chat_id", "label": "聊天ID", "description": "语核聊天 (群组) ID"},
+        {
+            "key": "chat_type",
+            "label": "聊天类型",
+            "description": '聊天类型: "group" 或 "user" (默认 "group")',
+        },
+    ],
+)

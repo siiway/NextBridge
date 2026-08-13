@@ -39,8 +39,11 @@ from drivers import BaseDriver
 
 class SignalConfig(_DriverConfig):
     api_url: str
+    """Signal Messenger REST API 地址."""
     number: str
+    """Signal 账号绑定的手机号 (含国际区号)."""
     max_file_size: int = 50 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 50MB."""
     proxy: str | None = UNSET
 
 
@@ -290,4 +293,17 @@ class SignalDriver(BaseDriver[SignalConfig]):
             self.logger.error(f"send error: {e}")
 
 
-register("signal", SignalConfig, SignalDriver)
+register(
+    "signal",
+    SignalConfig,
+    SignalDriver,
+    display_name="Signal",
+    icon="signal",
+    channel_fields=[
+        {
+            "key": "recipient",
+            "label": "接收方",
+            "description": 'Signal 接收方: 手机号 (如 "+12025551234") 或 "group.<base64id>" 群组',
+        }
+    ],
+)

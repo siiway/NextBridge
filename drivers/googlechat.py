@@ -54,11 +54,17 @@ from services.message_format import apply_rich_header
 
 class GoogleChatConfig(_DriverConfig):
     service_account_file: str = ""
+    """Google 服务账号 JSON 密钥文件路径."""
     service_account_json: str = ""
+    """Google 服务账号 JSON 密钥内容 (与 file 二选一)."""
     listen_path: str = "/google-chat/events"
+    """Google Chat 事件回调监听路径."""
     webhook_secret: str = ""
+    """Webhook 验签密钥."""
     endpoint_url: str = ""
+    """Google Chat API 端点 URL."""
     max_file_size: int = 50 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 50MB."""
     proxy: str | None = UNSET
 
     @model_validator(mode="after")
@@ -493,4 +499,17 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             self.logger.error(f"Google Chat [{self.instance_id}] post error: {e}")
 
 
-register("googlechat", GoogleChatConfig, GoogleChatDriver)
+register(
+    "googlechat",
+    GoogleChatConfig,
+    GoogleChatDriver,
+    display_name="Google Chat",
+    icon="googlechat",
+    channel_fields=[
+        {
+            "key": "space_name",
+            "label": "空间名称",
+            "description": 'Google Chat 空间资源名称, 如 "spaces/AAAA"',
+        }
+    ],
+)

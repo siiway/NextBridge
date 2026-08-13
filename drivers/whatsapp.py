@@ -40,6 +40,7 @@ from services.config_schema import _DriverConfig
 
 class WhatsAppConfig(_DriverConfig):
     storage_dir: str = ""  # defaults to ~/.nextbridge/whatsapp/<instance_id>.db
+    """WhatsApp 数据存储目录, 用于存放会话和多媒体文件."""
 
 
 class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
@@ -180,4 +181,17 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
             return None
 
 
-register("whatsapp", WhatsAppConfig, WhatsAppDriver)
+register(
+    "whatsapp",
+    WhatsAppConfig,
+    WhatsAppDriver,
+    display_name="WhatsApp",
+    icon="whatsapp",
+    channel_fields=[
+        {
+            "key": "chat_id",
+            "label": "聊天ID",
+            "description": 'WhatsApp JID, 如 "1234567890@s.whatsapp.net" 或 "123456789@g.us"',
+        }
+    ],
+)

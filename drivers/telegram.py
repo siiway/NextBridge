@@ -138,15 +138,22 @@ _patch_httpcore_proxy_tunnel()
 
 class TelegramConfig(_DriverConfig):
     bot_token: str
+    """Telegram Bot Token, 从 @BotFather 获取."""
     max_file_size: int = 50 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 50MB."""
     rich_header_host: str = "https://richheader.siiway.top"
+    """富文本消息头渲染服务地址."""
     avatar_proxy_host: str = ""  # Base URL for avatar proxy (e.g. "https://avatarproxy.yourname.workers.dev")
+    """头像代理地址, 用于缓存用户头像."""
     photo_padding_color: str | None = "#000000"
+    """图片填充背景色, 用于非正方形图片."""
     sanitize_accidental_mentions: CoercedBool = True
+    """是否清理意外触发的 @ 提及."""
     # When enabled, a recall bridged from another platform deletes the matching
     # Telegram message. Note: the Telegram Bot API cannot notify us when a user
     # deletes a message, so recalls cannot be *detected* from Telegram sources.
     enable_recall: CoercedBool = True
+    """是否启用消息撤回功能."""
     proxy: str | None = UNSET
 
 
@@ -1097,4 +1104,17 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             self.logger.warning(f"unpin failed for message {target_msg_id}: {e}")
 
 
-register("telegram", TelegramConfig, TelegramDriver)
+register(
+    "telegram",
+    TelegramConfig,
+    TelegramDriver,
+    display_name="Telegram",
+    icon="telegram",
+    channel_fields=[
+        {
+            "key": "chat_id",
+            "label": "聊天ID",
+            "description": 'Telegram 聊天 ID (群组为负数, 如 "-100123456789")',
+        }
+    ],
+)

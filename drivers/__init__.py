@@ -44,6 +44,8 @@ class DriverMeta:
     )
     author: str = ""
     url: str = ""
+    icon: str = ""
+    channel_fields: list[dict[str, str]] = field(default_factory=list)
 
 
 class DriverHealth(Enum):

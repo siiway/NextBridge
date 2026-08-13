@@ -50,7 +50,7 @@ from pydantic import model_validator
 from drivers import BaseDriver
 from drivers.registry import register
 from services import media
-from services.config import UNSET, get_proxy
+from services.config import get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
@@ -58,14 +58,21 @@ from services.message_format import apply_rich_header
 
 class MatrixConfig(_DriverConfig):
     homeserver: str
+    """Matrix 家服务器地址, 如 \"https://matrix.org\"."""
     user_id: str
+    """Matrix 用户 ID, 如 \"@user:matrix.org\"."""
     password: str = ""
+    """Matrix 用户密码 (与 access_token 二选一)."""
     access_token: str = ""
+    """Matrix 访问令牌 (与 password 二选一)."""
     max_file_size: int = 10 * 1024 * 1024
-    proxy: str | None = UNSET
+    """最大可发送的文件大小 (字节), 默认 10MB."""
     enable_e2e: bool = False
+    """是否启用端到端加密."""
     store_path: str = "data/e2e"
+    """端到端加密数据存储路径."""
     connect_timeout: int = 30
+    """连接超时时间 (秒)."""
 
     @model_validator(mode="after")
     def _require_auth(self) -> "MatrixConfig":
@@ -541,4 +548,17 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
             self.logger.error(f"fallback send failed: {e}")
 
 
-register("matrix", MatrixConfig, MatrixDriver)
+register(
+    "matrix",
+    MatrixConfig,
+    MatrixDriver,
+    display_name="Matrix",
+    icon="matrix",
+    channel_fields=[
+        {
+            "key": "room_id",
+            "label": "房间ID",
+            "description": 'Matrix 房间 ID, 如 "!abc123:matrix.org"',
+        }
+    ],
+)

@@ -62,13 +62,21 @@ from services.message import Attachment, NormalizedMessage
 
 class FeishuConfig(_DriverConfig):
     app_id: str
+    """飞书应用的 App ID."""
     app_secret: str
+    """飞书应用的 App Secret."""
     use_long_connection: bool = True
+    """是否使用长连接接收事件."""
     verification_token: str = ""
+    """飞书事件订阅的验证 Token."""
     encrypt_key: str = ""
+    """飞书事件订阅的加密密钥."""
     listen_path: str = "/event"
+    """飞书事件回调的监听路径."""
     webhook_secret: str = ""
+    """Webhook 验签密钥."""
     max_file_size: int = 50 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 50MB."""
 
 
 _WSS_URL_RE = re.compile(r"wss://\S+")
@@ -644,4 +652,17 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         return None
 
 
-register("feishu", FeishuConfig, FeishuDriver)
+register(
+    "feishu",
+    FeishuConfig,
+    FeishuDriver,
+    display_name="飞书",
+    icon="feishu",
+    channel_fields=[
+        {
+            "key": "chat_id",
+            "label": "聊天ID",
+            "description": '飞书开放聊天 ID, 如 "oc_xxxxxxxxxxxxxxxxxx"',
+        }
+    ],
+)

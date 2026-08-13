@@ -53,13 +53,21 @@ from services.message_format import apply_rich_header
 
 class SlackConfig(_DriverConfig):
     bot_token: str = ""
+    """Slack Bot Token (xoxb-...)."""
     app_token: str = ""
+    """Slack App Token (xapp-...)."""
     send_method: Literal["bot", "webhook"] = "bot"
+    """消息发送方式: bot / webhook."""
     incoming_webhook_url: str = ""
+    """Slack Incoming Webhook URL (send_method=\"webhook\" 时需要)."""
     signing_secret: str = ""
+    """Slack Signing Secret, 用于验证请求来源."""
     listen_path: str = "/slack/events"
+    """Slack 事件回调监听路径."""
     webhook_secret: str = ""
+    """Webhook 验签密钥."""
     max_file_size: int = 50 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 50MB."""
     proxy: str | None = UNSET
 
 
@@ -489,4 +497,17 @@ class SlackDriver(BaseDriver[SlackConfig]):
             self.logger.error(f"incoming webhook request failed: {e}")
 
 
-register("slack", SlackConfig, SlackDriver)
+register(
+    "slack",
+    SlackConfig,
+    SlackDriver,
+    display_name="Slack",
+    icon="slack",
+    channel_fields=[
+        {
+            "key": "channel_id",
+            "label": "频道ID",
+            "description": 'Slack 频道 ID, 如 "C1234567890"',
+        }
+    ],
+)
