@@ -18,9 +18,8 @@ data/
 # Document related
 docs/
 
-# Nested standalone repos (nb-docs, nb-webui)
+# Nested standalone repos (nb-docs)
 nb-docs/
-nb-webui/
 
 # claude
 .claude/
