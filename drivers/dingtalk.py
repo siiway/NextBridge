@@ -54,12 +54,19 @@ _UPLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/upload"
 
 class DingTalkConfig(_DriverConfig):
     app_key: str
+    """钉钉应用的 AppKey, 在钉钉开放平台创建应用时获取."""
     app_secret: str
+    """钉钉应用的 AppSecret."""
     robot_code: str
+    """钉钉机器人的 RobotCode."""
     signing_secret: str = ""
+    """钉钉事件订阅的签名密钥, 用于验证回调请求."""
     listen_path: str = "/dingtalk/event"
+    """钉钉事件回调的监听路径."""
     webhook_secret: str = ""
+    """Webhook 验签密钥, 用于验证请求来源."""
     max_file_size: int = 20 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 20MB."""
 
 
 _DINGTALK_ENDPOINT = "api.dingtalk.com"
@@ -378,4 +385,17 @@ def _verify_sign(timestamp: str, secret: str, sign: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-register("dingtalk", DingTalkConfig, DingTalkDriver)
+register(
+    "dingtalk",
+    DingTalkConfig,
+    DingTalkDriver,
+    display_name="钉钉",
+    icon="dingtalk",
+    channel_fields=[
+        {
+            "key": "open_conversation_id",
+            "label": "开放会话ID",
+            "description": "钉钉开放会话ID",
+        }
+    ],
+)

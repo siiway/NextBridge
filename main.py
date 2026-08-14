@@ -22,6 +22,7 @@ from services.http_server import HttpServerManager
 from services.media import close_all_sessions
 from services.middleware import MiddlewareChain
 from services.plugin_loader import load_all_drivers
+from services.webui import build_webui_app
 
 logger = log.get_logger("__main__")
 
@@ -182,10 +183,27 @@ async def main():
 
     config_path = config_io.find_config(Path(u.get_data_path()))
     if config_path is None:
-        logger.critical(
-            f"No config file found in: {u.get_data_path()} (tried config.json / .yaml / .toml)"
+        data_path = Path(u.get_data_path())
+        data_path.mkdir(parents=True, exist_ok=True)
+        config_path = data_path / "config.json"
+        config_io.save_config({"global": {}}, config_path)
+        logger.warning(
+            f"No config file found — generated default config: {config_path}"
         )
-        return
+        logger.warning(
+            "Configure your platforms via the WebUI management plane, "
+            "or edit this file directly."
+        )
+
+    rules_path = config_io.find_rules(Path(u.get_data_path()))
+    if rules_path is None:
+        data_path = Path(u.get_data_path())
+        data_path.mkdir(parents=True, exist_ok=True)
+        rules_path = data_path / "rules.json"
+        config_io.save_config({"rules": []}, rules_path)
+        logger.warning(
+            f"No rules file found — generated empty rules file: {rules_path}"
+        )
 
     bridge.load_rules()
 
@@ -284,6 +302,33 @@ async def main():
         version=version,
     )
 
+    # WebUI management plane
+    if validated_global.webui.enable:
+        dist_dir = Path(__file__).resolve().parent / "dist"
+        if not dist_dir.is_dir():
+            logger.warning(
+                f"WebUI frontend not found at {dist_dir} — build webui and "
+                "copy its dist/ contents there; API endpoints are still available"
+            )
+        webui_app = build_webui_app(
+            config_path=config_path,
+            rules_path=rules_path,
+            webui_json_path=Path(u.get_data_path()) / "webui.json",
+            dist_dir=dist_dir if dist_dir.is_dir() else None,
+            registry=registry,
+            version=version,
+        )
+        http_server.mount("webui", "/webui", webui_app)
+        logger.info(
+            "WebUI management plane: "
+            f"http://{validated_global.http.host}:{validated_global.http.port}/webui"
+        )
+    else:
+        logger.info(
+            "WebUI management plane disabled by configuration "
+            "(global.webui.enable=false)"
+        )
+
     # ------------------------------------------------------------------
     # Create driver context and manager
     # ------------------------------------------------------------------
@@ -313,7 +358,11 @@ async def main():
             logger.info(f"Registered driver: {platform}/{inst_id}")
 
     has_drivers = bool(driver_manager.drivers)
-    if not has_drivers and validated_global.http.enable != "true":
+    if (
+        not has_drivers
+        and validated_global.http.enable != "true"
+        and not http_server.has_mounts()
+    ):
         logger.error("No drivers configured — nothing to do, exiting.")
         return
     if not has_drivers and validated_global.http.enable == "true":

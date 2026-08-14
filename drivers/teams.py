@@ -40,10 +40,15 @@ from services.message_format import apply_rich_header
 
 class TeamsConfig(_DriverConfig):
     app_id: str
+    """Microsoft Teams 应用 ID."""
     app_secret: str
+    """Microsoft Teams 应用密钥."""
     listen_path: str = "/api/messages"
+    """Teams 消息回调监听路径."""
     webhook_secret: str = ""
+    """Webhook 验签密钥."""
     max_file_size: int = 20 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 20MB."""
     proxy: str | None = UNSET
 
 
@@ -347,4 +352,22 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             self.logger.error(f"post activity error: {e}")
 
 
-register("teams", TeamsConfig, TeamsDriver)
+register(
+    "teams",
+    TeamsConfig,
+    TeamsDriver,
+    display_name="Microsoft Teams",
+    icon="teams",
+    channel_fields=[
+        {
+            "key": "service_url",
+            "label": "服务URL",
+            "description": "Teams 活动中的 serviceUrl 字段值",
+        },
+        {
+            "key": "conversation_id",
+            "label": "对话ID",
+            "description": "Teams activity.conversation.id 值",
+        },
+    ],
+)

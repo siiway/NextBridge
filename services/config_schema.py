@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from os import environ
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
@@ -9,6 +9,14 @@ import services.logger as log
 
 UNSET = "unset"
 logger = log.get_logger("config_schema")
+
+
+def Unsettable(**kwargs: Any) -> Any:
+    """标记字段支持 'unset' 哨兵值, 前端将显示一个复选框来控制是否未设置."""
+    extra = dict(kwargs.pop("json_schema_extra", {}) or {})
+    extra["x-nb-unset"] = True
+    return Field(json_schema_extra=extra, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Reusable bool coercion: "true" / "1" / "yes" → True
@@ -30,114 +38,99 @@ CoercedBool = Annotated[bool, BeforeValidator(_coerce_bool)]
 
 
 class DatabaseConfig(BaseModel):
-    """Database configuration for SQLAlchemy.
-
-    Supports multiple database backends via SQLAlchemy connection strings.
-    Examples:
-        - SQLite: sqlite:////path/to/database.db
-        - MySQL: mysql+pymysql://user:password@host:port/database
-        - PostgreSQL: postgresql://user:password@host:port/database
-    """
+    """数据库连接配置, 用于 SQLAlchemy ORM."""
 
     url: str = "sqlite:///data.db"
-    """SQLAlchemy database URL. Relative SQLite paths are resolved under the data directory."""
+    """SQLAlchemy 数据库连接 URL. 相对路径的 SQLite 会在 data 目录下解析."""
 
     echo: bool = False
-    """Enable SQLAlchemy query logging for debugging."""
+    """启用 SQLAlchemy 查询日志, 用于调试."""
 
     pool_size: int | None = None
-    """Connection pool size. Uses SQLAlchemy default if not specified."""
+    """连接池大小. 未指定时使用 SQLAlchemy 默认值."""
 
     max_overflow: int | None = None
-    """Maximum overflow size of the pool. Uses SQLAlchemy default if not specified."""
+    """连接池最大溢出数. 未指定时使用 SQLAlchemy 默认值."""
 
     pool_recycle: int = 3600
-    """Recycle connections after this many seconds (default: 1 hour)."""
+    """连接回收时间（秒, 默认 1 小时）."""
 
     sslmode: str | None = None
-    """PostgreSQL SSL mode (e.g. ``require``, ``prefer``, ``disable``).
-    Only applies to PostgreSQL backends."""
+    """PostgreSQL SSL 模式 (如 ``require``, ``prefer``, ``disable``) . 仅 PostgreSQL 有效."""
 
     connect_timeout: int | None = None
-    """PostgreSQL connection timeout in seconds.
-    Only applies to PostgreSQL backends."""
+    """PostgreSQL 连接超时（秒）. 仅 PostgreSQL 有效."""
 
     application_name: str | None = None
-    """PostgreSQL application name for connection identification.
-    Only applies to PostgreSQL backends."""
+    """PostgreSQL 应用名称, 用于连接标识. 仅 PostgreSQL 有效."""
 
 
 class LoggingConfig(BaseModel):
-    """Logging configuration for controlling log output and rotation."""
+    """日志输出与轮转配置."""
 
     show_source: Literal["auto", "always", "never"] = "auto"
-    """Controls whether source file locations are shown in logs.
+    """控制日志中是否显示源码位置.
 
-    - ``auto``: show source only for DEBUG/TRACE level messages.
-    - ``always``: always show source.
-    - ``never``: never show source.
+    - ``auto``: 仅在 DEBUG/TRACE 级别显示
+    - ``always``: 始终显示
+    - ``never``: 从不显示
     """
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    """Console log verbosity level.
-    Set to DEBUG for verbose output during development or troubleshooting."""
+    """控制台日志级别. 开发或排障时设为 DEBUG 可获取详细输出."""
 
     file_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
-    """File log verbosity level. Default is DEBUG to capture all log messages."""
+    """文件日志级别. 默认为 DEBUG 以捕获所有日志."""
 
     dir: str | None = "logs"
-    """Directory path for log files. If None or empty, file logging is disabled.
-    Log files are automatically created with timestamp-based names."""
+    """日志文件目录. 设为 None 或空字符串可禁用文件日志."""
 
     rotation_size: str = "100 MB"
-    """Maximum size of a single log file before rotation (e.g., "100 MB", "500 MB").
-    Log files are automatically rotated when they exceed this size."""
+    """单个日志文件的最大大小 (如 ``"100 MB"``, ``"500 MB"``) , 超出后自动轮转."""
 
     retention_days: int = 7
-    """Number of days to keep log files. Older log files are automatically deleted.
-    Set to 0 to disable automatic deletion."""
+    """日志文件保留天数. 设为 0 可禁用自动删除."""
 
     compression: (
         Literal["gz", "bz2", "xz", "lzma", "tar", "tar.gz", "tar.bz2", "tar.xz", "zip"]
         | None
     ) = "zip"
-    """Compression format for rotated log files (e.g., "zip", "gz", "tar.gz").
-    Set to None to disable compression."""
+    """轮转日志文件的压缩格式 (如 ``"zip"``, ``"gz"``, ``"tar.gz"``) . 设为 None 可禁用压缩."""
 
     @field_validator("level", "file_level", mode="before")
     def normalize_level(cls, v):
         if v is None:
             return v
         if not isinstance(v, str):
-            raise ValueError(f"Invaild log level: {v}")
+            raise ValueError(f"无效的日志级别: {v}")
         upper = v.strip().upper()
         valid = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         if upper not in valid:
-            raise ValueError(f"Invaild log level: {v}")
+            raise ValueError(f"无效的日志级别: {v}")
         return upper
 
 
 class HttpConfig(BaseModel):
-    """Shared HTTP server configuration for mounted driver webhooks."""
+    """共享 HTTP 服务器配置, 用于挂载驱动的 Webhook."""
 
     host: str = "0.0.0.0"
-    """Host/IP for the shared HTTP server."""
+    """HTTP 服务器监听地址."""
 
     port: int = 9080
-    """Port for the shared HTTP server."""
+    """HTTP 服务器监听端口."""
 
     root_path: str = ""
-    """Optional ASGI root_path, useful behind path-prefixed reverse proxies."""
+    """可选的 ASGI root_path, 用于反向代理路径前缀的场景."""
 
     log_level: Literal["critical", "error", "warning", "info", "debug"] = "info"
-    """Uvicorn log level used by the shared HTTP server."""
+    """共享 HTTP 服务器的 Uvicorn 日志级别."""
 
     enable: Literal["unset", "true", "false"] = "unset"
-    """HTTP server startup mode.
+    """HTTP 服务器启动模式.
 
-    - ``unset``: auto start only when at least one driver mounts a sub-app.
-    - ``true``: always start HTTP server.
-    - ``false``: never start HTTP server.
+    - ``unset``: 仅当有驱动挂载子应用时自动启动
+    - ``true``: 始终启动
+    - ``false``: 从不启动
     """
 
     @field_validator("root_path", mode="before")
@@ -145,7 +138,7 @@ class HttpConfig(BaseModel):
         if v is None:
             return ""
         if not isinstance(v, str):
-            raise ValueError(f"Invalid http.root_path: {v}")
+            raise ValueError(f"无效的 http.root_path: {v}")
         rp = v.strip()
         if not rp or rp == "/":
             return ""
@@ -160,34 +153,44 @@ class HttpConfig(BaseModel):
         if v is None:
             return "unset"
         if not isinstance(v, str):
-            raise ValueError(f"Invalid http.enable: {v}")
+            raise ValueError(f"无效的 http.enable: {v}")
         val = v.strip().lower()
         if val not in {"unset", "true", "false"}:
-            raise ValueError("http.enable must be one of: unset, true, false")
+            raise ValueError("http.enable 只能是 unset / true / false 之一")
         return val
 
 
+class WebuiConfig(BaseModel):
+    """WebUI 管理面板配置."""
+
+    enable: CoercedBool = True
+    """是否在共享 HTTP 服务器的 ``/webui`` 路径提供 WebUI 管理面板.
+
+    凭据单独存储在 ``data/webui.json`` 中 (不会写入此文件) .
+    如不需要管理面板, 可在此禁用.
+    """
+
+
 class AdminApiConfig(BaseModel):
-    """Admin API configuration (driver status, reload, etc.)."""
+    """管理 API 配置 (驱动状态、重载等)."""
 
     enable: CoercedBool = False
-    """Enable the admin API endpoints (``/_nextbridge/drivers``, etc.).
+    """启用管理 API 端点 (``/_nextbridge/drivers`` 等) .
 
-    Disabled by default.  When enabled, ``password`` must also be set."""
+    默认禁用. 启用时 ``password`` 也必须设置."""
 
     password: str = ""
-    """Password for admin API access (HTTP Basic Auth, username ignored).
+    """管理 API 的访问密码 (HTTP Basic Auth, 忽略用户名) .
 
-    Must be non-empty when ``enable`` is true."""
+    当 ``enable`` 为 true 时不能为空."""
 
 
 class ExternalDriverConfig(BaseModel):
-    """Configuration for an external driver loaded from a pip package or file.
+    """外部驱动配置, 从 pip 包或文件加载.
 
-    The driver module must call ``drivers.registry.register()`` at import
-    time — the same contract as built-in drivers.
+    驱动模块必须在导入时调用 ``drivers.registry.register()`` —— 与内置驱动相同的契约.
 
-    Example::
+    示例::
 
         global:
           plugins:
@@ -201,139 +204,138 @@ class ExternalDriverConfig(BaseModel):
     """
 
     module: str
-    """Python module path to import, e.g. ``"nextbridge_mycustom.driver"``."""
+    """要导入的 Python 模块路径, 如 ``"nextbridge_mycustom.driver"`` ."""
 
 
 class DriversConfig(BaseModel):
-    """Driver selection configuration.
+    """驱动选择配置.
 
-    Controls which built-in and external drivers are loaded at startup.
+    控制在启动时加载哪些内置和外部驱动.
 
-    When ``enabled`` is **empty** (the default), NextBridge auto-discovers
-    drivers from the config file's top-level keys (backwards-compatible).
-    When ``enabled`` is **populated**, only the listed drivers are loaded.
+    当 ``enabled`` 为 **空** (默认) 时, NextBridge 从配置文件顶层键自动发现驱动。
+    当 ``enabled`` 为非空时, 仅加载列表中的驱动。
 
-    External drivers listed under ``external`` are imported and registered
-    before any built-in driver of the same name, allowing third-party
-    packages to override or extend built-in functionality.
+    在 ``external`` 中列出的外部驱动会在同名内置驱动之前导入并注册,
+    允许第三方包覆盖或扩展内置功能。
     """
 
     enabled: list[str] = []
-    """Driver names to load.  Empty = auto-discover from config file keys."""
+    """要加载的驱动名称列表. 空列表表示从配置文件键自动发现."""
 
     external: dict[str, ExternalDriverConfig] = {}
-    """External driver imports, keyed by driver name."""
+    """外部驱动导入配置, 按驱动名称键值."""
 
 
 class PluginConfig(BaseModel):
-    """Plugin discovery and driver lifecycle configuration."""
+    """插件发现与驱动生命周期配置."""
 
     paths: list[str] = []
-    """Local directories to scan for driver plugin ``.py`` files."""
+    """本地目录, 用于扫描驱动插件 ``.py`` 文件."""
 
     drivers: DriversConfig = DriversConfig()
-    """Driver selection and external driver configuration."""
+    """驱动选择与外部驱动配置."""
 
     auto_restart: CoercedBool = True
-    """Automatically restart crashed drivers with exponential backoff."""
+    """崩溃后自动重启驱动, 附带指数退避."""
 
     max_restart_attempts: int = 5
-    """Maximum restart attempts before a crashed driver is abandoned."""
+    """放弃前的最大重启尝试次数."""
 
     health_check_interval: int = 60
-    """Seconds between periodic driver health checks.  Set to 0 to disable."""
+    """健康检查间隔（秒）. 设为 0 可禁用."""
 
     admin: AdminApiConfig = AdminApiConfig()
-    """Admin API configuration (driver status, reload, etc.)."""
+    """管理 API 配置 (驱动状态、重载等)."""
 
 
 class MiddlewareConfig(BaseModel):
-    """Message middleware configuration."""
+    """消息中间件配置."""
 
     enabled: list[str] = []
-    """Middleware names to enable (evaluated in list order)."""
+    """要启用的中间件名称 (按列表顺序执行)."""
 
 
 class GlobalConfig(BaseModel):
-    """Global configuration options that apply to all drivers unless overridden."""
+    """全局配置, 适用于所有驱动 (除非被覆盖)."""
 
     command_prefix: str = "nb"
-    """Prefix used for built-in bridge commands, e.g. ``/nb bind setup``.
+    """内置桥接命令前缀, 如 ``/nb bind setup``.
 
-    The value is written without the leading slash. The default is ``nb``.
+    值不包含前导斜杠. 默认为 ``nb`` .
     """
 
-    proxy: str | None = UNSET
-    """Global proxy URL for all drivers that support proxy configuration.
-    Individual driver proxy settings will override this global setting."""
+    proxy: str | None = Unsettable(default=UNSET)
+    """全局代理 URL, 适用于所有支持代理的驱动.
+    单个驱动的代理设置会覆盖此全局设置."""
 
     base_url: str = ""
-    """Public base URL used when generating externally reachable links.
+    """生成外部可访问链接时使用的公网基础 URL.
 
-    Example: ``https://bridge.example.com``
+    示例: ``https://bridge.example.com``
     """
 
     strict_echo_match: CoercedBool = False
-    """Controls how the bridge prevents echoing messages back to the same channel/instance.
+    """控制桥接避免消息回显到同一频道/实例的方式.
 
-    When False (default): skips if target_id == msg.instance_id OR target_channel == msg.channel.
-    When True: skips only if target_id == msg.instance_id AND target_channel == msg.channel.
+    为 False (默认) : 当 target_id == msg.instance_id 或 target_channel == msg.channel 时跳过.
+    为 True: 仅当 target_id == msg.instance_id 且 target_channel == msg.channel 时跳过.
 
-    Default is False to maximize echo prevention."""
+    默认 False 以最大程度防止回显."""
 
     fuzzy_mention_match: CoercedBool = False
-    """Controls whether mentions without exact bind mapping should fall back to fuzzy nickname matching.
+    """控制无精确绑定的 @ 提及是否回退到模糊昵称匹配.
 
-    When True: Attempts to match mentioned user's name against known display names in the target platform.
-    When False (default): Only exact ID bounds or native platform mentions work.
+    为 True: 尝试将提及的用户名与目标平台的已知显示名称进行匹配.
+    为 False (默认) : 仅精确 ID 绑定或原生平台 @ 有效.
 
-    Default is False."""
+    默认 False."""
 
     log: LoggingConfig = LoggingConfig()
-    """Logging configuration for controlling log output and rotation."""
+    """日志输出与轮转配置."""
 
     database: DatabaseConfig = DatabaseConfig()
-    """Database configuration for message and user mappings."""
+    """数据库连接配置."""
 
     http: HttpConfig = HttpConfig()
-    """Shared HTTP server configuration for mounted driver webhooks."""
+    """共享 HTTP 服务器配置."""
+
+    webui: WebuiConfig = WebuiConfig()
+    """WebUI 管理面板配置."""
 
     plugins: PluginConfig = PluginConfig()
-    """Plugin discovery and driver lifecycle configuration."""
+    """插件发现与驱动生命周期配置."""
 
     middleware: MiddlewareConfig = MiddlewareConfig()
-    """Message middleware configuration."""
+    """消息中间件配置."""
 
     @field_validator("command_prefix", mode="before")
     def normalize_command_prefix(cls, v):
         if v is None:
             return "nb"
         if not isinstance(v, str):
-            raise ValueError(f"Invalid command prefix: {v}")
+            raise ValueError(f"无效的命令前缀: {v}")
         prefix = v.strip().lstrip("/")
         if not prefix:
-            raise ValueError("command_prefix cannot be empty")
+            raise ValueError("命令前缀不能为空")
         return prefix
 
     @field_validator("proxy", mode="after")
     def get_proxy_from_env(cls, v: str):
         if v.lower() in ["disabled", "disable", "unset"]:
-            logger.debug("Global proxy disabled manually")
+            logger.debug("全局代理已手动禁用")
             return None
 
         elif v:
-            logger.debug(f"Using global proxy from config file: {v}")
+            logger.debug(f"使用配置文件中的全局代理: {v}")
             return v or None
 
         for env_var in ["http_proxy", "https_proxy", "all_proxy"]:
             env_value = environ.get(env_var) or environ.get(env_var.upper())
             if env_value:
-                logger.debug(
-                    f"Using global proxy from environ variable {env_var}: {env_value}"
-                )
+                logger.debug(f"使用环境变量 {env_var} 中的全局代理: {env_value}")
                 return env_value or None
 
-        logger.debug("No global proxy configuration found")
+        logger.debug("未找到任何全局代理配置")
         return None
 
     @field_validator("base_url", mode="before")
@@ -341,7 +343,7 @@ class GlobalConfig(BaseModel):
         if v is None:
             return ""
         if not isinstance(v, str):
-            raise ValueError(f"Invalid global.base_url: {v}")
+            raise ValueError(f"无效的 global.base_url: {v}")
         base = v.strip()
         if not base:
             return ""
@@ -356,21 +358,20 @@ class GlobalConfig(BaseModel):
 
 
 class _DriverConfig(BaseModel):
-    """Shared base for every per-driver config model.
+    """所有驱动配置模型的共享基类.
 
-    Sets ``extra="forbid"`` so typos in the config file are caught at startup
-    rather than silently ignored.
+    设置 ``extra="forbid"`` 以捕获配置文件中的拼写错误, 而非静默忽略.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    proxy: str | None = UNSET
-    """Proxy URL used by driver API/gateway requests."""
+    proxy: str | None = Unsettable(default=UNSET)
+    """驱动 API / 网关请求使用的代理 URL."""
 
-    media_proxy: str | None = UNSET
-    """Proxy URL used only when fetching media/attachments.
+    media_proxy: str | None = Unsettable(default=UNSET)
+    """仅用于获取媒体/附件时的代理 URL.
 
-    Defaults to following ``proxy`` when unset.
+    未设置时默认跟随 ``proxy`` .
     """
 
 
@@ -380,7 +381,7 @@ class _DriverConfig(BaseModel):
 
 
 class Rule(BaseModel):
-    """Pydantic model for a single routing rule."""
+    """单条路由规则的 Pydantic 模型."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -393,7 +394,7 @@ class Rule(BaseModel):
 
 
 class RulesFile(BaseModel):
-    """Pydantic model for the rules file (top-level container)."""
+    """规则文件的 Pydantic 模型 (顶层容器)."""
 
     model_config = ConfigDict(extra="allow")
 

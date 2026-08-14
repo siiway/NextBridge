@@ -46,17 +46,29 @@ from drivers import BaseDriver
 
 class DiscordConfig(_DriverConfig):
     send_method: Literal["webhook", "bot"] = "webhook"
+    """消息发送方式: webhook (推荐) / bot (机器人)."""
     bot_token: str = ""
+    """Discord Bot Token (send_method=\"bot\" 时需要)."""
     max_file_size: int = 8 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 8MB."""
     cqface_webhook_fallback: Literal["bot", "unicode"] = "unicode"
+    """Webhook 不支持 CQ 表情时的回退方式: bot / unicode."""
     send_replies_as_bot: CoercedBool = True
+    """回复消息是否使用 Bot 发送."""
     allow_mentions_everyone: CoercedBool = False
+    """是否允许 @everyone."""
     allow_mentions_users: CoercedBool = True
+    """是否允许 @ 用户."""
     allow_mentions_roles: CoercedBool = False
+    """是否允许 @ 角色."""
     sanitize_mass_mentions: CoercedBool = True
+    """是否清理大量 @ 提及."""
     enable_recall: CoercedBool = True
+    """是否启用消息撤回功能."""
     auto_link_image_hosts: list[str] = ["discordmedia.com", "tenor.com"]
+    """自动链接图片的域名白名单."""
     auto_link_image_show_original_url: CoercedBool = True
+    """是否在自动链接图片时显示原始 URL."""
     proxy: str | None = UNSET
 
     @field_validator("cqface_webhook_fallback", mode="before")
@@ -1206,4 +1218,22 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             self.logger.exception(f"delete: failed to delete message {message_id}")
 
 
-register("discord", DiscordConfig, DiscordDriver)
+register(
+    "discord",
+    DiscordConfig,
+    DiscordDriver,
+    display_name="Discord",
+    icon="discord",
+    channel_fields=[
+        {
+            "key": "server_id",
+            "label": "服务器ID",
+            "description": "Discord 服务器 (Guild) ID",
+        },
+        {
+            "key": "channel_id",
+            "label": "频道ID",
+            "description": "Discord 频道 (Channel) ID",
+        },
+    ],
+)

@@ -34,8 +34,11 @@ from drivers import BaseDriver
 
 class MattermostConfig(_DriverConfig):
     server_url: str
+    """Mattermost 服务器地址."""
     token: str
+    """Mattermost 个人访问令牌."""
     max_file_size: int = 50 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 50MB."""
     proxy: str | None = UNSET
 
 
@@ -385,4 +388,13 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         return None
 
 
-register("mattermost", MattermostConfig, MattermostDriver)
+register(
+    "mattermost",
+    MattermostConfig,
+    MattermostDriver,
+    display_name="Mattermost",
+    icon="mattermost",
+    channel_fields=[
+        {"key": "channel_id", "label": "频道ID", "description": "Mattermost 频道 ID"}
+    ],
+)

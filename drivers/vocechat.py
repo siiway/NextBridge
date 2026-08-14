@@ -44,10 +44,15 @@ from services.message_format import apply_rich_header
 
 class VoceChatConfig(_DriverConfig):
     server_url: str
+    """VoceChat 服务器地址."""
     api_key: str
+    """VoceChat API 密钥."""
     listen_path: str = "/vocechat/webhook"
+    """VoceChat Webhook 监听路径."""
     webhook_secret: str = ""
+    """Webhook 验签密钥."""
     max_file_size: int = 50 * 1024 * 1024
+    """最大可发送的文件大小 (字节), 默认 50MB."""
     proxy: str | None = UNSET
 
 
@@ -433,4 +438,14 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             return None
 
 
-register("vocechat", VoceChatConfig, VoceChatDriver)
+register(
+    "vocechat",
+    VoceChatConfig,
+    VoceChatDriver,
+    display_name="VoceChat",
+    icon="vocechat",
+    channel_fields=[
+        {"key": "gid", "label": "群组ID", "description": "VoceChat 群组/频道 ID"},
+        {"key": "uid", "label": "用户ID", "description": "VoceChat 用户 ID (私聊)"},
+    ],
+)
