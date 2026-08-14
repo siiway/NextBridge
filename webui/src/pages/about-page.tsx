@@ -54,13 +54,13 @@ export function AboutPage() {
               size="sm"
               render={
                 <a
-                  href="https://github.com/LeiSureLyYrsc/nb-webui"
+                  href="https://github.com/siiway/webui"
                   target="_blank"
                   rel="noreferrer"
                 />
               }
             >
-              nb-webui 源码
+              webui 源码
               <ExternalLinkIcon className="size-3" />
             </Button>
             <Button

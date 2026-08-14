@@ -1,10 +1,10 @@
-# nb-webui
+# webui
 
 NextBridge 的 WebUI 管理平面前端 —— 用于在浏览器中管理全局配置、各平台实例与桥接规则。
 
 - 技术栈:**Vite + React + TypeScript + Tailwind CSS v4 + shadcn/ui (Base UI)**
 - 界面语言:简体中文
-- 后端 API 由 NextBridge 内置提供(挂载于共享 HTTP 服务器的 `/nb-webui` 路径)
+- 后端 API 由 NextBridge 内置提供(挂载于共享 HTTP 服务器的 `/webui` 路径)
 
 ## 快速开始
 
@@ -24,7 +24,7 @@ bun install
 bun run dev
 ```
 
-开发服务器会把 `/nb-webui/api` 代理到 `http://127.0.0.1:9080`,请先在 NextBridge 目录启动
+开发服务器会把 `/webui/api` 代理到 `http://127.0.0.1:9080`,请先在 NextBridge 目录启动
 `uv run main.py` 后再打开前端页面。
 
 ### 构建
@@ -41,12 +41,12 @@ NextBridge 在启动时会自动挂载本仓库构建出的静态文件:
 
 1. 构建本仓库得到 `dist/` 目录
 2. 把 `dist/` 中的**所有文件**复制到 NextBridge 仓库根目录的 `dist/` 目录
-3. 重启 NextBridge,访问 `http://<host>:<port>/nb-webui`
+3. 重启 NextBridge,访问 `http://<host>:<port>/webui`
 
 ```bash
 # 在本仓库目录执行
 bun run build
-# PowerShell (nb-webui 与 NextBridge 同级放置时)
+# PowerShell (webui 与 NextBridge 同级放置时)
 Copy-Item -Recurse -Force dist\* ..\NextBridge\dist\
 ```
 

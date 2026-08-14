@@ -37,12 +37,12 @@
 
 ## WebUI Management Plane
 
-NextBridge ships with a built-in WebUI management plane at `http://<host>:<port>/nb-webui`
+NextBridge ships with a built-in WebUI management plane at `http://<host>:<port>/webui`
 (default port `9080`), where you can edit the global config, platform instances, and
 bridge rules from your browser. Config and rules files are auto-generated with safe
 defaults on first startup.
 
-The frontend is built from the separate [nb-webui](https://github.com/LeiSureLyYrsc/nb-webui)
+The frontend is built from the separate [webui](https://github.com/LeiSureLyYrsc/webui)
 repository — build it and drop the output into this repo's `dist/` directory.
 
 > [!IMPORTANT]

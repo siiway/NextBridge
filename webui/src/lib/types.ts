@@ -12,12 +12,18 @@ export interface JsonSchema {
   required?: string[]
   items?: JsonSchema
   additionalProperties?: JsonSchema | boolean
+  "x-nb-unset"?: boolean
 }
 
 export interface SchemasResponse {
   global: JsonSchema
   drivers: Record<string, JsonSchema>
-  meta: Record<string, { description?: string }>
+  meta: Record<string, {
+    description?: string
+    display_name?: string
+    icon?: string
+    channel_fields?: { key: string; label: string; description?: string }[]
+  }>
 }
 
 export interface InfoResponse {
@@ -25,6 +31,10 @@ export interface InfoResponse {
   config_path: string
   rules_path: string
   platforms: Record<string, number>
+}
+
+export interface InstancesResponse {
+  instances: Record<string, string>
 }
 
 export interface LoginResponse {

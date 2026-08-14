@@ -425,10 +425,10 @@ register(
     "yunhu",
     YunhuConfig,
     YunhuDriver,
-    display_name="语核",
+    display_name="云湖",
     icon="yunhu",
     channel_fields=[
-        {"key": "chat_id", "label": "聊天ID", "description": "语核聊天 (群组) ID"},
+        {"key": "chat_id", "label": "聊天ID", "description": "云湖聊天 (群组) ID"},
         {
             "key": "chat_type",
             "label": "聊天类型",

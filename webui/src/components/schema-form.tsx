@@ -123,6 +123,8 @@ function SchemaField({ name, schema, value, onChange }: SchemaFieldProps) {
   const label = s.title || name
   const description = s.description
   const sensitive = SENSITIVE_RE.test(name)
+  const canUnset = s["x-nb-unset"] === true
+  const isUnset = value === "unset"
 
   let control: React.ReactNode = null
 
@@ -273,8 +275,27 @@ function SchemaField({ name, schema, value, onChange }: SchemaFieldProps) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <Label htmlFor={`sf-${name}`}>{label}</Label>
-      <div>{control}</div>
+      <div className="flex items-center justify-between">
+        <Label htmlFor={`sf-${name}`}>{label}</Label>
+        {canUnset && (
+          <label className="flex cursor-pointer items-center gap-1.5 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={isUnset}
+              onChange={(e) => onChange(e.target.checked ? "unset" : "")}
+              className="size-3.5"
+            />
+            未设置
+          </label>
+        )}
+      </div>
+      {isUnset ? (
+        <p className="rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+          未设置（将使用全局或环境变量中的值）
+        </p>
+      ) : (
+        <div>{control}</div>
+      )}
       {description && (
         <p className="text-sm text-muted-foreground">{description}</p>
       )}

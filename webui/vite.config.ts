@@ -5,7 +5,7 @@ import { defineConfig } from "vite"
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: "/nb-webui/",
+  base: "/webui/",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -14,7 +14,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/nb-webui/api": {
+      "/webui/api": {
         target: "http://127.0.0.1:9080",
         changeOrigin: true,
       },

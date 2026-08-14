@@ -3,7 +3,7 @@
 Serves the NextBridge WebUI on the shared HTTP server:
 
   - REST API under ``/api`` for config/rules editing with token auth
-  - static SPA from the repository ``dist/`` directory (built from nb-webui)
+  - static SPA from the repository ``dist/`` directory (built from webui)
 
 Credentials live in ``data/webui.json`` — kept separate from ``config.json``
 so config saves can never clobber the password hash.  The default account is
@@ -63,11 +63,11 @@ _DIST_MISSING_HTML = """<!doctype html>
 <main>
   <h1>NextBridge WebUI</h1>
   <p>API 服务已就绪,但前端页面尚未构建。请按以下步骤导入前端:</p>
-  <pre>git clone https://github.com/LeiSureLyYrsc/nb-webui.git
-cd nb-webui
+  <pre>git clone https://github.com/LeiSureLyYrsc/webui.git
+cd webui
 bun install
 bun run build
-# 将 nb-webui/dist 目录中的所有文件复制到 NextBridge 的 dist/ 目录后重启</pre>
+# 将 webui/dist 目录中的所有文件复制到 NextBridge 的 dist/ 目录后重启</pre>
   <p>详细教程见 <a href="https://nextbridge.siiway.org">NextBridge 文档站</a>。</p>
 </main>
 </body>
@@ -301,7 +301,20 @@ def _apply_descriptions(schema: dict[str, Any], docstrings: dict[str, str]) -> N
         return
     for name, desc in docstrings.items():
         if name in props and isinstance(props[name], dict):
-            props[name].setdefault("description", desc)
+            props[name]["description"] = desc
+            title = _extract_title(desc)
+            if title:
+                props[name]["title"] = title
+
+
+def _extract_title(desc: str) -> str:
+    """Extract a short title from the first line of a docstring."""
+    first = desc.strip().splitlines()[0] if desc.strip() else ""
+    for delim in ("。", ".", "，", ",", "：", ":", "(", "（", " -", "\n"):
+        idx = first.find(delim)
+        if idx != -1:
+            first = first[:idx]
+    return first.strip()
 
 
 def build_webui_app(

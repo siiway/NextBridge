@@ -41,10 +41,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
 
+import { PlatformIcon, platformName } from "@/components/platform-icon"
+
 import { apiFetch, apiPut } from "@/lib/api"
-import type { Rule, RulesDoc } from "@/lib/types"
+import type { InstancesResponse, Rule, RulesDoc, SchemasResponse } from "@/lib/types"
 
 type RuleDialogState = { mode: "create" } | { mode: "edit"; index: number } | null
+
+type ChannelFieldMeta = { key: string; label: string; description?: string }
 
 const CONNECT_TEMPLATE: Rule = {
   type: "connect",
@@ -54,6 +58,8 @@ const CONNECT_TEMPLATE: Rule = {
 
 export function RulesPage() {
   const [rules, setRules] = useState<Rule[] | null>(null)
+  const [instances, setInstances] = useState<Record<string, string>>({})
+  const [schemas, setSchemas] = useState<SchemasResponse | null>(null)
   const [dialog, setDialog] = useState<RuleDialogState>(null)
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
@@ -62,9 +68,15 @@ export function RulesPage() {
     let cancelled = false
     async function load() {
       try {
-        const resp = await apiFetch<RulesDoc>("/rules")
+        const [rulesResp, instancesResp, schemasResp] = await Promise.all([
+          apiFetch<RulesDoc>("/rules"),
+          apiFetch<InstancesResponse>("/instances"),
+          apiFetch<SchemasResponse>("/schemas"),
+        ])
         if (!cancelled) {
-          setRules(resp.rules ?? [])
+          setRules(rulesResp.rules ?? [])
+          setInstances(instancesResp.instances ?? {})
+          setSchemas(schemasResp)
         }
       } catch (err) {
         if (!cancelled) {
@@ -211,6 +223,10 @@ export function RulesPage() {
             dialog.mode === "edit" ? configuredRules[dialog.index] : undefined
           }
           saving={saving}
+          instances={instances}
+          channelFieldsByPlatform={schemas?.meta ? Object.fromEntries(
+            Object.entries(schemas.meta).map(([k, v]) => [k, v.channel_fields ?? []])
+          ) : {}}
           onClose={() => setDialog(null)}
           onSave={(rule) =>
             onSaveRule(rule, dialog.mode === "edit" ? dialog.index : null)
@@ -249,12 +265,16 @@ function RuleDialog({
   mode,
   initialRule,
   saving,
+  instances,
+  channelFieldsByPlatform,
   onClose,
   onSave,
 }: {
   mode: "create" | "edit"
   initialRule?: Rule
   saving: boolean
+  instances: Record<string, string>
+  channelFieldsByPlatform: Record<string, ChannelFieldMeta[]>
   onClose: () => void
   onSave: (rule: Rule) => void
 }) {
@@ -397,26 +417,32 @@ function RuleDialog({
             </div>
             {isConnect ? (
               <ChannelFieldsEditor
-                label="channels(双向连通的频道)"
+                label="channels（双向连通的频道）"
                 value={(rule.channels as Record<string, Record<string, string>>) ?? {}}
                 onChange={(v) =>
                   setRule((prev) => ({ ...prev, channels: v }))
                 }
                 single={false}
+                instances={instances}
+                channelFieldsByPlatform={channelFieldsByPlatform}
               />
             ) : (
               <>
                 <ChannelFieldsEditor
-                  label="from(消息来源)"
+                  label="from（消息来源）"
                   value={(rule.from as Record<string, Record<string, string>>) ?? {}}
                   onChange={(v) => setRule((prev) => ({ ...prev, from: v }))}
                   single
+                  instances={instances}
+                  channelFieldsByPlatform={channelFieldsByPlatform}
                 />
                 <ChannelFieldsEditor
-                  label="to(转发目标)"
+                  label="to（转发目标）"
                   value={(rule.to as Record<string, Record<string, string>>) ?? {}}
                   onChange={(v) => setRule((prev) => ({ ...prev, to: v }))}
                   single={false}
+                  instances={instances}
+                  channelFieldsByPlatform={channelFieldsByPlatform}
                 />
               </>
             )}
@@ -482,38 +508,33 @@ function ChannelFieldsEditor({
   value,
   onChange,
   single,
+  instances,
+  channelFieldsByPlatform,
 }: {
   label: string
   value: Record<string, Record<string, string>>
   onChange: (value: Record<string, Record<string, string>>) => void
   single: boolean
+  instances: Record<string, string>
+  channelFieldsByPlatform: Record<string, ChannelFieldMeta[]>
 }) {
   const instanceIds = Object.keys(value)
   const rows = single ? instanceIds.slice(0, 1) : instanceIds
+  const instanceOptions = Object.keys(instances)
 
   function setInstance(oldId: string, newId: string) {
     const next = { ...value }
     delete next[oldId]
-    if (newId.trim()) {
-      next[newId.trim()] = value[oldId] ?? {}
+    if (newId) {
+      next[newId] = value[oldId] ?? {}
     }
-    onChange(next)
-  }
-
-  function setFields(instanceId: string, fields: [string, string][]) {
-    const next = { ...value }
-    const obj: Record<string, string> = {}
-    for (const [key, val] of fields) {
-      if (key.trim()) {
-        obj[key.trim()] = val
-      }
-    }
-    next[instanceId] = obj
     onChange(next)
   }
 
   function addRow() {
-    onChange({ ...value, [`实例${Object.keys(value).length + 1}`]: {} })
+    // Prefer the first available instance that isn't already used
+    const unused = instanceOptions.find((id) => !(id in value))
+    onChange({ ...value, [unused ?? `实例${Object.keys(value).length + 1}`]: {} })
   }
 
   function removeRow(instanceId: string) {
@@ -526,34 +547,65 @@ function ChannelFieldsEditor({
     <div className="flex flex-col gap-2">
       <Label>{label}</Label>
       {rows.length === 0 && (
-        <p className="text-sm text-muted-foreground">暂无频道,点击下方按钮添加</p>
+        <p className="text-sm text-muted-foreground">暂无频道，点击下方按钮添加</p>
       )}
-      {rows.map((instanceId) => (
-        <div key={instanceId} className="rounded-lg border p-3">
-          <div className="mb-2 flex items-center gap-2">
-            <Input
-              value={instanceId}
-              placeholder="实例 ID(如: 我的QQ)"
-              onChange={(e) => setInstance(instanceId, e.target.value)}
-            />
-            {!single && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="删除该频道"
-                onClick={() => removeRow(instanceId)}
+      {rows.map((instanceId) => {
+        const platform = instances[instanceId]
+        const declared = platform ? (channelFieldsByPlatform[platform] ?? []) : []
+        return (
+          <div key={instanceId} className="rounded-lg border p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <Select
+                value={instanceId}
+                onValueChange={(v) => v && setInstance(instanceId, v)}
               >
-                <TrashIcon />
-              </Button>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="选择实例" />
+                </SelectTrigger>
+                <SelectContent>
+                  {instanceOptions.map((id) => (
+                    <SelectItem key={id} value={id}>
+                      <span className="flex items-center gap-2">
+                        <PlatformIcon
+                          platform={instances[id] ?? ""}
+                          className="size-4"
+                        />
+                        {platformName(instances[id] ?? "")} · {id}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!single && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="删除该频道"
+                  onClick={() => removeRow(instanceId)}
+                >
+                  <TrashIcon />
+                </Button>
+              )}
+            </div>
+            {platform ? (
+              <ChannelFields
+                declared={declared}
+                fields={value[instanceId] ?? {}}
+                onChange={(fields) => {
+                  const next = { ...value }
+                  next[instanceId] = fields
+                  onChange(next)
+                }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                请选择一个已配置的实例
+              </p>
             )}
           </div>
-          <KeyValueEditor
-            value={Object.entries(value[instanceId] ?? {})}
-            onChange={(fields) => setFields(instanceId, fields)}
-          />
-        </div>
-      ))}
+        )
+      })}
       {!single && (
         <Button
           type="button"
@@ -570,58 +622,85 @@ function ChannelFieldsEditor({
   )
 }
 
-function KeyValueEditor({
-  value,
+function ChannelFields({
+  declared,
+  fields,
   onChange,
 }: {
-  value: [string, string][]
-  onChange: (fields: [string, string][]) => void
+  declared: ChannelFieldMeta[]
+  fields: Record<string, string>
+  onChange: (fields: Record<string, string>) => void
 }) {
-  const rows: [string, string][] = value.length > 0 ? value : [["", ""]]
+  const customKeys = Object.keys(fields).filter(
+    (k) => !declared.some((d) => d.key === k),
+  )
 
-  function setRow(index: number, key: string, val: string) {
-    const next = [...rows]
-    next[index] = [key, val]
+  function setField(key: string, val: string) {
+    const next = { ...fields }
+    if (val) {
+      next[key] = val
+    } else {
+      delete next[key]
+    }
     onChange(next)
   }
 
-  function addField() {
-    onChange([...rows, ["", ""]])
-  }
-
-  function removeField(index: number) {
-    const next = [...rows]
-    next.splice(index, 1)
+  function setCustomKey(oldKey: string, newKey: string) {
+    if (oldKey === newKey) {
+      return
+    }
+    const next = { ...fields }
+    const val = next[oldKey] ?? ""
+    delete next[oldKey]
+    if (newKey.trim()) {
+      next[newKey.trim()] = val
+    }
     onChange(next)
   }
 
   return (
     <div className="flex flex-col gap-2">
-      {rows.map(([key, val], index) => (
-        <div key={index} className="flex items-center gap-2">
+      {declared.map((field) => (
+        <div key={field.key} className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="w-32 shrink-0 font-mono text-xs text-muted-foreground">
+              {field.label}
+            </span>
+            <Input
+              className="flex-1 font-mono text-xs"
+              value={fields[field.key] ?? ""}
+              placeholder={field.label}
+              onChange={(e) => setField(field.key, e.target.value)}
+            />
+          </div>
+          {field.description && (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          )}
+        </div>
+      ))}
+      {customKeys.map((key, idx) => (
+        <div key={`custom-${idx}`} className="flex items-center gap-2">
           <Input
             className="w-36 font-mono text-xs"
             placeholder="字段名"
             value={key}
-            onChange={(e) => setRow(index, e.target.value, val)}
+            onChange={(e) => setCustomKey(key, e.target.value)}
           />
           <Input
             className="flex-1 font-mono text-xs"
-            placeholder="值(如: group_id / 123456)"
-            value={val}
-            onChange={(e) => setRow(index, key, e.target.value)}
+            placeholder="值"
+            value={fields[key] ?? ""}
+            onChange={(e) => setField(key, e.target.value)}
           />
-          {rows.length > 1 && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="删除该字段"
-              onClick={() => removeField(index)}
-            >
-              <TrashIcon />
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="删除该字段"
+            onClick={() => setField(key, "")}
+          >
+            <TrashIcon />
+          </Button>
         </div>
       ))}
       <Button
@@ -629,10 +708,10 @@ function KeyValueEditor({
         variant="ghost"
         size="sm"
         className="w-fit"
-        onClick={addField}
+        onClick={() => onChange({ ...fields, [""]: "" })}
       >
         <PlusIcon />
-        添加频道字段
+        添加自定义字段
       </Button>
     </div>
   )

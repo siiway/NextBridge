@@ -307,7 +307,7 @@ async def main():
         dist_dir = Path(__file__).resolve().parent / "dist"
         if not dist_dir.is_dir():
             logger.warning(
-                f"WebUI frontend not found at {dist_dir} — build nb-webui and "
+                f"WebUI frontend not found at {dist_dir} — build webui and "
                 "copy its dist/ contents there; API endpoints are still available"
             )
         webui_app = build_webui_app(
@@ -318,10 +318,10 @@ async def main():
             registry=registry,
             version=version,
         )
-        http_server.mount("webui", "/nb-webui", webui_app)
+        http_server.mount("webui", "/webui", webui_app)
         logger.info(
             "WebUI management plane: "
-            f"http://{validated_global.http.host}:{validated_global.http.port}/nb-webui"
+            f"http://{validated_global.http.host}:{validated_global.http.port}/webui"
         )
     else:
         logger.info(

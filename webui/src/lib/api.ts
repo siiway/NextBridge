@@ -13,17 +13,17 @@ export class ApiError extends Error {
   }
 }
 
-const BASE = "/nb-webui/api"
+const BASE = "/webui/api"
 
 export function getToken(): string | null {
-  return sessionStorage.getItem("nb-webui-token")
+  return sessionStorage.getItem("webui-token")
 }
 
 export function setToken(token: string | null) {
   if (token) {
-    sessionStorage.setItem("nb-webui-token", token)
+    sessionStorage.setItem("webui-token", token)
   } else {
-    sessionStorage.removeItem("nb-webui-token")
+    sessionStorage.removeItem("webui-token")
   }
 }
 

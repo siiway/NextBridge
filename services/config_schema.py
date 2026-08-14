@@ -164,7 +164,7 @@ class WebuiConfig(BaseModel):
     """WebUI 管理面板配置."""
 
     enable: CoercedBool = True
-    """是否在共享 HTTP 服务器的 ``/nb-webui`` 路径提供 WebUI 管理面板.
+    """是否在共享 HTTP 服务器的 ``/webui`` 路径提供 WebUI 管理面板.
 
     凭据单独存储在 ``data/webui.json`` 中 (不会写入此文件) .
     如不需要管理面板, 可在此禁用.

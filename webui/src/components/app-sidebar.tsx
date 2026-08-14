@@ -43,12 +43,12 @@ export function AppSidebar({
 }) {
   const { username, logout } = useAuth()
   const [dark, setDark] = useState(
-    () => localStorage.getItem("nb-webui-theme") === "dark",
+    () => localStorage.getItem("webui-theme") === "dark",
   )
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark)
-    localStorage.setItem("nb-webui-theme", dark ? "dark" : "light")
+    localStorage.setItem("webui-theme", dark ? "dark" : "light")
   }, [dark])
 
   return (
