@@ -16,6 +16,7 @@ import services.logger as log
 
 if TYPE_CHECKING:
     from services.driver_manager import DriverManager
+    from plugins.manager import PluginManager
 
 logger = log.get_logger("http")
 
@@ -87,6 +88,7 @@ class HttpServerManager:
         self._ready = asyncio.Event()
         self._started = False
         self._driver_manager: DriverManager | None = None
+        self._plugin_manager: PluginManager | None = None
         self._admin_password: str = ""
 
     @staticmethod
@@ -119,6 +121,9 @@ class HttpServerManager:
     def set_driver_manager(self, manager: DriverManager, *, password: str) -> None:
         self._driver_manager = manager
         self._admin_password = password
+
+    def set_plugin_manager(self, manager: PluginManager) -> None:
+        self._plugin_manager = manager
 
     def has_mounts(self) -> bool:
         return bool(self._mounts)
@@ -188,8 +193,22 @@ class HttpServerManager:
                 return JSONResponse({"status": "restarted", "instance_id": instance_id})
 
             logger.info(
-                "Admin API enabled (/_nextbridge/drivers, /_nextbridge/admin/*)"
+                "Admin API enabled (/_nextbridge/drivers, /_nextbridge/plugins, /_nextbridge/admin/*)"
             )
+
+        if self._plugin_manager is not None:
+
+            @root.get(
+                "/_nextbridge/plugins",
+                dependencies=[Depends(self._check_admin_auth)],
+            )
+            async def _plugins_status() -> JSONResponse:
+                pm = self._plugin_manager
+                if pm is None:
+                    raise HTTPException(
+                        status_code=503, detail="Plugin manager not available"
+                    )
+                return JSONResponse({"plugins": pm.get_status()})
 
         for mount in self._mounts:
             root.mount(mount.path, mount.app)

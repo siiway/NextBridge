@@ -22,6 +22,9 @@ from services.http_server import HttpServerManager
 from services.media import close_all_sessions
 from services.middleware import MiddlewareChain
 from services.plugin_loader import load_all_drivers
+from plugins.context import PluginContext
+from plugins.loader import load_plugins as load_plugin_modules
+from plugins.manager import PluginManager
 
 logger = log.get_logger("__main__")
 
@@ -218,6 +221,24 @@ async def main():
     )
     bridge.command_prefix = validated_global.command_prefix
 
+    # ------------------------------------------------------------------
+    # Set up plugin infrastructure (before init_db so migrations register)
+    # ------------------------------------------------------------------
+    event_bus = EventBus()
+    middleware = MiddlewareChain()
+    bridge.set_middleware(middleware)
+    bridge.set_event_bus(event_bus)
+
+    plugin_cfg = validated_global.plugins
+    general_cfg = plugin_cfg.general
+    enabled_plugins = list(general_cfg.enabled)
+    external_plugins = general_cfg.external
+    plugin_configs = plugin_cfg.config
+
+    loaded_plugin_infos = load_plugin_modules(
+        enabled_plugins, external_plugins, plugin_cfg.paths or None
+    )
+
     try:
         init_db()
         logger.info(
@@ -232,13 +253,7 @@ async def main():
     # ------------------------------------------------------------------
     # Set up plugin infrastructure
     # ------------------------------------------------------------------
-    event_bus = EventBus()
-    middleware = MiddlewareChain()
-    bridge.set_middleware(middleware)
-    bridge.set_event_bus(event_bus)
-
     # Discover and import driver modules (built-in, entrypoints, local, external)
-    plugin_cfg = validated_global.plugins
     drivers_cfg = plugin_cfg.drivers
 
     if drivers_cfg.enabled:
@@ -327,6 +342,26 @@ async def main():
     # Let drivers perform startup and register webhook sub-apps.
     await asyncio.sleep(0)
 
+    # ------------------------------------------------------------------
+    # Initialize general plugins
+    # ------------------------------------------------------------------
+    plugin_manager = PluginManager(
+        event_bus,
+        lambda name, cfg: PluginContext(
+            bridge=bridge,
+            http_server=http_server,
+            event_bus=event_bus,
+            middleware=middleware,
+            config=cfg,
+            version=version,
+            config_path=config_path,
+        ),
+    )
+
+    await plugin_manager.discover_and_load(loaded_plugin_infos, plugin_configs)
+    for name in enabled_plugins:
+        await plugin_manager.enable_plugin(name)
+
     all_tasks: list[asyncio.Task] = []
     http_enable = validated_global.http.enable
     if http_enable == "false":
@@ -346,6 +381,7 @@ async def main():
                 )
                 return
             http_server.set_driver_manager(driver_manager, password=admin_cfg.password)
+        http_server.set_plugin_manager(plugin_manager)
         http_task = asyncio.create_task(http_server.run(), name="http/shared")
         all_tasks.append(http_task)
     else:
@@ -357,6 +393,7 @@ async def main():
         logger.info("NextBridge shutting down...")
     finally:
         await driver_manager.stop_all()
+        await plugin_manager.unload_all()
 
         for task in all_tasks:
             if not task.done():

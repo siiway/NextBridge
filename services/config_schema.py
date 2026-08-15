@@ -204,6 +204,38 @@ class ExternalDriverConfig(BaseModel):
     """Python module path to import, e.g. ``"nextbridge_mycustom.driver"``."""
 
 
+class GeneralPluginEntry(BaseModel):
+    """Configuration for an external general plugin loaded from a pip package or file.
+
+    The plugin module must call ``plugins.registry.register()`` at import
+    time — the same contract as built-in plugins.
+
+    Example::
+
+        global:
+          plugins:
+            general:
+              enabled:
+                - stats
+              external:
+                my_plugin:
+                  module: "nextbridge_myplugin"
+    """
+
+    module: str
+    """Python module path to import, e.g. ``"nextbridge_myplugin"``."""
+
+
+class GeneralPluginConfig(BaseModel):
+    """General (non-driver) plugin selection configuration."""
+
+    enabled: list[str] = []
+    """Plugin names to enable. Empty = no general plugins."""
+
+    external: dict[str, GeneralPluginEntry] = {}
+    """External plugin imports, keyed by plugin name."""
+
+
 class DriversConfig(BaseModel):
     """Driver selection configuration.
 
@@ -233,6 +265,12 @@ class PluginConfig(BaseModel):
 
     drivers: DriversConfig = DriversConfig()
     """Driver selection and external driver configuration."""
+
+    general: GeneralPluginConfig = GeneralPluginConfig()
+    """General (non-driver) plugin selection configuration."""
+
+    config: dict[str, dict] = {}
+    """Per-plugin configuration, keyed by plugin name."""
 
     auto_restart: CoercedBool = True
     """Automatically restart crashed drivers with exponential backoff."""

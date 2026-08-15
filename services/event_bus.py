@@ -25,6 +25,10 @@ class EventBus:
         driver.stopped    (instance_id)
         driver.abandoned  (instance_id)
         health_changed    (driver, old, new)
+        plugin.loaded     (name)
+        plugin.enabled    (name)
+        plugin.disabled   (name)
+        plugin.error      (name, error)
     """
 
     def __init__(self) -> None:

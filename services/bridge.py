@@ -62,6 +62,7 @@ class Bridge:
         self._deleters: dict[str, Callable] = {}
         self._pinners: dict[str, Callable] = {}
         self._unpinners: dict[str, Callable] = {}
+        self._commands: dict[str, Callable] = {}
         self._sensitive: frozenset[str] = frozenset()
         self._middleware: MiddlewareChain | None = None
         self._event_bus: EventBus | None = None
@@ -172,6 +173,10 @@ class Bridge:
         self._unpinners[instance_id] = unpin_func
         logger.debug(f"Registered unpinner for instance: {instance_id}")
 
+    def register_command(self, name: str, handler: Callable) -> None:
+        self._commands[name] = handler
+        logger.debug(f"Registered command: {name}")
+
     def senders_snapshot(self) -> list[dict]:
         """Return a serialisable snapshot of registered senders."""
         return [
@@ -189,10 +194,13 @@ class Bridge:
 
     def _get_command_help(self) -> str:
         prefix = self._get_command_prefix()
-        return (
+        lines = [
             f"Usage: `/{prefix} bind setup`, `/{prefix} bind confirm <code>`, "
-            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <target>`"
-        )
+            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <target>`",
+        ]
+        for name in self._commands:
+            lines.append(f"`/{prefix} {name}`")
+        return "\n".join(lines)
 
     def _parse_ping_command(self, text: str) -> str | None:
         parts = text.strip().split(maxsplit=1)
@@ -376,6 +384,22 @@ class Bridge:
         command = self._parse_internal_command(msg.text)
         if command is not None:
             action, args = command
+            if action in self._commands:
+                if not self._is_allowed_command_source(msg) and not msg.is_dm:
+                    logger.debug(
+                        f"Ignored command from non-configured channel: "
+                        f"instance={msg.instance_id} channel={msg.channel}"
+                    )
+                    return
+                handler = self._commands[action]
+                try:
+                    await handler(msg, args)
+                except Exception:
+                    logger.opt(exception=True).error(
+                        f"Error executing registered command '{action}'"
+                    )
+                return
+
             if not self._is_allowed_command_source(msg):
                 if action != "bind" or not msg.is_dm:
                     logger.debug(
