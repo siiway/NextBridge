@@ -105,7 +105,7 @@ class MessageDB:
     """Handles mapping of message IDs between different platforms."""
 
     _SCHEMA_VERSION = max(
-        (step.to_version for step in db_migrations.MIGRATIONS), default=0
+        (step.to_version for step in db_migrations.get_migrations()), default=0
     )
 
     @classmethod
@@ -247,7 +247,7 @@ class MessageDB:
     @staticmethod
     @lru_cache(maxsize=1)
     def _load_migration_steps() -> tuple[MigrationStep, ...]:
-        steps = db_migrations.MIGRATIONS
+        steps = db_migrations.get_migrations()
         logger.debug(f"Loaded {len(steps)} migration step(s) from registry")
         return steps
 
