@@ -23,20 +23,17 @@ class StatsPlugin(BasePlugin):
         self._counts[platform] = self._counts.get(platform, 0) + 1
 
     async def _handle_stats(self, msg, args) -> None:
-        sender_info = self._bridge._senders.get(msg.instance_id)
-        if not sender_info:
-            return
-        _, sender = sender_info
-
         if not self._counts:
-            await sender(msg.channel, "No bridged messages recorded yet.")
+            await self._bridge.send_message(
+                msg.instance_id, msg.channel, "No bridged messages recorded yet."
+            )
             return
 
         total = sum(self._counts.values())
         lines = [f"Bridged messages: {total}"]
         for platform, count in sorted(self._counts.items()):
             lines.append(f"- {platform}: {count}")
-        await sender(msg.channel, "\n".join(lines))
+        await self._bridge.send_message(msg.instance_id, msg.channel, "\n".join(lines))
 
     async def on_enable(self) -> None:
         self._ctx.event_bus.on("bridge.message", self._on_message)
@@ -44,6 +41,7 @@ class StatsPlugin(BasePlugin):
 
     async def on_disable(self) -> None:
         self._ctx.event_bus.off("bridge.message", self._on_message)
+        self._bridge.unregister_command("stats")
 
 
 register("stats", StatsPlugin)

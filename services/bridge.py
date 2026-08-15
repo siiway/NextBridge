@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import services.logger as log
@@ -11,6 +11,8 @@ from services import config, cqface
 from services.db import msg_db
 from services.message import NormalizedMessage
 from services.message_format import parse_richheader_tag
+
+CommandHandler = Callable[..., Awaitable[None]]
 
 if TYPE_CHECKING:
     from services.event_bus import EventBus
@@ -62,7 +64,7 @@ class Bridge:
         self._deleters: dict[str, Callable] = {}
         self._pinners: dict[str, Callable] = {}
         self._unpinners: dict[str, Callable] = {}
-        self._commands: dict[str, Callable] = {}
+        self._commands: dict[str, CommandHandler] = {}
         self._sensitive: frozenset[str] = frozenset()
         self._middleware: MiddlewareChain | None = None
         self._event_bus: EventBus | None = None
@@ -173,9 +175,23 @@ class Bridge:
         self._unpinners[instance_id] = unpin_func
         logger.debug(f"Registered unpinner for instance: {instance_id}")
 
-    def register_command(self, name: str, handler: Callable) -> None:
+    def register_command(self, name: str, handler: CommandHandler) -> None:
         self._commands[name] = handler
         logger.debug(f"Registered command: {name}")
+
+    def unregister_command(self, name: str) -> None:
+        self._commands.pop(name, None)
+        logger.debug(f"Unregistered command: {name}")
+
+    async def send_message(
+        self, instance_id: str, channel: dict, text: str, **kwargs
+    ) -> str | list[str] | None:
+        sender_info = self._senders.get(instance_id)
+        if sender_info is None:
+            logger.warning(f"No sender for instance '{instance_id}'")
+            return None
+        _, sender = sender_info
+        return await sender(channel, text, **kwargs)
 
     def senders_snapshot(self) -> list[dict]:
         """Return a serialisable snapshot of registered senders."""

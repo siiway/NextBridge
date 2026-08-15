@@ -40,18 +40,10 @@ class PluginContext:
 
     @property
     def event_bus(self):
-        if self._event_bus is None:
-            from services.event_bus import EventBus
-
-            self._event_bus = EventBus()
         return self._event_bus
 
     @property
     def middleware(self):
-        if self._middleware is None:
-            from services.middleware import MiddlewareChain
-
-            self._middleware = MiddlewareChain()
         return self._middleware
 
     @property
