@@ -201,6 +201,7 @@ async def main():
     global_config = raw.get("global", {})
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
     bridge.fuzzy_mention_match = global_config.get("fuzzy_mention_match", False)
+    bridge.mention_notify_control = global_config.get("mention_notify_control", True)
 
     try:
         validated_global = GlobalConfig.model_validate(global_config)

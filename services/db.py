@@ -70,6 +70,13 @@ class UserBinding(_Base):
 Index("idx_global_user", UserBinding.global_user_id)
 
 
+class MentionNotifyPreference(_Base):
+    __tablename__ = "mention_notify_prefs"
+    global_user_id = Column(String, primary_key=True)
+    mode = Column(String, default="all")
+    platforms = Column(Text, nullable=True)
+
+
 class ForwardPage(_Base):
     __tablename__ = "forward_pages"
 
@@ -497,6 +504,45 @@ class MessageDB:
                 )
             s.commit()
         return True
+
+    def get_global_user_id(self, instance_id: str, platform_user_id: str) -> str | None:
+        with self._session() as s:
+            return s.execute(
+                select(UserBinding.global_user_id).where(
+                    UserBinding.instance_id == instance_id,
+                    UserBinding.platform_user_id == platform_user_id,
+                )
+            ).scalar_one_or_none()
+
+    def get_mention_notify_pref(
+        self, global_user_id: str
+    ) -> tuple[str, str | None] | None:
+        with self._session() as s:
+            row = s.execute(
+                select(
+                    MentionNotifyPreference.mode,
+                    MentionNotifyPreference.platforms,
+                ).where(MentionNotifyPreference.global_user_id == global_user_id)
+            ).one_or_none()
+            if row is None:
+                return None
+            return (row[0], row[1])
+
+    def set_mention_notify_pref(
+        self,
+        global_user_id: str,
+        mode: str,
+        platforms: str | None = None,
+    ) -> None:
+        with self._session() as s:
+            s.merge(
+                MentionNotifyPreference(
+                    global_user_id=global_user_id,
+                    mode=mode,
+                    platforms=platforms,
+                )
+            )
+            s.commit()
 
     def get_all_bindings(
         self, instance_id: str, platform_user_id: str

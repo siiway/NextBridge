@@ -327,6 +327,16 @@ class GlobalConfig(BaseModel):
 
     Default is False."""
 
+    mention_notify_control: CoercedBool = True
+    """Controls whether users can customize cross-platform @mention notification preferences.
+
+    When True (default): Users can use ``/nb notify`` commands to choose which bound platforms
+    receive @mention notifications (all / whitelist / blacklist).
+    When False: All bound platforms are always notified. The ``/nb notify`` commands return a
+    disabled hint.
+
+    Default is True."""
+
     log: LoggingConfig = LoggingConfig()
     """Logging configuration for controlling log output and rotation."""
 

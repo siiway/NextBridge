@@ -70,6 +70,7 @@ class Bridge:
         self._event_bus: EventBus | None = None
         self.strict_echo_match: bool = False
         self.fuzzy_mention_match: bool = False
+        self.mention_notify_control: bool = True
         self.command_prefix: str = "nb"
 
     def set_middleware(self, chain: MiddlewareChain) -> None:
@@ -213,6 +214,9 @@ class Bridge:
         lines = [
             f"Usage: `/{prefix} bind setup`, `/{prefix} bind confirm <code>`, "
             f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <target>`",
+            f"`/{prefix} notify mode all|whitelist|blacklist`, "
+            f"`/{prefix} notify add <instance_id>`, `/{prefix} notify rm <instance_id>`, "
+            f"`/{prefix} notify list`",
         ]
         for name in self._commands:
             lines.append(f"`/{prefix} {name}`")
@@ -363,6 +367,193 @@ class Bridge:
 
             await sender(msg.channel, "\n".join(lines))
 
+    async def _handle_notify_mode(self, msg: NormalizedMessage, args: list[str]):
+        if not self.mention_notify_control:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "Cross-platform mention notification control is disabled in the config.",
+                )
+            return
+        valid = {"all", "whitelist", "blacklist"}
+        mode = args[0].lower() if args else ""
+        if mode not in valid:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                prefix = self._get_command_prefix()
+                await s(
+                    msg.channel,
+                    f"Usage: `/{prefix} notify mode all|whitelist|blacklist`",
+                )
+            return
+        global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+        if global_id is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "You need to bind accounts first. Use `/nb bind setup`.",
+                )
+            return
+        pref = msg_db().get_mention_notify_pref(global_id)
+        existing_platforms = pref[1] if pref else None
+        msg_db().set_mention_notify_pref(global_id, mode, existing_platforms)
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, s = sender_info
+            await s(msg.channel, f"Notification mode set to: **{mode}**")
+
+    async def _handle_notify_add(self, msg: NormalizedMessage, args: list[str]):
+        if not self.mention_notify_control:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "Cross-platform mention notification control is disabled in the config.",
+                )
+            return
+        target = args[0].strip() if args else ""
+        if not target:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                prefix = self._get_command_prefix()
+                await s(msg.channel, f"Usage: `/{prefix} notify add <instance_id>`")
+            return
+        global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+        if global_id is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "You need to bind accounts first. Use `/nb bind setup`.",
+                )
+            return
+        pref = msg_db().get_mention_notify_pref(global_id)
+        mode = pref[0] if pref else "whitelist"
+        if mode == "all":
+            mode = "whitelist"
+        platforms: list[str] = json.loads(pref[1] or "[]") if pref else []
+        if target in platforms:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(msg.channel, f"`{target}` is already in the list.")
+            return
+        platforms.append(target)
+        msg_db().set_mention_notify_pref(global_id, mode, json.dumps(platforms))
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, s = sender_info
+            await s(msg.channel, f"Added `{target}` to notification list. Mode: {mode}")
+
+    async def _handle_notify_rm(self, msg: NormalizedMessage, args: list[str]):
+        if not self.mention_notify_control:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "Cross-platform mention notification control is disabled in the config.",
+                )
+            return
+        target = args[0].strip() if args else ""
+        if not target:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                prefix = self._get_command_prefix()
+                await s(msg.channel, f"Usage: `/{prefix} notify rm <instance_id>`")
+            return
+        global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+        if global_id is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "You need to bind accounts first. Use `/nb bind setup`.",
+                )
+            return
+        pref = msg_db().get_mention_notify_pref(global_id)
+        if pref is None or pref[0] == "all":
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "No notification preference set or mode is already 'all'.",
+                )
+            return
+        platforms: list[str] = json.loads(pref[1] or "[]")
+        if target not in platforms:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(msg.channel, f"`{target}` is not in the list.")
+            return
+        platforms.remove(target)
+        if not platforms:
+            msg_db().set_mention_notify_pref(global_id, "all", None)
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    f"Removed `{target}`. List is now empty, mode reset to **all**.",
+                )
+            return
+        msg_db().set_mention_notify_pref(global_id, pref[0], json.dumps(platforms))
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, s = sender_info
+            await s(msg.channel, f"Removed `{target}` from notification list.")
+
+    async def _handle_notify_list(self, msg: NormalizedMessage):
+        if not self.mention_notify_control:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "Cross-platform mention notification control is disabled in the config.",
+                )
+            return
+        global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+        if global_id is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "You need to bind accounts first. Use `/nb bind setup`.",
+                )
+            return
+        pref = msg_db().get_mention_notify_pref(global_id)
+        if pref is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(msg.channel, "Notification mode: **all** (default)")
+            return
+        mode, platforms_str = pref
+        platforms: list[str] = json.loads(platforms_str or "[]")
+        lines = [f"Notification mode: **{mode}**"]
+        if platforms:
+            lines.append("Platforms: " + ", ".join(f"`{p}`" for p in platforms))
+        if mode == "all":
+            lines.append("(All bound platforms will receive @mention notifications)")
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, s = sender_info
+            await s(msg.channel, "\n".join(lines))
+
     # ------------------------------------------------------------------
     # Message routing
     # ------------------------------------------------------------------
@@ -417,7 +608,7 @@ class Bridge:
                 return
 
             if not self._is_allowed_command_source(msg):
-                if action != "bind" or not msg.is_dm:
+                if action not in ("bind", "notify") or not msg.is_dm:
                     logger.debug(
                         f"Ignored command from non-configured channel: "
                         f"instance={msg.instance_id} channel={msg.channel}"
@@ -430,30 +621,57 @@ class Bridge:
                     await sender(msg.channel, self._get_command_help())
                 return
 
-            if action != "bind":
+            if action not in ("bind", "notify"):
                 if sender_info:
                     _, sender = sender_info
                     await sender(msg.channel, self._get_command_help())
                 return
 
-            subcommand = args[0].lower() if args else ""
-            match subcommand:
-                case "setup":
-                    await self._handle_bind_setup_command(msg)
-                    return
-                case "confirm":
-                    await self._handle_bind_confirm_command(
-                        msg, args[1] if len(args) > 1 else None
-                    )
-                    return
-                case "rm":
-                    await self._handle_bind_rm_command(
-                        msg, args[1] if len(args) > 1 else None
-                    )
-                    return
-                case "list":
-                    await self._handle_bind_list_command(msg)
-                    return
+            if action == "bind":
+                subcommand = args[0].lower() if args else ""
+                match subcommand:
+                    case "setup":
+                        await self._handle_bind_setup_command(msg)
+                        return
+                    case "confirm":
+                        await self._handle_bind_confirm_command(
+                            msg, args[1] if len(args) > 1 else None
+                        )
+                        return
+                    case "rm":
+                        await self._handle_bind_rm_command(
+                            msg, args[1] if len(args) > 1 else None
+                        )
+                        return
+                    case "list":
+                        await self._handle_bind_list_command(msg)
+                        return
+
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, self._get_command_help())
+                return
+
+            if action == "notify":
+                subcommand = args[0].lower() if args else ""
+                match subcommand:
+                    case "mode":
+                        await self._handle_notify_mode(msg, args[1:])
+                        return
+                    case "add":
+                        await self._handle_notify_add(msg, args[1:])
+                        return
+                    case "rm":
+                        await self._handle_notify_rm(msg, args[1:])
+                        return
+                    case "list":
+                        await self._handle_notify_list(msg)
+                        return
+
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, self._get_command_help())
+                return
 
             if sender_info:
                 _, sender = sender_info
@@ -617,6 +835,27 @@ class Bridge:
             extra
         )
 
+    def _mention_notify_allowed(
+        self, mention_id: str, source_instance: str, target_instance: str
+    ) -> bool:
+        if not self.mention_notify_control:
+            return True
+        global_id = msg_db().get_global_user_id(source_instance, mention_id)
+        if global_id is None:
+            return True
+        pref = msg_db().get_mention_notify_pref(global_id)
+        if pref is None:
+            return True
+        mode, platforms_str = pref
+        if mode == "all":
+            return True
+        platforms: list[str] = json.loads(platforms_str or "[]")
+        if mode == "whitelist":
+            return target_instance in platforms
+        if mode == "blacklist":
+            return target_instance not in platforms
+        return True
+
     def _resolve_target_mention_user_id(
         self, msg: NormalizedMessage, mention: dict[str, Any], target_instance: str
     ) -> str | None:
@@ -624,42 +863,42 @@ class Bridge:
         mention_name = str(mention.get("name", "") or "").strip()
         from_ping = bool(mention.get("from_ping"))
 
+        result: str | None = None
+
         if mention_id:
             target_uid = msg_db().get_bound_user_id(
                 msg.instance_id, mention_id, target_instance
             )
             if target_uid:
-                return target_uid
+                result = target_uid
 
-        if self.fuzzy_mention_match and mention_name:
-            fuzzy_target_uid = msg_db().get_user_id_by_name(
-                target_instance, mention_name
+        if result is None and self.fuzzy_mention_match and mention_name:
+            result = msg_db().get_user_id_by_name(target_instance, mention_name)
+
+        if result is None and from_ping and mention_name:
+            result = msg_db().get_user_id_by_name(target_instance, mention_name)
+
+        if result is None:
+            target_platform = target_instance
+            if target_instance in self._senders:
+                target_platform = self._senders[target_instance][0]
+
+            if target_platform == "qq":
+                if msg.platform == "qq" and mention_id.isdigit():
+                    result = mention_id
+                elif msg.platform == "qq" and mention_name.isdigit():
+                    result = mention_name
+
+        if (
+            result is not None
+            and mention_id
+            and not self._mention_notify_allowed(
+                mention_id, msg.instance_id, target_instance
             )
-            if fuzzy_target_uid:
-                return fuzzy_target_uid
-
-        # /ping is an explicit cross-platform lookup request, so allow
-        # name-based match even when fuzzy_mention_match is disabled.
-        if from_ping and mention_name:
-            ping_target_uid = msg_db().get_user_id_by_name(
-                target_instance, mention_name
-            )
-            if ping_target_uid:
-                return ping_target_uid
-
-        target_platform = target_instance
-        if target_instance in self._senders:
-            target_platform = self._senders[target_instance][0]
-
-        if target_platform == "qq":
-            # QQ target addressing uses numeric QQ id or qid alias.
-            if msg.platform == "qq" and mention_id.isdigit():
-                return mention_id
-            if msg.platform == "qq" and mention_name.isdigit():
-                return mention_name
+        ):
             return None
 
-        return None
+        return result
 
     async def _dispatch(
         self,
