@@ -365,7 +365,7 @@ class GlobalConfig(BaseModel):
 
     @field_validator("proxy", mode="after")
     def get_proxy_from_env(cls, v: str):
-        if v.lower() in ["disabled", "disable", "unset"]:
+        if v is None or v.lower() in ["disabled", "disable", "unset"]:
             logger.debug("Global proxy disabled manually")
             return None
 

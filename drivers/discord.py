@@ -20,6 +20,7 @@
 # Note: webhook_url should be configured per channel in rules, not at instance level.
 
 from drivers.registry import register
+import asyncio
 import io
 import json
 from pathlib import Path
@@ -38,7 +39,7 @@ import services.cqface as cqface
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header, parse_richheader_tag
-from services.util import get_data_path
+from services.util import get_data_path, mask_url_credentials
 from services.config_schema import _DriverConfig, CoercedBool
 from services.config import get_proxy, get as get_config, UNSET
 from drivers import BaseDriver
@@ -143,6 +144,14 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._pin_suppress: set[str] = set()
         # name → emoji_id index built lazily from discord_emojis.json
         self._emoji_db: dict[str, str] | None = None
+        self._stopping = False
+
+    @staticmethod
+    def _bounded_add(s: set[str], item: str, maxlen: int = 10000) -> None:
+        """Add *item* to a suppression set, clearing it when it grows too large."""
+        if len(s) >= maxlen:
+            s.clear()
+        s.add(item)
 
     def _allowed_mentions_parse(self) -> list[str]:
         parse: list[str] = []
@@ -174,7 +183,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             connector = aiohttp.TCPConnector(ssl=False)
 
         if self._proxy:
-            self.logger.debug(f"using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {mask_url_credentials(self._proxy)}")
             self._session = aiohttp.ClientSession(
                 connector=connector, proxy=self._proxy
             )
@@ -244,10 +253,29 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         ):
             await self._on_raw_message_delete(payload)
 
-        # Blocks until the bot disconnects
-        await self._client.start(self._bot_token)
+        # Blocks until the bot disconnects. Reconnect on unexpected disconnect
+        # (token failure, kick, network drop) with exponential backoff.
+        attempt = 0
+        while not self._stopping:
+            try:
+                await self._client.start(self._bot_token)
+            except Exception:
+                if self._stopping:
+                    break
+                self.logger.exception(
+                    f"Discord [{self.instance_id}] client disconnected unexpectedly"
+                )
+            if self._stopping:
+                break
+            attempt += 1
+            delay = min(30.0, 2.0 * (2 ** (attempt - 1)))
+            self.logger.warning(
+                f"Discord [{self.instance_id}] reconnecting in {delay:.0f}s"
+            )
+            await asyncio.sleep(delay)
 
     async def stop(self):
+        self._stopping = True
         if self._client and not self._client.is_closed():
             await self._client.close()
         if self._session and not self._session.closed:
@@ -1107,7 +1135,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         try:
             msg_obj = await ch.fetch_message(int(target_msg_id))
-            self._pin_suppress.add(target_msg_id)
+            self._bounded_add(self._pin_suppress, target_msg_id)
             await msg_obj.pin()
         except discord.Forbidden:
             self.logger.warning(f"pin: no permission to pin in {channel_id}")
@@ -1149,7 +1177,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return
 
         # Suppress the raw delete event Discord dispatches back for this action.
-        self._recall_suppress.add(str(message_id))
+        self._bounded_add(self._recall_suppress, str(message_id))
 
         webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
 

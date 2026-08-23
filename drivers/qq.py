@@ -20,6 +20,7 @@ import json
 import math
 import ssl
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from functools import lru_cache
@@ -42,6 +43,7 @@ from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
 from services.message_format import parse_richheader_tag
+from services.util import mask_url_credentials
 
 
 class QqConfig(_DriverConfig):
@@ -181,9 +183,15 @@ class QqDriver(BaseDriver[QqConfig]):
         self._ws: Any = None  # websockets connection (type varies by version)
         # echo_id → Future; used to await responses for specific actions
         self._pending: dict[str, asyncio.Future] = {}
+        # Serialize WebSocket sends: concurrent _call() invocations must not
+        # interleave frames on the same connection (large payloads split into
+        # multiple frames would corrupt the outgoing JSON action).
+        self._send_lock = asyncio.Lock()
         self._proxy = get_proxy(config.proxy)
         # Cache for user qid to avoid repeated API calls
         self._qid_cache: dict[str, str] = {}
+        # user_id → monotonic timestamp of last failed qid lookup (negative cache)
+        self._qid_miss_cache: dict[str, float] = {}
         self._forward_pages: dict[str, _ForwardPage] = {}
         self._forward_file_url_cache: dict[str, str | None] = {}
         self._forward_gc_task: asyncio.Task | None = None
@@ -215,11 +223,11 @@ class QqDriver(BaseDriver[QqConfig]):
             sep = "&" if "?" in ws_url else "?"
             ws_url = f"{ws_url}{sep}access_token={self.config.ws_token}"
 
-        self.logger.info(f"connecting to {ws_url}")
+        self.logger.info(f"connecting to {mask_url_credentials(ws_url)}")
 
         connect_kwargs: dict
         if self._proxy:
-            self.logger.debug(f"using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {mask_url_credentials(self._proxy)}")
             connect_kwargs = {"proxy": self._proxy}
         else:
             connect_kwargs = {}
@@ -746,9 +754,6 @@ class QqDriver(BaseDriver[QqConfig]):
             f"group={group_id} message_id={message_id} seq={message_seq}"
         )
         time = event.get("time")
-        # Use qid for username when available
-        qid = (await self._get_qid(user_id, group_id)).strip()
-
         face_as_emoji: bool = self.config.cqface_mode == "emoji"
         text, attachments, reply_id, mentions = await self._parse_message(
             event,
@@ -762,6 +767,10 @@ class QqDriver(BaseDriver[QqConfig]):
                 f"NapCat [{self.instance_id}] ignoring empty message from {nickname}({user_id})"
             )
             return
+
+        # Use qid for username when available (only after the empty check, so
+        # ignored messages don't trigger a blocking get_stranger_info call).
+        qid = (await self._get_qid(user_id, group_id)).strip()
 
         # QQ avatar endpoint (public, no auth)
         avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
@@ -2116,7 +2125,8 @@ class QqDriver(BaseDriver[QqConfig]):
             self._pending[echo] = fut
             payload = {"action": action, "params": params, "echo": echo}
             try:
-                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                async with self._send_lock:
+                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
                 return await asyncio.wait_for(fut, timeout=timeout)
             except TimeoutError:
                 self._pending.pop(echo, None)
@@ -2287,15 +2297,23 @@ class QqDriver(BaseDriver[QqConfig]):
         if user_id in self._qid_cache:
             return self._qid_cache[user_id]
 
+        now = time.monotonic()
+        last_miss = self._qid_miss_cache.get(user_id)
+        if last_miss is not None and now - last_miss < 300:
+            return ""
+
         try:
             data = await self._api_get_stranger_info(user_id)
             if data:
                 qid = data.get("qid", "")
                 if qid:
                     self._qid_cache[user_id] = qid
+                else:
+                    self._qid_miss_cache[user_id] = now
                 self.logger.debug(f"qid for {user_id}: {qid}")
                 return qid
         except Exception as e:
+            self._qid_miss_cache[user_id] = now
             self.logger.warning(
                 f"NapCat [{self.instance_id}] failed to get qid for {user_id}: {e}"
             )

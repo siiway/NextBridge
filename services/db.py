@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     delete,
+    event,
     func,
     select,
     update,
@@ -116,8 +117,15 @@ class MessageDB:
     )
 
     @classmethod
+    def _compute_target_version(cls) -> int:
+        return max(
+            (int(step.to_version) for step in cls._load_migration_steps()),
+            default=int(cls._SCHEMA_VERSION),
+        )
+
+    @classmethod
     def target_db_version(cls) -> int:
-        return int(cls._SCHEMA_VERSION)
+        return cls._compute_target_version()
 
     def __init__(self, engine: Engine | None = None):
         """Initialize the database handler.
@@ -179,7 +187,10 @@ class MessageDB:
 
         # SQLite-specific settings
         if url.startswith("sqlite:///"):
-            engine_kwargs["connect_args"] = {"check_same_thread": False}
+            engine_kwargs["connect_args"] = {
+                "check_same_thread": False,
+                "timeout": 30,
+            }
 
         # PostgreSQL-specific settings
         elif url.startswith("postgresql"):
@@ -207,6 +218,15 @@ class MessageDB:
 
         logger.info(f"Initializing database engine: {url.split('://')[0]}")
         engine = create_engine(url, **engine_kwargs)
+
+        if url.startswith("sqlite:///"):
+
+            @event.listens_for(engine, "connect")
+            def _set_sqlite_pragmas(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
+                cursor.close()
 
         return engine
 
@@ -261,7 +281,7 @@ class MessageDB:
     @classmethod
     def _run_migrations(cls, engine: Engine) -> None:
         current_version = cls._read_schema_version()
-        target_version = int(cls._SCHEMA_VERSION)
+        target_version = cls._compute_target_version()
         migration_flag = False
         logger.info(
             f"Database schema migration check: current={current_version}, target={target_version}"
@@ -401,38 +421,52 @@ class MessageDB:
         """Verify and consume a binding code, creating a permanent link."""
         now = int(time.time())
         with self._session() as s:
-            row = s.execute(
-                select(BindingCode).where(
-                    BindingCode.code == code,
-                    BindingCode.expires_at > now,
+            # Atomically consume the code (delete + return) so two concurrent
+            # confirmations can't both succeed on the same code.
+            consumed = (
+                s.execute(
+                    delete(BindingCode)
+                    .where(BindingCode.code == code, BindingCode.expires_at > now)
+                    .returning(BindingCode.instance_id, BindingCode.platform_user_id)
                 )
-            ).scalar_one_or_none()
-            if row is None:
+            ).first()
+            if consumed is None:
                 return False
 
-            src_inst = row.instance_id
-            src_uid = row.platform_user_id
+            src_inst = consumed.instance_id
+            src_uid = consumed.platform_user_id
 
-            s.execute(delete(BindingCode).where(BindingCode.code == code))
-
-            existing = (
-                s.execute(
-                    select(UserBinding).where(
-                        (
-                            (UserBinding.instance_id == src_inst)
-                            & (UserBinding.platform_user_id == src_uid)
-                        )
-                        | (
-                            (UserBinding.instance_id == target_instance)
-                            & (UserBinding.platform_user_id == target_user_id)
-                        )
-                    )
+            # Deterministically resolve the target group: prefer the source's
+            # existing group, then the target's, then a fresh id.
+            src_binding = s.execute(
+                select(UserBinding).where(
+                    UserBinding.instance_id == src_inst,
+                    UserBinding.platform_user_id == src_uid,
                 )
-                .scalars()
-                .first()
-            )
+            ).scalar_one_or_none()
+            tgt_binding = s.execute(
+                select(UserBinding).where(
+                    UserBinding.instance_id == target_instance,
+                    UserBinding.platform_user_id == target_user_id,
+                )
+            ).scalar_one_or_none()
 
-            global_id = existing.global_user_id if existing else str(uuid.uuid4())
+            if (
+                src_binding
+                and tgt_binding
+                and src_binding.global_user_id != tgt_binding.global_user_id
+            ):
+                logger.warning(
+                    f"consume_binding_code: merging distinct groups "
+                    f"{src_binding.global_user_id} and {tgt_binding.global_user_id}; "
+                    f"keeping {src_binding.global_user_id}"
+                )
+
+            global_id = (
+                src_binding.global_user_id
+                if src_binding
+                else (tgt_binding.global_user_id if tgt_binding else str(uuid.uuid4()))
+            )
 
             s.merge(
                 UserBinding(

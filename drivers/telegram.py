@@ -30,6 +30,7 @@ import asyncio
 import html
 import io
 import re
+import time
 from typing import TypedDict
 from urllib.parse import urlencode
 
@@ -308,6 +309,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         super().__init__(instance_id, config, bridge)
         self._app: Application | None = None
         self._proxy = get_proxy(config.proxy)
+        # user_id → (monotonic timestamp, avatar URL) cache to avoid re-fetching
+        # the user's profile photo on every inbound message.
+        self._avatar_cache: dict[str, tuple[float, str]] = {}
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
@@ -521,51 +525,60 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             if from_user
             else user_id
         )
-        username = from_user.username or "" if from_user else ""
+        username = (from_user.username or "") if from_user else ""
 
-        # Get user avatar
+        # Get user avatar (cached; TTL 1h)
         user_avatar = ""
         if from_user and self._app:
-            try:
-                photos = await self._app.bot.get_user_profile_photos(
-                    user_id=int(user_id), limit=1
-                )
-                if photos.photos:
-                    photo = photos.photos[0][-1]  # Get the largest size
-                    f = await photo.get_file()
+            cached = self._avatar_cache.get(user_id)
+            now = time.monotonic()
+            if cached is not None and now - cached[0] < 3600:
+                user_avatar = cached[1]
+            else:
+                try:
+                    photos = await self._app.bot.get_user_profile_photos(
+                        user_id=int(user_id), limit=1
+                    )
+                    if photos.photos:
+                        photo = photos.photos[0][-1]  # Get the largest size
+                        f = await photo.get_file()
 
-                    # Use avatar proxy if configured
-                    if f.file_path and self.config.avatar_proxy_host:
-                        host = self.config.avatar_proxy_host.rstrip("/")
-                        # file_path should be a relative path like 'photos/file_6.jpg'
-                        # If it's a full URL, extract the photos/ or profile_photos/ part
-                        file_path = f.file_path
-                        self.logger.debug(f"original file_path: {file_path}")
-                        if file_path.startswith("http"):
-                            from urllib.parse import urlparse
+                        # Use avatar proxy if configured
+                        if f.file_path and self.config.avatar_proxy_host:
+                            host = self.config.avatar_proxy_host.rstrip("/")
+                            # file_path should be a relative path like 'photos/file_6.jpg'
+                            # If it's a full URL, extract the photos/ or profile_photos/ part
+                            file_path = f.file_path
+                            self.logger.debug(f"original file_path: {file_path}")
+                            if file_path.startswith("http"):
+                                from urllib.parse import urlparse
 
-                            parsed = urlparse(file_path)
-                            path = parsed.path.lstrip("/")
-                            self.logger.debug(f"parsed path: {path}")
-                            # Extract the part after 'bot<token>/'
-                            parts = path.split("/")
-                            self.logger.debug(f"path parts: {parts}")
-                            if len(parts) >= 2:
-                                # Find the index of 'photos' or 'profile_photos'
-                                for i, part in enumerate(parts):
-                                    if part in ("photos", "profile_photos"):
-                                        file_path = "/".join(parts[i:])
-                                        self.logger.debug(
-                                            f"extracted file_path: {file_path}"
-                                        )
-                                        break
-                        self.logger.debug(f"final avatar URL: {host}/file/{file_path}")
-                        user_avatar = f"{host}/file/{file_path}"
-                    elif f.file_path:
-                        # Fallback: use direct Telegram API URL
-                        user_avatar = f.file_path
-            except Exception as e:
-                self.logger.warning(f"failed to fetch avatar for user {user_id}: {e}")
+                                parsed = urlparse(file_path)
+                                path = parsed.path.lstrip("/")
+                                self.logger.debug(f"parsed path: {path}")
+                                # Extract the part after 'bot<token>/'
+                                parts = path.split("/")
+                                self.logger.debug(f"path parts: {parts}")
+                                if len(parts) >= 2:
+                                    # Find the index of 'photos' or 'profile_photos'
+                                    for i, part in enumerate(parts):
+                                        if part in ("photos", "profile_photos"):
+                                            file_path = "/".join(parts[i:])
+                                            self.logger.debug(
+                                                f"extracted file_path: {file_path}"
+                                            )
+                                            break
+                            self.logger.debug(
+                                f"final avatar URL: {host}/file/{file_path}"
+                            )
+                            user_avatar = f"{host}/file/{file_path}"
+                            self._avatar_cache[user_id] = (now, user_avatar)
+                        # No proxy configured: f.file_path is a relative path that
+                        # downstream drivers cannot download, so leave empty.
+                except Exception as e:
+                    self.logger.warning(
+                        f"failed to fetch avatar for user {user_id}: {e}"
+                    )
 
         attachments: list[Attachment] = []
 
@@ -704,7 +717,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             if from_user
             else user_id
         )
-        username = from_user.username or "" if from_user else ""
+        username = (from_user.username or "") if from_user else ""
         normalized = NormalizedMessage(
             platform="telegram",
             instance_id=self.instance_id,

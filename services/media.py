@@ -9,7 +9,9 @@
 
 import mimetypes
 import asyncio
+import ipaddress
 import shutil
+from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
@@ -153,6 +155,48 @@ _DEFAULT_HEADERS = {
     "Referer": "https://qq.com/",
 }
 
+_LOOPBACK_HOSTS = {"localhost", "localhost.localdomain"}
+
+
+def _is_public_ip(ip_str: str) -> bool:
+    """Return True if *ip_str* is a globally routable IP address."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return bool(ip.is_global)
+
+
+async def _validate_url(url: str) -> bool:
+    """Reject non-http(s) URLs and URLs resolving to non-public addresses.
+
+    This is a defense-in-depth SSRF guard: media attachments are fetched from
+    URLs supplied by remote messages, so we block loopback, private, link-local,
+    reserved, and metadata-service addresses before issuing any request.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    if host.lower() in _LOOPBACK_HOSTS:
+        return False
+    if _is_public_ip(host) is False:
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(host, None)
+    except Exception:
+        return False
+    for info in infos:
+        if not _is_public_ip(str(info[4][0])):
+            return False
+    return True
+
 
 async def fetch(
     url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None
@@ -167,6 +211,10 @@ async def fetch(
     oversized, the URL is empty, or the download fails.
     """
     if not url:
+        return None
+
+    if not await _validate_url(url):
+        logger.warning(f"media.fetch: blocked non-public URL {url!r}")
         return None
 
     session = _get_session(proxy=proxy)

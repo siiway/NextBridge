@@ -737,6 +737,7 @@ class Bridge:
         if msg.instance_id not in channels:
             return False
         rule_ch = channels[msg.instance_id]
+        matched: list[str] = []
         for key, expected in rule_ch.items():
             if key in ("msg",):  # reserved — not a channel address field
                 continue
@@ -744,7 +745,10 @@ class Bridge:
                 continue  # config-only field (webhook_url, msg_format, ...) — skip
             if str(msg.channel[key]) != str(expected):
                 return False
-        logger.debug(f"Channel match success for {msg.instance_id}: {key}={expected!r}")
+            matched.append(f"{key}={expected!r}")
+        logger.debug(
+            f"Channel match success for {msg.instance_id}: {', '.join(matched)}"
+        )
         return True
 
     def _matches_from(self, msg: NormalizedMessage, from_cfg: dict) -> bool:
