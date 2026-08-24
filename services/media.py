@@ -185,8 +185,14 @@ async def _validate_url(url: str) -> bool:
         return False
     if host.lower() in _LOOPBACK_HOSTS:
         return False
-    if _is_public_ip(host) is False:
-        return False
+    # If the host is a literal IP it must be globally routable; hostnames
+    # are resolved below and their addresses are checked.
+    try:
+        ipaddress.ip_address(host)
+        if not _is_public_ip(host):
+            return False
+    except ValueError:
+        pass
     try:
         loop = asyncio.get_running_loop()
         infos = await loop.getaddrinfo(host, None)
