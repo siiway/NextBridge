@@ -94,6 +94,8 @@ class SlackDriver(BaseDriver[SlackConfig]):
             str, tuple[str, str]
         ] = {}  # user_id → (name, avatar_url)
         self._proxy = get_proxy(config.proxy)
+        self._msg_queue: asyncio.Queue = asyncio.Queue()
+        self._msg_worker_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -150,6 +152,8 @@ class SlackDriver(BaseDriver[SlackConfig]):
                 return
             self.http_server.mount(self.instance_id, listen_path, app)
             self.logger.info(f"Events API mounted at {log_path}")
+            if self._msg_worker_task is None or self._msg_worker_task.done():
+                self._msg_worker_task = asyncio.create_task(self._msg_worker())
             try:
                 await asyncio.Event().wait()
             finally:
@@ -206,8 +210,20 @@ class SlackDriver(BaseDriver[SlackConfig]):
             return JSONResponse({"challenge": payload.get("challenge", "")})
 
         event = payload.get("event", {})
-        asyncio.create_task(self._dispatch_event(event))
+        self._msg_queue.put_nowait(event)
         return PlainTextResponse("ok", status_code=200)
+
+    async def _msg_worker(self) -> None:
+        while True:
+            event = await self._msg_queue.get()
+            try:
+                await self._dispatch_event(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(f"message handler error: {e}")
+            finally:
+                self._msg_queue.task_done()
 
     # ------------------------------------------------------------------
     # Receive — shared event dispatch

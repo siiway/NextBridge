@@ -145,6 +145,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         # name → emoji_id index built lazily from discord_emojis.json
         self._emoji_db: dict[str, str] | None = None
         self._stopping = False
+        # Ordered FIFO queue + single worker: Discord dispatches each event in a
+        # detached task, so without serialization bridged messages can be
+        # reordered on the target platform.
+        self._message_queue: asyncio.Queue = asyncio.Queue()
+        self._message_worker_task: asyncio.Task | None = None
 
     @staticmethod
     def _bounded_add(s: set[str], item: str, maxlen: int = 10000) -> None:
@@ -215,7 +220,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         async def on_message(message: discord.Message):
             if message.author.bot:
                 return
-            await self._on_message(message)
+            self._message_queue.put_nowait(message)
 
         @self._client.event
         async def on_message_edit(before: discord.Message, after: discord.Message):
@@ -253,6 +258,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         ):
             await self._on_raw_message_delete(payload)
 
+        if self._message_worker_task is None or self._message_worker_task.done():
+            self._message_worker_task = asyncio.create_task(self._message_worker())
+
         # Blocks until the bot disconnects. Reconnect on unexpected disconnect
         # (token failure, kick, network drop) with exponential backoff.
         attempt = 0
@@ -284,6 +292,18 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
     # ------------------------------------------------------------------
     # Receive
     # ------------------------------------------------------------------
+
+    async def _message_worker(self) -> None:
+        while True:
+            message = await self._message_queue.get()
+            try:
+                await self._on_message(message)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(f"message handler error: {e}")
+            finally:
+                self._message_queue.task_done()
 
     async def _on_message(self, message: discord.Message):
         server_id = str(message.guild.id) if message.guild else ""

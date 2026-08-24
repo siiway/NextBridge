@@ -94,6 +94,8 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
         self._session: aiohttp.ClientSession | None = None
         self._username_cache: dict[str, str] = {}
         self._proxy = get_proxy(config.proxy)
+        self._msg_queue: asyncio.Queue = asyncio.Queue()
+        self._msg_worker_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -126,6 +128,8 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             f"Rocket.Chat [{self.instance_id}] webhook mounted at {log_path} "
             f"(send_method={self.config.send_method})"
         )
+        if self._msg_worker_task is None or self._msg_worker_task.done():
+            self._msg_worker_task = asyncio.create_task(self._msg_worker())
         try:
             await asyncio.Event().wait()
         finally:
@@ -199,8 +203,20 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             mentions=mentions,
             source_proxy=self._media_proxy,
         )
-        asyncio.create_task(self.bridge.on_message(normalized))
+        self._msg_queue.put_nowait(normalized)
         return JSONResponse({})
+
+    async def _msg_worker(self) -> None:
+        while True:
+            msg = await self._msg_queue.get()
+            try:
+                await self.bridge.on_message(msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(f"message handler error: {e}")
+            finally:
+                self._msg_queue.task_done()
 
     async def _parse_attachment(
         self, att_raw: dict, server: str, max_size: int

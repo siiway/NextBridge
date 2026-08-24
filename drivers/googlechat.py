@@ -81,6 +81,8 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         self._creds: _sa.Credentials | None = None
         self._token_lock: asyncio.Lock = asyncio.Lock()
         self._proxy = get_proxy(config.proxy)
+        self._msg_queue: asyncio.Queue = asyncio.Queue()
+        self._msg_worker_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -124,6 +126,8 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
         self.logger.info(
             f"Google Chat [{self.instance_id}] webhook mounted at {log_path}"
         )
+        if self._msg_worker_task is None or self._msg_worker_task.done():
+            self._msg_worker_task = asyncio.create_task(self._msg_worker())
         try:
             await asyncio.Event().wait()
         finally:
@@ -257,8 +261,20 @@ class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
             mentions=mentions,
             source_proxy=self._media_proxy,
         )
-        asyncio.create_task(self.bridge.on_message(normalized))
+        self._msg_queue.put_nowait(normalized)
         return JSONResponse({"text": ""})
+
+    async def _msg_worker(self) -> None:
+        while True:
+            msg = await self._msg_queue.get()
+            try:
+                await self.bridge.on_message(msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(f"message handler error: {e}")
+            finally:
+                self._msg_queue.task_done()
 
     async def _verify_token(self, token: str) -> bool:
         import google.oauth2.id_token as _id_token

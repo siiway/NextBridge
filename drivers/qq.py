@@ -196,7 +196,11 @@ class QqDriver(BaseDriver[QqConfig]):
         self._forward_file_url_cache: dict[str, str | None] = {}
         self._forward_gc_task: asyncio.Task | None = None
         self._forward_mount_registered = False
-        self._event_tasks: set[asyncio.Task] = set()
+        # Ordered FIFO queue + single worker: events must be processed in the
+        # order they arrive on the WebSocket, otherwise bridged messages can be
+        # reordered (fire-and-forget create_task interleaves concurrent handlers).
+        self._event_queue: asyncio.Queue[dict] = asyncio.Queue()
+        self._event_worker_task: asyncio.Task | None = None
         # Message IDs we deleted ourselves (bridged recalls). Used to ignore the
         # recall notice NapCat echoes back so we don't loop.
         self._recall_suppress: set[str] = set()
@@ -217,6 +221,8 @@ class QqDriver(BaseDriver[QqConfig]):
         self.bridge.register_unpinner(self.instance_id, self.unpin)
         self._ensure_forward_http_mount()
         self._ensure_forward_gc_task()
+        if self._event_worker_task is None or self._event_worker_task.done():
+            self._event_worker_task = asyncio.create_task(self._event_worker())
 
         ws_url = self.config.ws_url
         if self.config.ws_token:
@@ -518,18 +524,21 @@ class QqDriver(BaseDriver[QqConfig]):
                 self.logger.error(f"handler error: {e}")
 
     def _spawn_event_task(self, data: dict) -> None:
-        task = asyncio.create_task(self._handle(data))
-        self._event_tasks.add(task)
+        # Enqueue for the single ordered worker instead of firing a detached
+        # task. This preserves WebSocket arrival order through to the bridge.
+        self._event_queue.put_nowait(data)
 
-        def _on_done(done_task: asyncio.Task) -> None:
-            self._event_tasks.discard(done_task)
-            if done_task.cancelled():
-                return
-            exc = done_task.exception()
-            if exc is not None:
-                self.logger.error(f"async handler error: {exc}")
-
-        task.add_done_callback(_on_done)
+    async def _event_worker(self) -> None:
+        while True:
+            data = await self._event_queue.get()
+            try:
+                await self._handle(data)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(f"async handler error: {e}")
+            finally:
+                self._event_queue.task_done()
 
     async def _handle(self, data: dict):
         # Action responses carry an "echo" field — ignore them

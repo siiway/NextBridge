@@ -58,6 +58,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         # uid → (name, avatar)
         self._user_cache: dict[int, tuple[str, str]] = {}
         self._proxy = get_proxy(config.proxy)
+        self._msg_queue: asyncio.Queue = asyncio.Queue()
+        self._msg_worker_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -88,6 +90,8 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
         self.logger.info(f"VoceChat [{self.instance_id}] webhook mounted at {log_path}")
+        if self._msg_worker_task is None or self._msg_worker_task.done():
+            self._msg_worker_task = asyncio.create_task(self._msg_worker())
         try:
             await asyncio.Event().wait()
         finally:
@@ -112,8 +116,20 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         except Exception:
             return PlainTextResponse("Handle failed", status_code=500)
 
-        asyncio.create_task(self._dispatch(event))
+        self._msg_queue.put_nowait(event)
         return PlainTextResponse("ok", status_code=200)
+
+    async def _msg_worker(self) -> None:
+        while True:
+            event = await self._msg_queue.get()
+            try:
+                await self._dispatch(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(f"message handler error: {e}")
+            finally:
+                self._msg_queue.task_done()
 
     async def _dispatch(self, event: dict) -> None:
         detail = event.get("detail", {})
