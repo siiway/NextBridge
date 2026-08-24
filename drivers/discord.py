@@ -915,15 +915,20 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             else:
                 payload["avatar_url"] = avatar
 
-        # Download each attachment; collect as (bytes, mime, filename) triples
+        # Download attachments concurrently; collect as (bytes, mime, filename)
         files: list[tuple[bytes, str, str]] = []
         source_proxy = self._source_proxy_from_kwargs(kwargs)
-        for att in attachments or []:
-            if not att.url and att.data is None:
-                continue
-            result = await media.fetch_attachment(
+        valid_atts = [
+            att for att in attachments or [] if att.url or att.data is not None
+        ]
+
+        async def _fetch(att: Attachment):
+            return await media.fetch_attachment(
                 att, self.config.max_file_size, source_proxy
             )
+
+        results = await asyncio.gather(*(_fetch(att) for att in valid_atts))
+        for att, result in zip(valid_atts, results):
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
@@ -1006,12 +1011,17 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         discord_files: list[discord.File] = []
         source_proxy = self._source_proxy_from_kwargs(kwargs)
-        for att in attachments or []:
-            if not att.url and att.data is None:
-                continue
-            result = await media.fetch_attachment(
+        valid_atts = [
+            att for att in attachments or [] if att.url or att.data is not None
+        ]
+
+        async def _fetch(att: Attachment):
+            return await media.fetch_attachment(
                 att, self.config.max_file_size, source_proxy
             )
+
+        results = await asyncio.gather(*(_fetch(att) for att in valid_atts))
+        for att, result in zip(valid_atts, results):
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)

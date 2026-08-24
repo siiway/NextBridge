@@ -210,8 +210,8 @@ async def fetch(
     """
     Download *url* up to *max_bytes*.
 
-    Sends a HEAD request first to check Content-Length before committing to a
-    full download.  Falls back to streaming if the server doesn't support HEAD.
+    Streams the response and aborts as soon as the body exceeds *max_bytes*,
+    so oversized files are never fully buffered in memory.
 
     Returns ``(data, content_type)`` on success, or ``None`` if the file is
     oversized, the URL is empty, or the download fails.
@@ -226,23 +226,6 @@ async def fetch(
     session = _get_session(proxy=proxy)
 
     try:
-        # Pre-flight HEAD to skip obviously oversized files without downloading
-        try:
-            async with session.head(
-                url,
-                allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(total=10),
-                headers=_DEFAULT_HEADERS,
-            ) as resp:
-                cl = resp.headers.get("Content-Length")
-                if cl and int(cl) > max_bytes:
-                    logger.debug(
-                        f"media.fetch: skipping {url!r} — Content-Length {cl} > {max_bytes}"
-                    )
-                    return None
-        except Exception:
-            pass  # server doesn't support HEAD; proceed with GET
-
         async with session.get(
             url, timeout=aiohttp.ClientTimeout(total=60), headers=_DEFAULT_HEADERS
         ) as resp:
