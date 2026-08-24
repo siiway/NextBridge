@@ -337,6 +337,13 @@ class GlobalConfig(BaseModel):
 
     Default is True."""
 
+    send_timeout: float = 2.0
+    """Maximum time (seconds) a single message send may take before it is offloaded
+    to the slow-send queue so it no longer blocks subsequent messages.
+
+    Messages that exceed this timeout keep sending in the background while the
+    main worker continues with the next message. Default is 2.0 seconds."""
+
     log: LoggingConfig = LoggingConfig()
     """Logging configuration for controlling log output and rotation."""
 

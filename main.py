@@ -221,6 +221,7 @@ async def main():
         file_level=validated_global.log.file_level,
     )
     bridge.command_prefix = validated_global.command_prefix
+    bridge.send_timeout = validated_global.send_timeout
 
     # ------------------------------------------------------------------
     # Set up plugin infrastructure (before init_db so migrations register)

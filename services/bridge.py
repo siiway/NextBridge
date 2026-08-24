@@ -72,6 +72,9 @@ class Bridge:
         self.fuzzy_mention_match: bool = False
         self.mention_notify_control: bool = True
         self.command_prefix: str = "nb"
+        self.send_timeout: float = 2.0
+        self._slow_queue: asyncio.Queue = asyncio.Queue()
+        self._slow_worker_task: asyncio.Task | None = None
 
     def set_middleware(self, chain: MiddlewareChain) -> None:
         self._middleware = chain
@@ -904,6 +907,81 @@ class Bridge:
 
         return result
 
+    def _ensure_slow_worker(self):
+        if self._slow_worker_task is None or self._slow_worker_task.done():
+            self._slow_worker_task = asyncio.create_task(self._slow_worker())
+
+    async def _slow_worker(self):
+        while True:
+            task = await self._slow_queue.get()
+            try:
+                await task
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            finally:
+                self._slow_queue.task_done()
+
+    async def _send_to_target(
+        self,
+        target_id: str,
+        target_channel: dict,
+        formatted_out: str,
+        extra_out: dict,
+        msg: NormalizedMessage,
+        bridge_id: str,
+    ):
+        sender_info = self._senders.get(target_id)
+        if sender_info is None:
+            return
+        _, sender = sender_info
+        try:
+            new_msg_id = await sender(
+                target_channel,
+                formatted_out,
+                attachments=msg.attachments,
+                **extra_out,
+            )
+            if new_msg_id:
+                if isinstance(new_msg_id, list):
+                    for m_id in new_msg_id:
+                        if m_id:
+                            msg_db().save_mapping(
+                                bridge_id, target_id, target_channel, str(m_id)
+                            )
+                else:
+                    msg_db().save_mapping(
+                        bridge_id, target_id, target_channel, str(new_msg_id)
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(f"Failed to send to '{target_id}'")
+
+    async def _dispatch_guarded(
+        self,
+        target_id: str,
+        target_channel: dict,
+        formatted_out: str,
+        extra_out: dict,
+        msg: NormalizedMessage,
+        bridge_id: str,
+    ):
+        send_task = asyncio.create_task(
+            self._send_to_target(
+                target_id, target_channel, formatted_out, extra_out, msg, bridge_id
+            )
+        )
+        try:
+            await asyncio.wait_for(asyncio.shield(send_task), timeout=self.send_timeout)
+        except asyncio.TimeoutError:
+            self._ensure_slow_worker()
+            self._slow_queue.put_nowait(send_task)
+        except asyncio.CancelledError:
+            send_task.cancel()
+            raise
+
     async def _dispatch(
         self,
         msg: NormalizedMessage,
@@ -933,7 +1011,7 @@ class Bridge:
             if sender_info is None:
                 logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
-            target_platform, sender = sender_info
+            target_platform, _ = sender_info
 
             formatted_out, extra_out = self._normalize_target_cqface(
                 target_platform, formatted, extra
@@ -989,26 +1067,9 @@ class Bridge:
                     continue
                 formatted_out, extra_out = mw_result
 
-            try:
-                new_msg_id = await sender(
-                    target_channel,
-                    formatted_out,
-                    attachments=msg.attachments,
-                    **extra_out,
-                )
-                if new_msg_id:
-                    if isinstance(new_msg_id, list):
-                        for m_id in new_msg_id:
-                            if m_id:
-                                msg_db().save_mapping(
-                                    bridge_id, target_id, target_channel, str(m_id)
-                                )
-                    else:
-                        msg_db().save_mapping(
-                            bridge_id, target_id, target_channel, str(new_msg_id)
-                        )
-            except Exception as e:
-                logger.error(f"Failed to send to '{target_id}': {e}")
+            await self._dispatch_guarded(
+                target_id, target_channel, formatted_out, extra_out, msg, bridge_id
+            )
 
     async def _dispatch_connect(
         self,
@@ -1054,7 +1115,7 @@ class Bridge:
             if sender_info is None:
                 logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
-            target_platform, sender = sender_info
+            target_platform, _ = sender_info
 
             formatted_out, extra_out = self._normalize_target_cqface(
                 target_platform, formatted, extra
@@ -1110,31 +1171,9 @@ class Bridge:
                     continue
                 formatted_out, extra_out = mw_result
 
-            try:
-                new_msg_id = await sender(
-                    target_channel,
-                    formatted_out,
-                    attachments=msg.attachments,
-                    **extra_out,
-                )
-                if new_msg_id:
-                    if isinstance(new_msg_id, list):
-                        for m_id in new_msg_id:
-                            if m_id:
-                                msg_db().save_mapping(
-                                    bridge_id, target_id, target_channel, str(m_id)
-                                )
-                    else:
-                        msg_db().save_mapping(
-                            bridge_id, target_id, target_channel, str(new_msg_id)
-                        )
-            except asyncio.CancelledError:
-                logger.info(f"Message dispatch cancelled during send to {target_id}")
-                # Don't return - continue to process other targets
-                continue
-            except Exception:
-                logger.exception(f"Failed to send to '{target_id}")
-                continue
+            await self._dispatch_guarded(
+                target_id, target_channel, formatted_out, extra_out, msg, bridge_id
+            )
 
     async def on_edit_message(self, msg: NormalizedMessage):
         """Called by drivers when a message is edited on their platform."""
