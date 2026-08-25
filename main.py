@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import importlib
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 from tomllib import load as load_toml
@@ -40,6 +41,34 @@ def _load_project_version() -> str:
         raise RuntimeError("Missing [project].version in pyproject.toml")
 
     return version
+
+
+def _load_commit_hash() -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _is_release_build() -> bool:
+    try:
+        proc = subprocess.run(
+            ["git", "describe", "--tags", "--exact-match"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return False
+    return proc.returncode == 0
 
 
 def _discover_all_driver_modules() -> None:
@@ -183,6 +212,10 @@ async def main():
         logger.opt(exception=True).critical("Startup aborted: failed to load version")
         return
 
+    commit_hash = _load_commit_hash()
+    is_dev = bool(commit_hash) and not _is_release_build()
+    bridge.set_version_info(version, commit_hash, is_dev)
+
     config_path = config_io.find_config(Path(u.get_data_path()))
     if config_path is None:
         logger.critical(
@@ -319,6 +352,7 @@ async def main():
         max_restart_attempts=plugin_cfg.max_restart_attempts,
         health_check_interval=plugin_cfg.health_check_interval,
     )
+    bridge.set_driver_manager(driver_manager)
 
     logger.info(f"========== NextBridge v{version} Starting ==========")
 

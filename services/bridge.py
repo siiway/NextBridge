@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -75,6 +76,21 @@ class Bridge:
         self.send_timeout: float = 2.0
         self._slow_queue: asyncio.Queue = asyncio.Queue()
         self._slow_worker_task: asyncio.Task | None = None
+        self.version: str = ""
+        self.commit_hash: str | None = None
+        self.is_dev: bool = False
+        self.started_at: float = time.monotonic()
+        self._driver_manager = None
+
+    def set_driver_manager(self, manager) -> None:
+        self._driver_manager = manager
+
+    def set_version_info(
+        self, version: str, commit_hash: str | None, is_dev: bool
+    ) -> None:
+        self.version = version
+        self.commit_hash = commit_hash
+        self.is_dev = is_dev
 
     def set_middleware(self, chain: MiddlewareChain) -> None:
         self._middleware = chain
@@ -219,11 +235,52 @@ class Bridge:
             f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <target>`",
             f"`/{prefix} notify mode all|whitelist|blacklist`, "
             f"`/{prefix} notify add <instance_id>`, `/{prefix} notify rm <instance_id>`, "
-            f"`/{prefix} notify list`",
+            f"`/{prefix} notify list`, `/{prefix} status`",
         ]
         for name in self._commands:
             lines.append(f"`/{prefix} {name}`")
         return "\n".join(lines)
+
+    def _version_display(self) -> str:
+        if self.is_dev and self.commit_hash:
+            return f"{self.version}+{self.commit_hash}"
+        return self.version or "unknown"
+
+    def _format_uptime(self) -> str:
+        seconds = int(time.monotonic() - self.started_at)
+        days, rem = divmod(seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, secs = divmod(rem, 60)
+        parts: list[str] = []
+        if days:
+            parts.append(f"{days}d")
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes:
+            parts.append(f"{minutes}m")
+        parts.append(f"{secs}s")
+        return "".join(parts)
+
+    async def _handle_status_command(
+        self, msg: NormalizedMessage, args: list[str]
+    ) -> None:
+        lines = [
+            f"NextBridge {self._version_display()}",
+            f"Uptime: {self._format_uptime()}",
+        ]
+        if self._driver_manager is not None:
+            drivers = self._driver_manager.drivers
+            lines.append(f"Drivers: {len(drivers)}")
+            for iid, managed in sorted(drivers.items()):
+                health = managed.driver.health.value
+                state = managed.state.name.lower()
+                lines.append(
+                    f"- {managed.platform}/{iid}: {health} ({state}, "
+                    f"restarts={managed.restart_count})"
+                )
+        lines.append(f"Rules: {len(self._rules)}")
+        lines.append(f"Senders: {len(self._senders)}")
+        await self.send_message(msg.instance_id, msg.channel, "\n".join(lines))
 
     def _parse_ping_command(self, text: str) -> str | None:
         parts = text.strip().split(maxsplit=1)
@@ -611,7 +668,7 @@ class Bridge:
                 return
 
             if not self._is_allowed_command_source(msg):
-                if action not in ("bind", "notify") or not msg.is_dm:
+                if action not in ("bind", "notify", "status") or not msg.is_dm:
                     logger.debug(
                         f"Ignored command from non-configured channel: "
                         f"instance={msg.instance_id} channel={msg.channel}"
@@ -624,7 +681,7 @@ class Bridge:
                     await sender(msg.channel, self._get_command_help())
                 return
 
-            if action not in ("bind", "notify"):
+            if action not in ("bind", "notify", "status"):
                 if sender_info:
                     _, sender = sender_info
                     await sender(msg.channel, self._get_command_help())
@@ -674,6 +731,10 @@ class Bridge:
                 if sender_info:
                     _, sender = sender_info
                     await sender(msg.channel, self._get_command_help())
+                return
+
+            if action == "status":
+                await self._handle_status_command(msg, args)
                 return
 
             if sender_info:
