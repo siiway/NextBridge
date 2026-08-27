@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import importlib
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +57,26 @@ def _load_commit_hash() -> str | None:
     if proc.returncode != 0:
         return None
     return proc.stdout.strip() or None
+
+
+def _parse_build_version(env: str) -> tuple[str, str | None] | None:
+    """Parse ``NEXTBRIDGE_BUILD_VERSION`` (``vX.X-YYYYMMDD-<hash>``).
+
+    Returns ``(version, commit_hash)`` when the env var is set and well-formed,
+    otherwise ``None``.  Container builds inject this so the running process can
+    report its version even without git metadata on disk.
+    """
+    raw = (env or "").strip()
+    if not raw:
+        return None
+    body = raw[1:] if raw.startswith("v") else raw
+    parts = body.split("-")
+    if not parts or not parts[0]:
+        return None
+    version = parts[0]
+    # <hash> is present only in the full 3-part form.
+    commit = parts[-1] if len(parts) >= 3 else None
+    return version, commit
 
 
 def _is_release_build() -> bool:
@@ -206,13 +227,22 @@ def cmd_validate(args: argparse.Namespace) -> None:
 
 
 async def main():
-    try:
-        version = _load_project_version()
-    except Exception:
-        logger.opt(exception=True).critical("Startup aborted: failed to load version")
-        return
-
-    commit_hash = _load_commit_hash()
+    build_version = _parse_build_version(os.environ.get("NEXTBRIDGE_BUILD_VERSION", ""))
+    if build_version:
+        version, commit_hash = build_version
+        # Build env provides commit hash only in the full form; fall back to git
+        # when it is absent (e.g. local builds reusing the var without a hash).
+        if commit_hash is None:
+            commit_hash = _load_commit_hash()
+    else:
+        try:
+            version = _load_project_version()
+        except Exception:
+            logger.opt(exception=True).critical(
+                "Startup aborted: failed to load version"
+            )
+            return
+        commit_hash = _load_commit_hash()
     is_dev = bool(commit_hash) and not _is_release_build()
     bridge.set_version_info(version, commit_hash, is_dev)
 
