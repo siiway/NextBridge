@@ -10,8 +10,9 @@
 import mimetypes
 import asyncio
 import ipaddress
+import os
 import shutil
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
@@ -204,6 +205,46 @@ async def _validate_url(url: str) -> bool:
     return True
 
 
+def _local_path_of(url: str) -> str | None:
+    """Return a local filesystem path if *url* refers to one, else ``None``.
+
+    Local drivers (e.g. QQ / NapCat) deliver cached media as absolute paths on
+    the bridge host rather than http(s) URLs.  We accept ``file://`` URLs and
+    absolute paths so those attachments can be read directly instead of being
+    rejected by the SSRF guard.
+    """
+    if url.startswith("file://"):
+        rest = unquote(url[7:])
+        # file:///abs -> "/abs"; file://host/abs is not supported.
+        if rest.startswith("/"):
+            return rest
+        return None
+    if os.path.isabs(url):
+        return url
+    return None
+
+
+async def _read_local_file(path: str, max_bytes: int) -> tuple[bytes, str] | None:
+    """Read a local file up to *max_bytes* with the same size guard as ``fetch``."""
+    try:
+        if not os.path.isfile(path):
+            logger.warning(f"media.fetch: local file not found {path!r}")
+            return None
+        size = os.path.getsize(path)
+        if size > max_bytes:
+            logger.debug(
+                f"media.fetch: local {path!r} size {size} > {max_bytes}, skipping"
+            )
+            return None
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, lambda: open(path, "rb").read())
+    except Exception as e:
+        logger.error(f"media.fetch failed to read local {path!r}: {e}")
+        return None
+    mime, _ = mimetypes.guess_type(path)
+    return data, mime or "application/octet-stream"
+
+
 async def fetch(
     url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None
 ) -> tuple[bytes, str] | None:
@@ -211,13 +252,18 @@ async def fetch(
     Download *url* up to *max_bytes*.
 
     Streams the response and aborts as soon as the body exceeds *max_bytes*,
-    so oversized files are never fully buffered in memory.
+    so oversized files are never fully buffered in memory.  Local file URLs
+    (``file://`` or absolute paths) are read directly from disk.
 
     Returns ``(data, content_type)`` on success, or ``None`` if the file is
     oversized, the URL is empty, or the download fails.
     """
     if not url:
         return None
+
+    local_path = _local_path_of(url)
+    if local_path is not None:
+        return await _read_local_file(local_path, max_bytes)
 
     if not await _validate_url(url):
         logger.warning(f"media.fetch: blocked non-public URL {url!r}")
