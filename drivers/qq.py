@@ -895,9 +895,12 @@ class QqDriver(BaseDriver[QqConfig]):
                     attachments.append(Attachment(type="image", url=url, name=name))
 
                 case "record":  # voice message
-                    url = d.get("url") or d.get("file", "")
-                    name = d.get("file", "voice.amr")
-                    attachments.append(Attachment(type="voice", url=url, name=name))
+                    url = self._segment_url(d)
+                    name = self._segment_name(d, "voice.amr")
+                    if url:
+                        attachments.append(Attachment(type="voice", url=url, name=name))
+                    else:
+                        attachments.append(await self._resolve_record_attachment(d))
 
                 case "video":
                     url = d.get("url") or d.get("file", "")
@@ -1366,6 +1369,66 @@ class QqDriver(BaseDriver[QqConfig]):
         )
         self._forward_file_url_cache[cache_key] = None
         return ""
+
+    async def _resolve_record_attachment(self, seg_data: dict) -> Attachment:
+        name = self._segment_name(seg_data, "voice.amr")
+        self.logger.info(
+            f"NapCat [{self.instance_id}] resolving voice attachment, "
+            f"seg fields: {seg_data!r}"
+        )
+
+        candidates: list[str] = []
+        for key in ("url", "path", "file", "name"):
+            value = str(seg_data.get(key) or "").strip()
+            if (
+                value
+                and not value.startswith(("http://", "https://"))
+                and value not in candidates
+            ):
+                candidates.append(value)
+
+        for file_ref in candidates:
+            response = await self._call(
+                "get_record",
+                {"file": file_ref, "out_format": "amr"},
+                timeout=10.0,
+                retries=1,
+            )
+            self.logger.info(
+                f"NapCat [{self.instance_id}] get_record({file_ref!r}) -> {response!r}"
+            )
+            data = (
+                response.get("data")
+                if response and response.get("status") == "ok"
+                else None
+            )
+            if not isinstance(data, dict):
+                continue
+
+            b64 = str(data.get("base64") or "").strip()
+            if b64.startswith("base64://"):
+                b64 = b64[len("base64://") :]
+            if b64:
+                try:
+                    raw = base64.b64decode(b64)
+                except Exception:
+                    raw = b""
+                if raw:
+                    file_name = str(data.get("file_name") or data.get("name") or name)
+                    return Attachment(type="voice", url="", data=raw, name=file_name)
+
+            url = self._segment_url(data)
+            if url:
+                return Attachment(
+                    type="voice",
+                    url=url,
+                    name=self._segment_name(data, name),
+                )
+
+        self.logger.debug(
+            f"NapCat [{self.instance_id}] get_record unresolved for voice {name!r}"
+        )
+        return Attachment(type="voice", url="", name=name)
 
     async def _render_forward_file_asset_html(
         self,

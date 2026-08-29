@@ -919,7 +919,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         files: list[tuple[bytes, str, str]] = []
         source_proxy = self._source_proxy_from_kwargs(kwargs)
         valid_atts = [
-            att for att in attachments or [] if att.url or att.data is not None
+            att
+            for att in attachments or []
+            if att.url or att.name or att.data is not None
         ]
 
         async def _fetch(att: Attachment):
@@ -1012,7 +1014,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         discord_files: list[discord.File] = []
         source_proxy = self._source_proxy_from_kwargs(kwargs)
         valid_atts = [
-            att for att in attachments or [] if att.url or att.data is not None
+            att
+            for att in attachments or []
+            if att.url or att.name or att.data is not None
         ]
 
         async def _fetch(att: Attachment):
