@@ -418,7 +418,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 message_id=msg.message_id,
                 reply_parent=msg.parent_id,
                 mentions=mentions,
-                is_dm=event.chat_type == "p2p_chat",
+                is_dm=msg.chat_type == "p2p",
             )
 
             if self._loop:
