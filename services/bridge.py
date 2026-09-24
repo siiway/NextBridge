@@ -796,7 +796,9 @@ class Bridge:
 
         Only keys that are present in msg.channel are compared — other keys in
         the channel config block (e.g. webhook_url, msg_format) are skipped so
-        they do not interfere with address matching.
+        they do not interfere with address matching. At least one channel
+        address field must match; otherwise a direct message could match a
+        group-only rule because their address fields do not overlap.
         """
         if msg.instance_id not in channels:
             return False
@@ -813,18 +815,20 @@ class Bridge:
         logger.debug(
             f"Channel match success for {msg.instance_id}: {', '.join(matched)}"
         )
-        return True
+        return bool(matched)
 
     def _matches_from(self, msg: NormalizedMessage, from_cfg: dict) -> bool:
         """Return True if *msg* matches the ``from`` block of a forward rule."""
         if msg.instance_id not in from_cfg:
             return False
+        matched = False
         for key, expected in from_cfg[msg.instance_id].items():
             if key not in msg.channel:
                 continue
             if str(msg.channel[key]) != str(expected):
                 return False
-        return True
+            matched = True
+        return matched
 
     def _build_formatted(
         self, msg: NormalizedMessage, msg_cfg: dict, is_webhook: bool = False

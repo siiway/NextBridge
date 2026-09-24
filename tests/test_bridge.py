@@ -215,6 +215,11 @@ class TestMatchesChannel:
         channels = {"inst1": {"id": "ch2"}}
         assert not bridge._matches_channel(msg, channels)
 
+    def test_private_message_does_not_match_group_channel(self, bridge):
+        msg = NormalizedMessage(instance_id="qq", channel={"user_id": "user1"})
+        channels = {"qq": {"group_id": "group1"}}
+        assert not bridge._matches_channel(msg, channels)
+
 
 class TestMatchesFrom:
     def test_matches(self, bridge):
@@ -241,6 +246,47 @@ class TestMatchesFrom:
         msg = NormalizedMessage(instance_id="inst1", channel={"id": 123})
         from_cfg = {"inst1": {"id": "123"}}
         assert bridge._matches_from(msg, from_cfg)
+
+    def test_private_message_does_not_match_group_source(self, bridge):
+        msg = NormalizedMessage(instance_id="qq", channel={"user_id": "user1"})
+        from_cfg = {"qq": {"group_id": "group1"}}
+        assert not bridge._matches_from(msg, from_cfg)
+
+
+class TestPrivateMessageRouting:
+    @pytest.mark.asyncio
+    async def test_private_message_is_not_dispatched_to_group_rules(self, bridge):
+        bridge._rules = [
+            {
+                "id": "connect-rule",
+                "type": "connect",
+                "channels": {"qq": {"group_id": "group1"}},
+            },
+            {
+                "id": "forward-rule",
+                "type": "forward",
+                "from": {"qq": {"group_id": "group1"}},
+                "to": {"target": {"id": "target1"}},
+            },
+        ]
+        msg = NormalizedMessage(
+            platform="qq",
+            instance_id="qq",
+            channel={"user_id": "user1"},
+            user_id="user1",
+            text="hello",
+            is_dm=True,
+        )
+
+        with patch("services.bridge.msg_db") as mock_msg_db:
+            mock_msg_db.return_value = MagicMock()
+            bridge._dispatch_connect = AsyncMock()
+            bridge._dispatch = AsyncMock()
+
+            await bridge.on_message(msg)
+
+        bridge._dispatch_connect.assert_not_awaited()
+        bridge._dispatch.assert_not_awaited()
 
 
 class TestIsAllowedCommandSource:
