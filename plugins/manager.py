@@ -76,6 +76,9 @@ class PluginManager:
             await instance.on_load(ctx)
         except Exception as exc:
             logger.opt(exception=True).error(f"Failed to load plugin: {name}")
+            ctx.cleanup()
+            managed.instance = None
+            managed.ctx = None
             managed.state = PluginState.ERROR
             managed.error = exc
             self._event_bus.emit("plugin.error", name=name, error=exc)

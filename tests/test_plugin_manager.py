@@ -41,6 +41,17 @@ class DependentPlugin(BasePlugin):
         self.ctx = ctx
 
 
+class FailingPlugin(BasePlugin):
+    meta = PluginMeta(name="fail", version="1.0.0")
+
+    async def on_load(self, ctx) -> None:
+        ctx.register_command("failcmd", self._handler)
+        raise RuntimeError("boom")
+
+    async def _handler(self, *args, **kwargs) -> None:
+        pass
+
+
 def _ctx_factory(bridge, event_bus, middleware):
     def factory(name, cfg):
         return PluginContext(
@@ -125,6 +136,19 @@ class TestPluginManagerLifecycle:
             await manager.unload_plugin("rec")
         managed = manager.plugins["rec"]
         assert managed.state == PluginState.UNLOADED
+        assert managed.instance is None
+        assert managed.ctx is None
+
+    @pytest.mark.asyncio
+    async def test_failed_load_cleans_registrations(self, env):
+        bridge, _, _, manager = env
+        registry = {"fail": FailingPlugin}
+        loaded = {"fail": PluginInfo(name="fail", source="test", module_path="x")}
+        with patch("plugins.manager.get_registered_plugins", return_value=registry):
+            await manager.discover_and_load(loaded, {})
+        assert "failcmd" not in bridge._commands
+        managed = manager.plugins["fail"]
+        assert managed.state == PluginState.ERROR
         assert managed.instance is None
         assert managed.ctx is None
 
