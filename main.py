@@ -24,6 +24,7 @@ from services.http_server import HttpServerManager
 from services.media import close_all_sessions
 from services.middleware import MiddlewareChain
 from services.plugin_loader import load_all_drivers
+from services.reload import ReloadEngine, install_sighup_handler
 from plugins.context import PluginContext
 from plugins.loader import load_plugins as load_plugin_modules
 from plugins.manager import PluginManager
@@ -253,7 +254,11 @@ async def main():
         )
         return
 
-    bridge.load_rules()
+    try:
+        bridge.load_rules()
+    except Exception as exc:
+        logger.opt(exception=exc).critical("Rules configuration error")
+        return
 
     logger.info(f"Loading config from: {config_path}")
     raw: dict = config_io.load_config(config_path)
@@ -436,6 +441,17 @@ async def main():
     await plugin_manager.discover_and_load(loaded_plugin_infos, plugin_configs)
     for name in enabled_plugins:
         await plugin_manager.enable_plugin(name)
+
+    # ------------------------------------------------------------------
+    # Hot-reload engine
+    # ------------------------------------------------------------------
+    reload_engine = ReloadEngine(
+        bridge, config_path=config_path, driver_manager=driver_manager
+    )
+    reload_engine.seed(raw)
+    http_server.set_reload_engine(reload_engine)
+    if install_sighup_handler(reload_engine):
+        logger.info("SIGHUP handler installed for configuration reload")
 
     all_tasks: list[asyncio.Task] = []
     http_enable = validated_global.http.enable

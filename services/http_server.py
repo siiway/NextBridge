@@ -16,6 +16,7 @@ import services.logger as log
 
 if TYPE_CHECKING:
     from services.driver_manager import DriverManager
+    from services.reload import ReloadEngine
     from plugins.manager import PluginManager
 
 logger = log.get_logger("http")
@@ -89,6 +90,7 @@ class HttpServerManager:
         self._started = False
         self._driver_manager: DriverManager | None = None
         self._plugin_manager: PluginManager | None = None
+        self._reload_engine: ReloadEngine | None = None
         self._admin_password: str = ""
 
     @staticmethod
@@ -124,6 +126,9 @@ class HttpServerManager:
 
     def set_plugin_manager(self, manager: PluginManager) -> None:
         self._plugin_manager = manager
+
+    def set_reload_engine(self, engine: ReloadEngine) -> None:
+        self._reload_engine = engine
 
     def has_mounts(self) -> bool:
         return bool(self._mounts)

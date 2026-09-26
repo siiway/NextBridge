@@ -102,9 +102,14 @@ class Bridge:
     # Setup
     # ------------------------------------------------------------------
 
+    def apply_rules(self, rules: list[dict]) -> None:
+        """Replace the active rule set with *rules* (already normalized)."""
+        self._rules = rules
+        logger.info(f"Applied {len(self._rules)} bridge rule(s)")
+
     def load_rules(self):
-        # Load rules and normalize each rule with a stable id
-        rules, rules_path = config.load_rules_with_ids()
+        # Load and validate rules, normalize each rule with a stable id
+        rules, rules_path = config.load_rules_with_ids(validate=True)
         if rules_path is None:
             logger.warning("No rules file found")
             self._rules = []
