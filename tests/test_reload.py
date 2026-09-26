@@ -169,6 +169,24 @@ async def test_reload_all(env):
     assert bridge.command_prefix == "nb"
 
 
+@pytest.mark.asyncio
+async def test_reload_all_invalid_rules_keeps_global(env):
+    bridge, engine, rules_path, config_path = env
+    _write_config(config_path, {"global": {"command_prefix": "first"}})
+    await engine.reload_config()
+    assert bridge.command_prefix == "first"
+
+    # A new global config is valid, but the rules file is not: nothing
+    # must be applied, including the global config.
+    _write_config(config_path, {"global": {"command_prefix": "second"}})
+    _write_rules(rules_path, [{"id": "r1", "type": "bogus"}])
+    with pytest.raises(ReloadError) as exc:
+        await engine.reload_all()
+    assert exc.value.code == "invalid_rules"
+    assert bridge.command_prefix == "first"
+    assert config.get("global.command_prefix") == "first"
+
+
 def test_startup_rules_validation(tmp_path, monkeypatch):
     rules_path = tmp_path / "rules.yaml"
     _write_rules(rules_path, [{"id": "r1", "type": "bogus"}])

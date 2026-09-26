@@ -188,9 +188,19 @@ class ReloadEngine:
         All changed configs are validated first; if any is invalid nothing
         is rebuilt and :class:`ReloadError` is raised.
         """
+        raw = self.read_config_file()
+        changed = self._plan_driver_reloads(raw)
+        return await self._apply_driver_reloads(changed)
+
+    def _plan_driver_reloads(self, raw: dict) -> list[tuple[str, Any, str]]:
+        """Validate changed driver configs without side effects.
+
+        Returns ``(instance_id, config, digest)`` tuples for changed, valid
+        instances. Raises :class:`ReloadError` if any changed config is
+        invalid, leaving the running system untouched.
+        """
         from drivers.registry import all_drivers
 
-        raw = self.read_config_file()
         registry = all_drivers()
         changed: list[tuple[str, Any, str]] = []
         errors: list[dict] = []
@@ -215,7 +225,11 @@ class ReloadEngine:
                 code="invalid_driver_config",
                 details=errors,
             )
+        return changed
 
+    async def _apply_driver_reloads(
+        self, changed: list[tuple[str, Any, str]]
+    ) -> list[str]:
         manager = self._driver_manager
         managed_ids = set(manager.drivers) if manager else set()
         reloaded: list[str] = []
@@ -243,13 +257,17 @@ class ReloadEngine:
     async def reload_all(self) -> dict:
         async with self.lock:
             raw = self.read_config_file()
-            validated = self.apply_config(raw)
-            self._record("config", "", "ok")
+            validated = self.validate_global(raw)
             data, _ = self.read_rules_file()
             rules = self.parse_rules(data)
+            changed = self._plan_driver_reloads(raw)
+
+            # Everything validated successfully — apply now.
+            self.apply_config(raw)
+            self._record("config", "", "ok")
             self.apply_rules(rules)
             self._record("rules", "", "ok")
-            reloaded = await self.reload_drivers_locked()
+            reloaded = await self._apply_driver_reloads(changed)
             logger.info("Full reload completed")
             return {
                 "rules": len(rules),
