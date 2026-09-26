@@ -132,6 +132,10 @@ def _file_format(record: "loguru.Record") -> str:
 
 
 def _masking_filter(record: "loguru.Record") -> bool:
+    # Audit entries are written only to the dedicated audit sink.
+    if "audit" in record.get("extra", {}):
+        return False
+
     if record.get("extra", {}).get("_uvicorn"):
         record["extra"]["source"] = ""
         record["extra"]["name"] = "uvicorn"

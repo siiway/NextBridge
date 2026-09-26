@@ -11,6 +11,7 @@ from tomllib import load as load_toml
 from pydantic import ValidationError
 
 import services.error  # noqa: F401
+import services.audit as audit
 import services.logger as log
 import services.util as u
 from services import config_io
@@ -299,6 +300,14 @@ async def main():
     middleware = MiddlewareChain()
     bridge.set_middleware(middleware)
     bridge.set_event_bus(event_bus)
+
+    audit.configure(
+        validated_global.log.dir,
+        rotation=validated_global.log.rotation_size,
+        retention=validated_global.log.retention_days,
+        compression=validated_global.log.compression,
+        event_bus=event_bus,
+    )
 
     plugin_cfg = validated_global.plugins
     general_cfg = plugin_cfg.general
