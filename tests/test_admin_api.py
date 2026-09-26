@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -63,8 +64,8 @@ def env(tmp_path, monkeypatch):
     bridge = Bridge()
     engine = ReloadEngine(bridge, config_path=config_path)
     metrics = MetricsCollector()
-    dm = FakeDriverManager()
-    pm = FakePluginManager()
+    dm: Any = FakeDriverManager()
+    pm: Any = FakePluginManager()
     app = build_admin_app(
         version="test",
         bridge=bridge,
