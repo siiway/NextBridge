@@ -61,12 +61,18 @@ class ReloadEngine:
         *,
         config_path: Path,
         driver_manager: DriverManager | None = None,
+        metrics: Any = None,
     ) -> None:
         self._bridge = bridge
         self._config_path = Path(config_path)
         self._driver_manager = driver_manager
+        self._metrics = metrics
         self.lock = asyncio.Lock()
         self._driver_hashes: dict[str, str] = {}
+
+    def _record(self, kind: str, target: str, result: str) -> None:
+        if self._metrics is not None:
+            self._metrics.inc_config_reload(kind, target, result)
 
     # ------------------------------------------------------------------
     # Reads
@@ -141,8 +147,13 @@ class ReloadEngine:
             return self.reload_config_locked()
 
     def reload_config_locked(self) -> GlobalConfig:
-        raw = self.read_config_file()
-        validated = self.apply_config(raw)
+        try:
+            raw = self.read_config_file()
+            validated = self.apply_config(raw)
+        except ReloadError:
+            self._record("config", "", "error")
+            raise
+        self._record("config", "", "ok")
         logger.info("Reloaded global configuration")
         return validated
 
@@ -151,9 +162,14 @@ class ReloadEngine:
             return self.reload_rules_locked()
 
     def reload_rules_locked(self) -> list[dict]:
-        data, _ = self.read_rules_file()
-        rules = self.parse_rules(data)
+        try:
+            data, _ = self.read_rules_file()
+            rules = self.parse_rules(data)
+        except ReloadError:
+            self._record("rules", "", "error")
+            raise
         self.apply_rules(rules)
+        self._record("rules", "", "ok")
         logger.info(f"Reloaded {len(rules)} rule(s)")
         return rules
 
@@ -187,6 +203,8 @@ class ReloadEngine:
                 changed.append((inst_id, cfg, digest))
 
         if errors:
+            for err in errors:
+                self._record("driver", str(err.get("instance_id", "")), "error")
             raise ReloadError(
                 "Invalid driver configuration",
                 code="invalid_driver_config",
@@ -203,12 +221,14 @@ class ReloadEngine:
             try:
                 await manager.reload_driver(inst_id, cfg)
             except Exception as exc:
+                self._record("driver", inst_id, "error")
                 raise ReloadError(
                     f"Failed to reload driver '{inst_id}': {exc}",
                     code="driver_reload_failed",
                     details={"instance_id": inst_id},
                 ) from exc
             self._driver_hashes[inst_id] = digest
+            self._record("driver", inst_id, "ok")
             reloaded.append(inst_id)
 
         if reloaded:
@@ -219,9 +239,11 @@ class ReloadEngine:
         async with self.lock:
             raw = self.read_config_file()
             validated = self.apply_config(raw)
+            self._record("config", "", "ok")
             data, _ = self.read_rules_file()
             rules = self.parse_rules(data)
             self.apply_rules(rules)
+            self._record("rules", "", "ok")
             reloaded = await self.reload_drivers_locked()
             logger.info("Full reload completed")
             return {

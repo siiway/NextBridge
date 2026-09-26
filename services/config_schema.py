@@ -292,6 +292,19 @@ class MiddlewareConfig(BaseModel):
     """Middleware names to enable (evaluated in list order)."""
 
 
+class MetricsConfig(BaseModel):
+    """Runtime metrics collection configuration."""
+
+    enabled: CoercedBool = True
+    """Whether to collect and expose runtime metrics."""
+
+    snapshot_interval: int = 60
+    """Seconds between periodic counter snapshots to the database.
+
+    Set to ``0`` to disable periodic persistence (counters stay in memory).
+    """
+
+
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
@@ -358,6 +371,9 @@ class GlobalConfig(BaseModel):
 
     middleware: MiddlewareConfig = MiddlewareConfig()
     """Message middleware configuration."""
+
+    metrics: MetricsConfig = MetricsConfig()
+    """Runtime metrics collection configuration."""
 
     @field_validator("command_prefix", mode="before")
     def normalize_command_prefix(cls, v):

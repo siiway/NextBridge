@@ -81,6 +81,16 @@ class Bridge:
         self.is_dev: bool = False
         self.started_at: float = time.monotonic()
         self._driver_manager = None
+        self._metrics = None
+
+    def set_metrics(self, metrics) -> None:
+        self._metrics = metrics
+
+    def _sender_platform(self, instance_id: str) -> str:
+        sender_info = self._senders.get(instance_id)
+        if sender_info and sender_info[0]:
+            return str(sender_info[0])
+        return instance_id
 
     def set_driver_manager(self, manager) -> None:
         self._driver_manager = manager
@@ -655,6 +665,11 @@ class Bridge:
     async def on_message(self, msg: NormalizedMessage):
         logger.info(f"on_message: {msg!s}")
 
+        if self._metrics and not (
+            msg.is_edit or msg.is_recall or msg.is_pin or msg.is_unpin
+        ):
+            self._metrics.inc_message(msg.platform, msg.instance_id, "recv")
+
         if self._event_bus:
             self._event_bus.emit(
                 "bridge.message",
@@ -815,6 +830,8 @@ class Bridge:
                 matched = self._matches_channel(msg, rule.get("channels", {}))
                 # logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
                 if matched:
+                    if self._metrics:
+                        self._metrics.inc_rule_match(rule_id)
                     if msg.message_id:
                         msg_db().save_mapping(
                             bridge_id, msg.instance_id, msg.channel, msg.message_id
@@ -822,6 +839,8 @@ class Bridge:
                     await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:
                 if self._matches_from(msg, rule.get("from", {})):
+                    if self._metrics:
+                        self._metrics.inc_rule_match(rule_id)
                     if msg.message_id:
                         msg_db().save_mapping(
                             bridge_id, msg.instance_id, msg.channel, msg.message_id
@@ -1094,9 +1113,17 @@ class Bridge:
                     msg_db().save_mapping(
                         bridge_id, target_id, target_channel, str(new_msg_id)
                     )
+            if self._metrics:
+                self._metrics.inc_message(
+                    self._sender_platform(target_id), target_id, "send"
+                )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            if self._metrics:
+                self._metrics.inc_send_failure(
+                    self._sender_platform(target_id), type(exc).__name__
+                )
             logger.exception(f"Failed to send to '{target_id}'")
 
     async def _dispatch_guarded(
@@ -1116,6 +1143,8 @@ class Bridge:
         try:
             await asyncio.wait_for(asyncio.shield(send_task), timeout=self.send_timeout)
         except asyncio.TimeoutError:
+            if self._metrics:
+                self._metrics.inc_send_timeout(self._sender_platform(target_id))
             self._ensure_slow_worker()
             self._slow_queue.put_nowait(send_task)
         except asyncio.CancelledError:

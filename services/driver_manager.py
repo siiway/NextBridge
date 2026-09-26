@@ -69,10 +69,15 @@ class DriverManager:
         self._health_check_interval = health_check_interval
         self._health_task: asyncio.Task | None = None
         self._ctx = None
+        self._metrics = None
 
     def set_context(self, ctx) -> None:
         """Store the shared driver context used to rebuild drivers."""
         self._ctx = ctx
+
+    def set_metrics(self, metrics) -> None:
+        """Store the metrics collector used to record driver restarts."""
+        self._metrics = metrics
 
     @property
     def drivers(self) -> dict[str, ManagedDriver]:
@@ -256,6 +261,8 @@ class DriverManager:
         managed.restart_count = 0
         managed.last_error = None
         await self._start_driver(managed)
+        if self._metrics:
+            self._metrics.inc_driver_restart(managed.platform, instance_id)
         logger.debug(f"Driver '{instance_id}' reloaded")
 
     def _clear_instance_registrations(self, instance_id: str) -> None:

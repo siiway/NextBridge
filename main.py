@@ -16,12 +16,13 @@ import services.util as u
 from services import config_io
 from services.bridge import bridge
 from services.config_schema import GlobalConfig, RulesFile
-from services.db import db_target_version, init_db
+from services.db import db_target_version, init_db, msg_db
 from services.driver_context import DriverContext
 from services.driver_manager import DriverManager
 from services.event_bus import EventBus
 from services.http_server import HttpServerManager
 from services.media import close_all_sessions
+from services.metrics import MetricsCollector, snapshot_loop
 from services.middleware import MiddlewareChain
 from services.plugin_loader import load_all_drivers
 from services.reload import ReloadEngine, install_sighup_handler
@@ -443,10 +444,24 @@ async def main():
         await plugin_manager.enable_plugin(name)
 
     # ------------------------------------------------------------------
+    # Runtime metrics
+    # ------------------------------------------------------------------
+    metrics = MetricsCollector()
+    try:
+        metrics.restore(msg_db().load_metrics_counters())
+    except Exception:
+        logger.opt(exception=True).warning("Failed to restore metrics counters")
+    bridge.set_metrics(metrics)
+    driver_manager.set_metrics(metrics)
+
+    # ------------------------------------------------------------------
     # Hot-reload engine
     # ------------------------------------------------------------------
     reload_engine = ReloadEngine(
-        bridge, config_path=config_path, driver_manager=driver_manager
+        bridge,
+        config_path=config_path,
+        driver_manager=driver_manager,
+        metrics=metrics,
     )
     reload_engine.seed(raw)
     http_server.set_reload_engine(reload_engine)
@@ -454,6 +469,16 @@ async def main():
         logger.info("SIGHUP handler installed for configuration reload")
 
     all_tasks: list[asyncio.Task] = []
+    if (
+        validated_global.metrics.enabled
+        and validated_global.metrics.snapshot_interval > 0
+    ):
+        all_tasks.append(
+            asyncio.create_task(
+                snapshot_loop(metrics, validated_global.metrics.snapshot_interval),
+                name="metrics/snapshot",
+            )
+        )
     http_enable = validated_global.http.enable
     if http_enable == "false":
         if http_server.has_mounts():

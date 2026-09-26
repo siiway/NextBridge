@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import (
     Column,
+    Float,
     Index,
     Integer,
     LargeBinary,
@@ -107,6 +108,15 @@ class ForwardAsset(_Base):
 
 Index("idx_forward_assets_page_id", ForwardAsset.page_id)
 Index("idx_forward_assets_expires_at", ForwardAsset.expires_at)
+
+
+class MetricsCounter(_Base):
+    __tablename__ = "metrics_counters"
+
+    name = Column(String, primary_key=True)
+    labels = Column(String, primary_key=True)
+    value = Column(Float, nullable=False, default=0.0)
+    updated_at = Column(Integer, nullable=False, default=0)
 
 
 class MessageDB:
@@ -959,6 +969,31 @@ class MessageDB:
                     or 0
                 ),
             }
+
+    def load_metrics_counters(self) -> list[dict]:
+        with self._session() as s:
+            rows = s.execute(select(MetricsCounter)).scalars().all()
+            return [
+                {
+                    "name": row.name,
+                    "labels": row.labels,
+                    "value": row.value or 0.0,
+                }
+                for row in rows
+            ]
+
+    def save_metrics_counters(self, rows: list[dict]) -> None:
+        with self._session() as s:
+            for row in rows:
+                s.merge(
+                    MetricsCounter(
+                        name=str(row["name"]),
+                        labels=str(row.get("labels") or "{}"),
+                        value=float(row.get("value", 0.0)),
+                        updated_at=int(row.get("updated_at", 0)),
+                    )
+                )
+            s.commit()
 
     def recent_mappings(self, limit: int = 50) -> list[dict]:
         limit = max(1, min(int(limit), 500))
