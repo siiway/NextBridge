@@ -7,7 +7,7 @@ import pytest
 from plugins import BasePlugin, PluginMeta, PluginState
 from plugins.context import PluginContext
 from plugins.loader import PluginInfo
-from plugins.manager import PluginDependencyError, PluginManager
+from plugins.manager import PluginDependencyError, PluginError, PluginManager
 from services.bridge import Bridge
 from services.event_bus import EventBus
 from services.middleware import MiddlewareChain
@@ -47,6 +47,23 @@ class FailingPlugin(BasePlugin):
     async def on_load(self, ctx) -> None:
         ctx.register_command("failcmd", self._handler)
         raise RuntimeError("boom")
+
+    async def _handler(self, *args, **kwargs) -> None:
+        pass
+
+
+class FlakyPlugin(BasePlugin):
+    meta = PluginMeta(name="flaky", version="1.0.0")
+    fail_next = False
+
+    async def on_load(self, ctx) -> None:
+        self.ctx = ctx
+        if FlakyPlugin.fail_next:
+            FlakyPlugin.fail_next = False
+            raise RuntimeError("boom")
+
+    async def on_enable(self) -> None:
+        self.ctx.register_command("flaky", self._handler)
 
     async def _handler(self, *args, **kwargs) -> None:
         pass
@@ -180,6 +197,24 @@ class TestPluginManagerLifecycle:
             await manager.disable_plugin("faildis")
         assert "faildis" not in bridge._commands
         assert manager.plugins["faildis"].state == PluginState.ERROR
+
+    @pytest.mark.asyncio
+    async def test_restart_failure_keeps_old_instance(self, env):
+        bridge, _, _, manager = env
+        registry = {"flaky": FlakyPlugin}
+        loaded = {"flaky": PluginInfo(name="flaky", source="test", module_path="x")}
+        with patch("plugins.manager.get_registered_plugins", return_value=registry):
+            await manager.discover_and_load(loaded, {})
+            await manager.enable_plugin("flaky")
+            first = manager.plugins["flaky"].instance
+            assert "flaky" in bridge._commands
+            FlakyPlugin.fail_next = True
+            with pytest.raises(PluginError):
+                await manager.restart_plugin("flaky")
+        managed = manager.plugins["flaky"]
+        assert managed.instance is first
+        assert managed.state == PluginState.ENABLED
+        assert "flaky" in bridge._commands
 
     @pytest.mark.asyncio
     async def test_dependency_refusal(self, env):

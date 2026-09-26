@@ -199,10 +199,11 @@ class PluginManager:
             logger.info(f"Plugin reloaded: {name}")
 
     async def restart_plugin(self, name: str) -> None:
-        """Disable, unload, reload and re-enable a plugin.
+        """Reload a plugin and restore its previous enabled state.
 
-        Rolls the managed record back to the previous instance on failure and
-        raises :class:`PluginError`.
+        The replacement instance is fully loaded before the previous one is
+        retired, so a load failure leaves the running instance (and its
+        registrations) untouched. Raises :class:`PluginError` on failure.
         """
         managed = self._managed.get(name)
         if managed is None:
@@ -218,11 +219,21 @@ class PluginManager:
         prev_instance = managed.instance
         prev_ctx = managed.ctx
 
-        if was_enabled:
-            await self.disable_plugin(name, force=True)
-            if managed.state == PluginState.ERROR:
-                raise PluginError(f"Failed to disable plugin '{name}'")
+        # Build the replacement first; the current instance keeps running
+        # (and stays registered) until the new one has loaded successfully.
+        candidate = ManagedPlugin(info=managed.info, config=managed.config)
+        if not await self._load_instance(name, candidate):
+            # Previous instance/ctx were never touched and remain functional.
+            raise PluginError(f"Failed to reload plugin '{name}'")
 
+        # New instance is ready — retire the previous one.
+        if was_enabled and prev_instance is not None:
+            try:
+                await prev_instance.on_disable()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"Error during disable of plugin '{name}'"
+                )
         if prev_instance is not None:
             try:
                 await prev_instance.on_unload()
@@ -233,11 +244,10 @@ class PluginManager:
         if prev_ctx is not None:
             prev_ctx.cleanup()
 
-        if not await self._load_instance(name, managed):
-            managed.instance = prev_instance
-            managed.ctx = prev_ctx
-            managed.state = PluginState.ERROR
-            raise PluginError(f"Failed to reload plugin '{name}'")
+        managed.instance = candidate.instance
+        managed.ctx = candidate.ctx
+        managed.state = PluginState.LOADED
+        managed.error = None
 
         if was_enabled:
             await self.enable_plugin(name)
