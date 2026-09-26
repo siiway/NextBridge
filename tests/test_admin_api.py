@@ -234,3 +234,21 @@ async def test_metrics_endpoint(env):
         resp = await client.get("/metrics")
     assert resp.status_code == 200
     assert b"nextbridge_messages_total" in resp.content
+
+
+@pytest.mark.asyncio
+async def test_rules_edit_preserves_yaml_comments(env):
+    rules_path = env["rules_path"]
+    rules_path.write_text(
+        "# keep me\nrules:\n  - id: r1\n    type: forward\n",
+        encoding="utf-8",
+    )
+    async with _client(env["app"]) as client:
+        sha = (await client.get("/rules")).json()["data"]["sha256"]
+        resp = await client.patch(
+            "/admin/rules/r1",
+            json={"msg": {"msg_format": "x"}},
+            params={"expected_sha256": sha},
+        )
+        assert resp.status_code == 200, resp.text
+    assert "# keep me" in rules_path.read_text(encoding="utf-8")

@@ -191,6 +191,25 @@ def build_admin_app(
             )
         return reload_engine
 
+    def _load_config_roundtrip(engine: ReloadEngine) -> dict:
+        path = engine.config_path
+        if path is not None and path.suffix.lower() in {".yaml", ".yml"}:
+            try:
+                data = config_io.load_yaml_roundtrip(path)
+            except Exception as exc:
+                raise AdminError(
+                    f"Failed to read config file: {exc}",
+                    code="config_parse_error",
+                    details=str(exc),
+                ) from exc
+            if not isinstance(data, dict):
+                raise AdminError(
+                    "Config file must contain a mapping",
+                    code="invalid_config",
+                )
+            return data
+        return engine.read_config_file()
+
     def _load_rules() -> tuple[dict, Path]:
         data, path = _engine().read_rules_file()
         if path is None:
@@ -199,6 +218,15 @@ def build_admin_app(
                 status=404,
                 code="rules_not_found",
             )
+        if path.suffix.lower() in {".yaml", ".yml"}:
+            try:
+                data = config_io.load_yaml_roundtrip(path)
+            except Exception as exc:
+                raise AdminError(
+                    f"Failed to read rules file: {exc}",
+                    code="rules_parse_error",
+                    details=str(exc),
+                ) from exc
         if not isinstance(data, dict):
             data = {}
         data.setdefault("rules", [])
@@ -429,7 +457,7 @@ def build_admin_app(
                 details={"allowed": sorted(HOT_RELOAD_GLOBAL_KEYS)},
             )
         async with engine.lock:
-            raw = engine.read_config_file()
+            raw = _load_config_roundtrip(engine)
             _conflict_guard(engine.config_path, expected_sha256, force)
             global_section = raw.setdefault("global", {})
             if not isinstance(global_section, dict):
