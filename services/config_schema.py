@@ -175,8 +175,13 @@ class AdminApiConfig(BaseModel):
 
     Disabled by default.  When enabled, ``password`` must also be set."""
 
+    user: str = "admin"
+    """Username for admin API access (HTTP Basic Auth).
+
+    Checked together with ``password``."""
+
     password: str = ""
-    """Password for admin API access (HTTP Basic Auth, username ignored).
+    """Password for admin API access (HTTP Basic Auth).
 
     Must be non-empty when ``enable`` is true."""
 

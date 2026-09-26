@@ -498,6 +498,10 @@ async def main():
         logger.info("Shared HTTP server disabled by configuration (http.enable=false)")
     elif http_server.should_start():
         admin_cfg = plugin_cfg.admin
+        http_server.set_bridge(bridge)
+        http_server.set_driver_manager(driver_manager)
+        http_server.set_plugin_manager(plugin_manager)
+        http_server.set_metrics(metrics)
         if admin_cfg.enable:
             if not admin_cfg.password:
                 logger.critical(
@@ -505,8 +509,13 @@ async def main():
                     "(global.plugins.admin.password). Refusing to start."
                 )
                 return
-            http_server.set_driver_manager(driver_manager, password=admin_cfg.password)
-        http_server.set_plugin_manager(plugin_manager)
+            http_server.configure_admin(
+                enabled=True, user=admin_cfg.user, password=admin_cfg.password
+            )
+            logger.info("Admin API enabled at /_nextbridge/*")
+        else:
+            http_server.configure_admin(enabled=False)
+            logger.info("Admin API disabled; only /_nextbridge/health is exposed")
         http_task = asyncio.create_task(http_server.run(), name="http/shared")
         all_tasks.append(http_task)
     else:

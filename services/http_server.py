@@ -2,26 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import loguru
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI
 
 import services.logger as log
+from services.admin_api import build_admin_app
 
 if TYPE_CHECKING:
-    from services.driver_manager import DriverManager
-    from services.reload import ReloadEngine
     from plugins.manager import PluginManager
+    from services.bridge import Bridge
+    from services.driver_manager import DriverManager
+    from services.metrics import MetricsCollector
+    from services.reload import ReloadEngine
 
 logger = log.get_logger("http")
-
-_security = HTTPBasic()
 
 
 class _UvicornLogHandler(logging.Handler):
@@ -91,6 +89,10 @@ class HttpServerManager:
         self._driver_manager: DriverManager | None = None
         self._plugin_manager: PluginManager | None = None
         self._reload_engine: ReloadEngine | None = None
+        self._metrics: MetricsCollector | None = None
+        self._bridge: Bridge | None = None
+        self._admin_enabled: bool = False
+        self._admin_user: str = ""
         self._admin_password: str = ""
 
     @staticmethod
@@ -120,9 +122,8 @@ class HttpServerManager:
         )
         self._ready.set()
 
-    def set_driver_manager(self, manager: DriverManager, *, password: str) -> None:
+    def set_driver_manager(self, manager: DriverManager) -> None:
         self._driver_manager = manager
-        self._admin_password = password
 
     def set_plugin_manager(self, manager: PluginManager) -> None:
         self._plugin_manager = manager
@@ -130,20 +131,24 @@ class HttpServerManager:
     def set_reload_engine(self, engine: ReloadEngine) -> None:
         self._reload_engine = engine
 
+    def set_metrics(self, metrics: MetricsCollector) -> None:
+        self._metrics = metrics
+
+    def set_bridge(self, bridge: Bridge) -> None:
+        self._bridge = bridge
+
+    def configure_admin(
+        self, *, enabled: bool, user: str = "", password: str = ""
+    ) -> None:
+        self._admin_enabled = enabled
+        self._admin_user = user
+        self._admin_password = password
+
     def has_mounts(self) -> bool:
         return bool(self._mounts)
 
     def should_start(self) -> bool:
         return self.start_without_mounts or self.has_mounts()
-
-    def _check_admin_auth(
-        self,
-        credentials: HTTPBasicCredentials = Depends(_security),
-    ) -> None:
-        if not secrets.compare_digest(
-            credentials.password.encode(), self._admin_password.encode()
-        ):
-            raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
 
     async def run(self) -> None:
         """Start shared uvicorn server if mount exists or start_without_mounts is enabled."""
@@ -155,65 +160,19 @@ class HttpServerManager:
 
         root = FastAPI()
 
-        @root.get("/_nextbridge/health")
-        async def _health() -> JSONResponse:
-            payload: dict[str, object] = {
-                "status": "ok",
-                "version": self.version,
-            }
-            if self.log_level == "debug":
-                payload["mounts"] = [m.path for m in self._mounts]
-            return JSONResponse(payload)
-
-        if self._driver_manager is not None:
-
-            @root.get(
-                "/_nextbridge/drivers",
-                dependencies=[Depends(self._check_admin_auth)],
-            )
-            async def _drivers_status() -> JSONResponse:
-                dm = self._driver_manager
-                if dm is None:
-                    raise HTTPException(
-                        status_code=503, detail="Driver manager not available"
-                    )
-                return JSONResponse({"drivers": dm.get_status()})
-
-            @root.post(
-                "/_nextbridge/admin/reload/{instance_id}",
-                dependencies=[Depends(self._check_admin_auth)],
-            )
-            async def _reload_driver(instance_id: str) -> JSONResponse:
-                dm = self._driver_manager
-                if dm is None:
-                    raise HTTPException(
-                        status_code=503, detail="Driver manager not available"
-                    )
-                if instance_id not in dm.drivers:
-                    return JSONResponse(
-                        {"error": f"unknown driver: {instance_id}"},
-                        status_code=404,
-                    )
-                await dm.restart_driver(instance_id)
-                return JSONResponse({"status": "restarted", "instance_id": instance_id})
-
-            logger.info(
-                "Admin API enabled (/_nextbridge/drivers, /_nextbridge/plugins, /_nextbridge/admin/*)"
-            )
-
-        if self._plugin_manager is not None:
-
-            @root.get(
-                "/_nextbridge/plugins",
-                dependencies=[Depends(self._check_admin_auth)],
-            )
-            async def _plugins_status() -> JSONResponse:
-                pm = self._plugin_manager
-                if pm is None:
-                    raise HTTPException(
-                        status_code=503, detail="Plugin manager not available"
-                    )
-                return JSONResponse({"plugins": pm.get_status()})
+        admin_app = build_admin_app(
+            version=self.version,
+            debug=self.log_level == "debug",
+            bridge=self._bridge,
+            driver_manager=self._driver_manager,
+            plugin_manager=self._plugin_manager,
+            reload_engine=self._reload_engine,
+            metrics=self._metrics,
+            admin_enabled=self._admin_enabled,
+            admin_user=self._admin_user,
+            admin_password=self._admin_password,
+        )
+        root.mount("/_nextbridge", admin_app)
 
         for mount in self._mounts:
             root.mount(mount.path, mount.app)

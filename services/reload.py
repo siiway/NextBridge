@@ -70,6 +70,11 @@ class ReloadEngine:
         self.lock = asyncio.Lock()
         self._driver_hashes: dict[str, str] = {}
 
+    @property
+    def config_path(self) -> Path:
+        """Path to the active configuration file."""
+        return self._config_path
+
     def _record(self, kind: str, target: str, result: str) -> None:
         if self._metrics is not None:
             self._metrics.inc_config_reload(kind, target, result)
