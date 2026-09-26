@@ -15,6 +15,14 @@ if TYPE_CHECKING:
 logger = log.get_logger("plugin_manager")
 
 
+class PluginError(RuntimeError):
+    """Base error for plugin lifecycle operations."""
+
+
+class PluginDependencyError(PluginError):
+    """Raised when an operation would break another plugin's dependency."""
+
+
 @dataclass
 class ManagedPlugin:
     info: PluginInfo | None = None
@@ -22,6 +30,7 @@ class ManagedPlugin:
     state: PluginState = PluginState.CREATED
     error: Exception | None = None
     config: dict[str, Any] = field(default_factory=dict)
+    ctx: PluginContext | None = None
 
 
 class PluginManager:
@@ -37,6 +46,46 @@ class PluginManager:
     @property
     def plugins(self) -> dict[str, ManagedPlugin]:
         return dict(self._managed)
+
+    def _dependents(self, name: str) -> list[str]:
+        """Return names of active plugins that declare a dependency on *name*."""
+        dependents: list[str] = []
+        for other, managed in self._managed.items():
+            if other == name or managed.instance is None:
+                continue
+            if managed.state in (PluginState.LOADED, PluginState.ENABLED):
+                deps = getattr(managed.instance.meta, "dependencies", []) or []
+                if name in deps:
+                    dependents.append(other)
+        return dependents
+
+    async def _load_instance(self, name: str, managed: ManagedPlugin) -> bool:
+        """(Re)create and load the plugin instance; return True on success."""
+        registry = get_registered_plugins()
+        plugin_cls = registry.get(name)
+        if plugin_cls is None:
+            managed.state = PluginState.ERROR
+            managed.error = RuntimeError(f"Plugin '{name}' not in registry")
+            self._event_bus.emit("plugin.error", name=name, error=managed.error)
+            return False
+
+        ctx = self._ctx_factory(name, managed.config)
+        try:
+            instance = plugin_cls()
+            instance.meta.name = name
+            await instance.on_load(ctx)
+        except Exception as exc:
+            logger.opt(exception=True).error(f"Failed to load plugin: {name}")
+            managed.state = PluginState.ERROR
+            managed.error = exc
+            self._event_bus.emit("plugin.error", name=name, error=exc)
+            return False
+
+        managed.instance = instance
+        managed.ctx = ctx
+        managed.state = PluginState.LOADED
+        managed.error = None
+        return True
 
     async def discover_and_load(
         self,
@@ -60,26 +109,12 @@ class PluginManager:
                 continue
 
             raw_cfg = plugin_configs.get(name, {})
-            ctx = self._ctx_factory(name, raw_cfg)
-
-            try:
-                instance = plugin_cls()
-                instance.meta.name = name
-                await instance.on_load(ctx)
-                self._managed[name] = ManagedPlugin(
-                    info=info,
-                    instance=instance,
-                    state=PluginState.LOADED,
-                    config=raw_cfg,
-                )
-                logger.info(f"Plugin loaded: {name} v{instance.meta.version}")
+            managed = ManagedPlugin(info=info, config=raw_cfg)
+            self._managed[name] = managed
+            if await self._load_instance(name, managed):
+                version = managed.instance.meta.version if managed.instance else "?"
+                logger.info(f"Plugin loaded: {name} v{version}")
                 self._event_bus.emit("plugin.loaded", name=name)
-            except Exception as exc:
-                logger.opt(exception=True).error(f"Failed to load plugin: {name}")
-                self._managed[name] = ManagedPlugin(
-                    info=info, state=PluginState.ERROR, error=exc, config=raw_cfg
-                )
-                self._event_bus.emit("plugin.error", name=name, error=exc)
 
         return loaded
 
@@ -107,10 +142,16 @@ class PluginManager:
             managed.error = exc
             self._event_bus.emit("plugin.error", name=name, error=exc)
 
-    async def disable_plugin(self, name: str) -> None:
+    async def disable_plugin(self, name: str, *, force: bool = False) -> None:
         managed = self._managed.get(name)
         if managed is None:
             return
+        if not force:
+            dependents = self._dependents(name)
+            if dependents:
+                raise PluginDependencyError(
+                    f"Plugin '{name}' is required by: {', '.join(dependents)}"
+                )
         if managed.state != PluginState.ENABLED:
             return
         if managed.instance is None:
@@ -118,6 +159,8 @@ class PluginManager:
 
         try:
             await managed.instance.on_disable()
+            if managed.ctx is not None:
+                managed.ctx.cleanup()
             managed.state = PluginState.DISABLED
             logger.info(f"Plugin disabled: {name}")
             self._event_bus.emit("plugin.disabled", name=name)
@@ -143,40 +186,75 @@ class PluginManager:
                 logger.opt(exception=True).warning(
                     f"Error during unload of plugin '{name}'"
                 )
+        if managed.ctx is not None:
+            managed.ctx.cleanup()
+            managed.ctx = None
 
-        registry = get_registered_plugins()
-        plugin_cls = registry.get(name)
-        if plugin_cls is None:
-            logger.error(f"Cannot reload plugin '{name}': not in registry")
-            managed.state = PluginState.ERROR
-            managed.error = RuntimeError(f"Plugin '{name}' not in registry")
-            return
-
-        raw_cfg = managed.config
-
-        ctx = self._ctx_factory(name, raw_cfg)
-
-        try:
-            instance = plugin_cls()
-            instance.meta.name = name
-            await instance.on_load(ctx)
-            managed.instance = instance
-            managed.state = PluginState.LOADED
-            managed.error = None
+        if await self._load_instance(name, managed):
             logger.info(f"Plugin reloaded: {name}")
-        except Exception as exc:
-            logger.opt(exception=True).error(f"Failed to reload plugin: {name}")
-            managed.state = PluginState.ERROR
-            managed.error = exc
-            self._event_bus.emit("plugin.error", name=name, error=exc)
 
-    async def unload_plugin(self, name: str) -> None:
+    async def restart_plugin(self, name: str) -> None:
+        """Disable, unload, reload and re-enable a plugin.
+
+        Rolls the managed record back to the previous instance on failure and
+        raises :class:`PluginError`.
+        """
+        managed = self._managed.get(name)
+        if managed is None:
+            raise PluginError(f"Unknown plugin: {name}")
+
+        dependents = self._dependents(name)
+        if dependents:
+            raise PluginDependencyError(
+                f"Plugin '{name}' is required by: {', '.join(dependents)}"
+            )
+
+        was_enabled = managed.state == PluginState.ENABLED
+        prev_instance = managed.instance
+        prev_ctx = managed.ctx
+
+        if was_enabled:
+            await self.disable_plugin(name, force=True)
+            if managed.state == PluginState.ERROR:
+                raise PluginError(f"Failed to disable plugin '{name}'")
+
+        if prev_instance is not None:
+            try:
+                await prev_instance.on_unload()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"Error during unload of plugin '{name}'"
+                )
+        if prev_ctx is not None:
+            prev_ctx.cleanup()
+
+        if not await self._load_instance(name, managed):
+            managed.instance = prev_instance
+            managed.ctx = prev_ctx
+            managed.state = PluginState.ERROR
+            raise PluginError(f"Failed to reload plugin '{name}'")
+
+        if was_enabled:
+            await self.enable_plugin(name)
+            if managed.state != PluginState.ENABLED:
+                raise PluginError(f"Failed to re-enable plugin '{name}'")
+
+        logger.info(f"Plugin restarted: {name}")
+
+    async def unload_plugin(self, name: str, *, force: bool = False) -> None:
         managed = self._managed.get(name)
         if managed is None:
             return
 
+        if not force:
+            dependents = self._dependents(name)
+            if dependents:
+                raise PluginDependencyError(
+                    f"Plugin '{name}' is required by: {', '.join(dependents)}"
+                )
+
         if managed.state == PluginState.ENABLED:
-            await self.disable_plugin(name)
+            await self.disable_plugin(name, force=True)
 
         if managed.instance is not None:
             try:
@@ -185,6 +263,9 @@ class PluginManager:
                 logger.opt(exception=True).warning(
                     f"Error during unload of plugin '{name}'"
                 )
+        if managed.ctx is not None:
+            managed.ctx.cleanup()
+            managed.ctx = None
 
         managed.state = PluginState.UNLOADED
         managed.instance = None
@@ -203,4 +284,7 @@ class PluginManager:
 
     async def unload_all(self) -> None:
         for name in list(self._managed):
-            await self.unload_plugin(name)
+            try:
+                await self.unload_plugin(name, force=True)
+            except Exception:
+                logger.opt(exception=True).warning(f"Error unloading plugin: {name}")

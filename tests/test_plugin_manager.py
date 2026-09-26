@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+
+from plugins import BasePlugin, PluginMeta, PluginState
+from plugins.context import PluginContext
+from plugins.loader import PluginInfo
+from plugins.manager import PluginDependencyError, PluginManager
+from services.bridge import Bridge
+from services.event_bus import EventBus
+from services.middleware import MiddlewareChain
+
+
+class RecordingPlugin(BasePlugin):
+    meta = PluginMeta(name="rec", version="1.0.0")
+
+    def __init__(self):
+        self.enabled = False
+
+    async def on_load(self, ctx) -> None:
+        self.ctx = ctx
+
+    async def on_enable(self) -> None:
+        self.enabled = True
+        self.ctx.register_command("rec", self._handler)
+        self.ctx.on_event("evt", self._handler)
+
+    async def on_disable(self) -> None:
+        self.enabled = False
+
+    async def _handler(self, *args, **kwargs) -> None:
+        pass
+
+
+class DependentPlugin(BasePlugin):
+    meta = PluginMeta(name="dep", version="1.0.0", dependencies=["rec"])
+
+    async def on_load(self, ctx) -> None:
+        self.ctx = ctx
+
+
+def _ctx_factory(bridge, event_bus, middleware):
+    def factory(name, cfg):
+        return PluginContext(
+            bridge=bridge, event_bus=event_bus, middleware=middleware, config=cfg
+        )
+
+    return factory
+
+
+class TestPluginContextCleanup:
+    def test_cleanup_removes_registrations(self):
+        bridge = Bridge()
+        event_bus = EventBus()
+        middleware = MiddlewareChain()
+        ctx = PluginContext(bridge=bridge, event_bus=event_bus, middleware=middleware)
+
+        ctx.register_command("rec", lambda *a: None)
+        ctx.on_event("evt", lambda *a: None)
+        ctx.add_receive_middleware("mw", lambda m: m)
+
+        assert "rec" in bridge._commands
+        assert event_bus._handlers["evt"]
+        assert middleware.has_receive
+
+        ctx.cleanup()
+
+        assert "rec" not in bridge._commands
+        assert not event_bus._handlers["evt"]
+        assert not middleware.has_receive
+
+    def test_cleanup_is_idempotent(self):
+        ctx = PluginContext(bridge=Bridge(), event_bus=EventBus())
+        ctx.register_command("rec", lambda *a: None)
+        ctx.cleanup()
+        ctx.cleanup()
+
+
+class TestPluginManagerLifecycle:
+    @pytest.fixture
+    def env(self):
+        bridge = Bridge()
+        event_bus = EventBus()
+        middleware = MiddlewareChain()
+        manager = PluginManager(event_bus, _ctx_factory(bridge, event_bus, middleware))
+        return bridge, event_bus, middleware, manager
+
+    @pytest.mark.asyncio
+    async def test_disable_cleans_registrations(self, env):
+        bridge, _, _, manager = env
+        registry = {"rec": RecordingPlugin}
+        loaded = {"rec": PluginInfo(name="rec", source="test", module_path="x")}
+        with patch("plugins.manager.get_registered_plugins", return_value=registry):
+            await manager.discover_and_load(loaded, {})
+            await manager.enable_plugin("rec")
+            assert "rec" in bridge._commands
+            await manager.disable_plugin("rec")
+        assert "rec" not in bridge._commands
+        assert manager.plugins["rec"].state == PluginState.DISABLED
+
+    @pytest.mark.asyncio
+    async def test_restart_reloads_and_reenables(self, env):
+        bridge, _, _, manager = env
+        registry = {"rec": RecordingPlugin}
+        loaded = {"rec": PluginInfo(name="rec", source="test", module_path="x")}
+        with patch("plugins.manager.get_registered_plugins", return_value=registry):
+            await manager.discover_and_load(loaded, {})
+            await manager.enable_plugin("rec")
+            first = manager.plugins["rec"].instance
+            await manager.restart_plugin("rec")
+        managed = manager.plugins["rec"]
+        assert managed.state == PluginState.ENABLED
+        assert managed.instance is not first
+        assert "rec" in bridge._commands
+
+    @pytest.mark.asyncio
+    async def test_unload_clears_instance(self, env):
+        _, _, _, manager = env
+        registry = {"rec": RecordingPlugin}
+        loaded = {"rec": PluginInfo(name="rec", source="test", module_path="x")}
+        with patch("plugins.manager.get_registered_plugins", return_value=registry):
+            await manager.discover_and_load(loaded, {})
+            await manager.unload_plugin("rec")
+        managed = manager.plugins["rec"]
+        assert managed.state == PluginState.UNLOADED
+        assert managed.instance is None
+        assert managed.ctx is None
+
+    @pytest.mark.asyncio
+    async def test_dependency_refusal(self, env):
+        _, _, _, manager = env
+        registry = {"rec": RecordingPlugin, "dep": DependentPlugin}
+        loaded = {
+            "rec": PluginInfo(name="rec", source="test", module_path="x"),
+            "dep": PluginInfo(name="dep", source="test", module_path="y"),
+        }
+        with patch("plugins.manager.get_registered_plugins", return_value=registry):
+            await manager.discover_and_load(loaded, {})
+            await manager.enable_plugin("rec")
+            await manager.enable_plugin("dep")
+            with pytest.raises(PluginDependencyError):
+                await manager.disable_plugin("rec")
