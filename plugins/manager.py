@@ -162,16 +162,18 @@ class PluginManager:
 
         try:
             await managed.instance.on_disable()
-            if managed.ctx is not None:
-                managed.ctx.cleanup()
-            managed.state = PluginState.DISABLED
-            logger.info(f"Plugin disabled: {name}")
-            self._event_bus.emit("plugin.disabled", name=name)
         except Exception as exc:
             logger.opt(exception=True).error(f"Failed to disable plugin: {name}")
             managed.state = PluginState.ERROR
             managed.error = exc
             self._event_bus.emit("plugin.error", name=name, error=exc)
+        else:
+            managed.state = PluginState.DISABLED
+            logger.info(f"Plugin disabled: {name}")
+            self._event_bus.emit("plugin.disabled", name=name)
+        finally:
+            if managed.ctx is not None:
+                managed.ctx.cleanup()
 
     async def reload_plugin(self, name: str) -> None:
         managed = self._managed.get(name)

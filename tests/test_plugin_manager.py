@@ -52,6 +52,22 @@ class FailingPlugin(BasePlugin):
         pass
 
 
+class FailingDisablePlugin(BasePlugin):
+    meta = PluginMeta(name="faildis", version="1.0.0")
+
+    async def on_load(self, ctx) -> None:
+        self.ctx = ctx
+
+    async def on_enable(self) -> None:
+        self.ctx.register_command("faildis", self._handler)
+
+    async def on_disable(self) -> None:
+        raise RuntimeError("boom")
+
+    async def _handler(self, *args, **kwargs) -> None:
+        pass
+
+
 def _ctx_factory(bridge, event_bus, middleware):
     def factory(name, cfg):
         return PluginContext(
@@ -151,6 +167,19 @@ class TestPluginManagerLifecycle:
         assert managed.state == PluginState.ERROR
         assert managed.instance is None
         assert managed.ctx is None
+
+    @pytest.mark.asyncio
+    async def test_disable_cleans_when_hook_fails(self, env):
+        bridge, _, _, manager = env
+        registry = {"faildis": FailingDisablePlugin}
+        loaded = {"faildis": PluginInfo(name="faildis", source="test", module_path="x")}
+        with patch("plugins.manager.get_registered_plugins", return_value=registry):
+            await manager.discover_and_load(loaded, {})
+            await manager.enable_plugin("faildis")
+            assert "faildis" in bridge._commands
+            await manager.disable_plugin("faildis")
+        assert "faildis" not in bridge._commands
+        assert manager.plugins["faildis"].state == PluginState.ERROR
 
     @pytest.mark.asyncio
     async def test_dependency_refusal(self, env):
