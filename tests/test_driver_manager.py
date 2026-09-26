@@ -110,6 +110,27 @@ async def test_reload_driver_rolls_back_on_factory_error(env):
 
 
 @pytest.mark.asyncio
+async def test_reload_driver_rolls_back_on_start_failure(env):
+    manager, ctx = env
+
+    def factory(iid, cfg):
+        return FakeDriver(iid, cfg, ctx, fail_start=(cfg == "boom"))
+
+    drv = FakeDriver("i1", None, ctx)
+    await manager.register_and_start("fake", "i1", drv, "cfg", factory)
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeError):
+        await manager.reload_driver("i1", "boom")
+    await asyncio.sleep(0)
+
+    managed = manager.drivers["i1"]
+    assert managed.driver is drv
+    assert managed.config_snapshot == "cfg"
+    assert managed.state == DriverState.RUNNING
+
+
+@pytest.mark.asyncio
 async def test_reload_unknown_driver_raises(env):
     manager, _ = env
     with pytest.raises(KeyError):

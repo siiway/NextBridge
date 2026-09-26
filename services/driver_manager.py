@@ -261,6 +261,23 @@ class DriverManager:
         managed.restart_count = 0
         managed.last_error = None
         await self._start_driver(managed)
+
+        # Give the replacement a chance to run its initial start().  If it
+        # fails right away (state is neither STARTING nor RUNNING), restore
+        # the previous instance instead of keeping a dead driver.
+        await asyncio.sleep(0)
+        if managed.state not in (DriverState.STARTING, DriverState.RUNNING):
+            logger.error(
+                f"Driver '{instance_id}' failed to start after reload, rolling back"
+            )
+            await self.stop_driver(instance_id)
+            managed.driver = old_driver
+            managed.config_snapshot = old_config
+            managed.restart_count = 0
+            managed.last_error = None
+            await self._start_driver(managed)
+            raise RuntimeError(f"Driver '{instance_id}' failed to start")
+
         if self._metrics:
             self._metrics.inc_driver_restart(managed.platform, instance_id)
         logger.debug(f"Driver '{instance_id}' reloaded")
