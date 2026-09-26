@@ -228,8 +228,17 @@ def build_admin_app(
                     details=str(exc),
                 ) from exc
         if not isinstance(data, dict):
-            data = {}
-        data.setdefault("rules", [])
+            raise AdminError(
+                "Rules file must contain a mapping",
+                code="invalid_rules_file",
+            )
+        if data.get("rules") is None:
+            data["rules"] = []
+        if not isinstance(data["rules"], list):
+            raise AdminError(
+                "Rules file 'rules' must be an array",
+                code="invalid_rules_file",
+            )
         return data, path
 
     def _conflict_guard(path: Path, expected: str | None, force: bool) -> None:

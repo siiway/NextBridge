@@ -252,3 +252,12 @@ async def test_rules_edit_preserves_yaml_comments(env):
         )
         assert resp.status_code == 200, resp.text
     assert "# keep me" in rules_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_create_rule_malformed_document(env):
+    env["rules_path"].write_text("rules: not-a-list\n", encoding="utf-8")
+    async with _client(env["app"]) as client:
+        resp = await client.post("/admin/rules", json={"type": "forward"})
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_rules_file"
