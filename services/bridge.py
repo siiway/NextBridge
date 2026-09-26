@@ -203,6 +203,35 @@ class Bridge:
         self._commands.pop(name, None)
         logger.debug(f"Unregistered command: {name}")
 
+    def unregister_sender(self, instance_id: str) -> None:
+        self._senders.pop(instance_id, None)
+        logger.debug(f"Unregistered sender for instance: {instance_id}")
+
+    def unregister_editor(self, instance_id: str) -> None:
+        self._editors.pop(instance_id, None)
+
+    def unregister_deleter(self, instance_id: str) -> None:
+        self._deleters.pop(instance_id, None)
+
+    def unregister_pinner(self, instance_id: str) -> None:
+        self._pinners.pop(instance_id, None)
+
+    def unregister_unpinner(self, instance_id: str) -> None:
+        self._unpinners.pop(instance_id, None)
+
+    def clear_instance(self, instance_id: str) -> None:
+        """Remove every callback registered by *instance_id*.
+
+        Used before rebuilding/replacing a driver instance so stale callbacks
+        never point at a dead object.
+        """
+        self._senders.pop(instance_id, None)
+        self._editors.pop(instance_id, None)
+        self._deleters.pop(instance_id, None)
+        self._pinners.pop(instance_id, None)
+        self._unpinners.pop(instance_id, None)
+        logger.debug(f"Cleared registrations for instance: {instance_id}")
+
     async def send_message(
         self, instance_id: str, channel: dict, text: str, **kwargs
     ) -> str | list[str] | None:

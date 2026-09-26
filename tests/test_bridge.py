@@ -485,6 +485,44 @@ class TestRegisterSender:
         snapshot = bridge.senders_snapshot()
         assert snapshot == [{"instance_id": "inst1", "platform": None}]
 
+    def test_clear_instance_removes_all_callbacks(self, bridge):
+        async def fake(channel, text, **kwargs):
+            pass
+
+        bridge.register_sender("inst1", fake)
+        bridge.register_editor("inst1", fake)
+        bridge.register_deleter("inst1", fake)
+        bridge.register_pinner("inst1", fake)
+        bridge.register_unpinner("inst1", fake)
+
+        bridge.clear_instance("inst1")
+
+        assert "inst1" not in bridge._senders
+        assert "inst1" not in bridge._editors
+        assert "inst1" not in bridge._deleters
+        assert "inst1" not in bridge._pinners
+        assert "inst1" not in bridge._unpinners
+
+    def test_clear_instance_is_scoped(self, bridge):
+        async def fake(channel, text, **kwargs):
+            pass
+
+        bridge.register_sender("inst1", fake)
+        bridge.register_sender("inst2", fake)
+
+        bridge.clear_instance("inst1")
+
+        assert "inst1" not in bridge._senders
+        assert "inst2" in bridge._senders
+
+    def test_unregister_sender(self, bridge):
+        async def fake(channel, text, **kwargs):
+            pass
+
+        bridge.register_sender("inst1", fake)
+        bridge.unregister_sender("inst1")
+        assert "inst1" not in bridge._senders
+
 
 class TestDispatchContinueOnError:
     """核心: 单个目标发送失败不应该中断后续目标 (issue #1)"""
