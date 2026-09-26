@@ -161,6 +161,46 @@ async def test_reload_drivers_rebuilds_changed(env):
 
 
 @pytest.mark.asyncio
+async def test_reload_drivers_adds_new_instance(env):
+    _, engine, _, config_path = env
+    register("reloadtest", ReloadCfg, ReloadDriver)
+    try:
+        ctx = FakeCtx()
+        manager = DriverManager(EventBus(), health_check_interval=0)
+        manager.set_context(ctx)
+        engine._driver_manager = manager
+
+        _write_config(config_path, {"reloadtest": {"i1": {"token": "a"}}})
+        assert await engine.reload_drivers() == ["i1"]
+        assert "i1" in manager.drivers
+
+        await manager.stop_all()
+    finally:
+        unregister("reloadtest")
+
+
+@pytest.mark.asyncio
+async def test_reload_drivers_removes_instance(env):
+    _, engine, _, config_path = env
+    register("reloadtest", ReloadCfg, ReloadDriver)
+    try:
+        ctx = FakeCtx()
+        manager = DriverManager(EventBus(), health_check_interval=0)
+        manager.set_context(ctx)
+        drv = ReloadDriver("i1", None, ctx)
+        await manager.register_and_start("reloadtest", "i1", drv, None, lambda i, c: c)
+        await asyncio.sleep(0)
+        engine._driver_manager = manager
+
+        _write_config(config_path, {})
+        assert await engine.reload_drivers() == []
+        assert "i1" not in manager.drivers
+        assert ctx.bridge.cleared == ["i1"]
+    finally:
+        unregister("reloadtest")
+
+
+@pytest.mark.asyncio
 async def test_reload_all(env):
     bridge, engine, rules_path, _ = env
     _write_rules(rules_path, [{"id": "r1", "type": "forward"}])

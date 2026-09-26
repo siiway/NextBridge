@@ -282,6 +282,52 @@ class DriverManager:
             self._metrics.inc_driver_restart(managed.platform, instance_id)
         logger.debug(f"Driver '{instance_id}' reloaded")
 
+    def make_factory(self, platform: str) -> Callable[[str, Any], BaseDriver] | None:
+        """Build a factory for *platform* from the stored context.
+
+        Returns ``None`` when the platform is unknown or no context has been
+        provided.
+        """
+        from drivers.registry import get_driver
+
+        entry = get_driver(platform)
+        if entry is None or self._ctx is None:
+            return None
+        _, driver_cls = entry
+        http_server = getattr(self._ctx, "http_server", None)
+
+        def factory(instance_id: str, config: Any) -> BaseDriver:
+            driver = driver_cls(instance_id, config, self._ctx)
+            if http_server is not None:
+                driver.attach_http_server(http_server)
+            return driver
+
+        return factory
+
+    async def add_driver(
+        self,
+        platform: str,
+        instance_id: str,
+        config: Any,
+        factory: Callable[[str, Any], BaseDriver] | None = None,
+    ) -> None:
+        """Construct and start a new driver instance at runtime."""
+        factory = factory or self.make_factory(platform)
+        if factory is None:
+            raise RuntimeError(f"No factory available for platform: {platform}")
+        driver = factory(instance_id, config)
+        await self.register_and_start(platform, instance_id, driver, config, factory)
+
+    async def remove_driver(self, instance_id: str) -> None:
+        """Stop a managed driver, forget it, and clear its callbacks."""
+        managed = self._managed.get(instance_id)
+        if managed is None:
+            return
+        await self.stop_driver(instance_id)
+        self._clear_instance_registrations(instance_id)
+        self._managed.pop(instance_id, None)
+        logger.debug(f"Driver '{instance_id}' removed")
+
     def _clear_instance_registrations(self, instance_id: str) -> None:
         """Drop bridge callbacks owned by the given instance, if possible."""
         if self._ctx is None:

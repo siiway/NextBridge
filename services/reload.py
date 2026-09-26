@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import signal
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +47,15 @@ class ReloadError(Exception):
 def _hash_raw(value: Any) -> str:
     raw = json.dumps(value, sort_keys=True, ensure_ascii=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class DriverReloadPlan:
+    """Driver instances that need to change on the next apply step."""
+
+    changed: list[tuple[str, Any, str]] = field(default_factory=list)
+    added: list[tuple[str, str, Any, str]] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
 
 
 class ReloadEngine:
@@ -192,30 +202,43 @@ class ReloadEngine:
         changed = self._plan_driver_reloads(raw)
         return await self._apply_driver_reloads(changed)
 
-    def _plan_driver_reloads(self, raw: dict) -> list[tuple[str, Any, str]]:
-        """Validate changed driver configs without side effects.
+    def _plan_driver_reloads(self, raw: dict) -> DriverReloadPlan:
+        """Diff the config against the running instances without side effects.
 
-        Returns ``(instance_id, config, digest)`` tuples for changed, valid
-        instances. Raises :class:`ReloadError` if any changed config is
-        invalid, leaving the running system untouched.
+        Validates every changed/added config first. Raises
+        :class:`ReloadError` if any is invalid, leaving the running system
+        untouched. Newly added instances (present in config but not managed)
+        and removed instances (managed but absent from config) are planned
+        alongside rebuilds of changed instances.
         """
         from drivers.registry import all_drivers
 
+        manager = self._driver_manager
+        if manager is None:
+            return DriverReloadPlan()
+
         registry = all_drivers()
+        managed_ids = set(manager.drivers)
         changed: list[tuple[str, Any, str]] = []
+        added: list[tuple[str, str, Any, str]] = []
         errors: list[dict] = []
+        config_ids: set[str] = set()
 
         for platform, (config_cls, _) in registry.items():
             for inst_id, inst_raw in (raw.get(platform, {}) or {}).items():
+                config_ids.add(inst_id)
                 digest = _hash_raw(inst_raw)
-                if self._driver_hashes.get(inst_id) == digest:
-                    continue
                 try:
                     cfg = config_cls.model_validate(inst_raw)
                 except ValidationError as exc:
                     errors.append({"instance_id": inst_id, "errors": exc.errors()})
                     continue
-                changed.append((inst_id, cfg, digest))
+                if inst_id in managed_ids:
+                    if self._driver_hashes.get(inst_id) == digest:
+                        continue
+                    changed.append((inst_id, cfg, digest))
+                else:
+                    added.append((platform, inst_id, cfg, digest))
 
         if errors:
             for err in errors:
@@ -225,18 +248,17 @@ class ReloadEngine:
                 code="invalid_driver_config",
                 details=errors,
             )
-        return changed
 
-    async def _apply_driver_reloads(
-        self, changed: list[tuple[str, Any, str]]
-    ) -> list[str]:
+        removed = [iid for iid in managed_ids if iid not in config_ids]
+        return DriverReloadPlan(changed=changed, added=added, removed=removed)
+
+    async def _apply_driver_reloads(self, plan: DriverReloadPlan) -> list[str]:
         manager = self._driver_manager
-        managed_ids = set(manager.drivers) if manager else set()
-        reloaded: list[str] = []
-        for inst_id, cfg, digest in changed:
-            if manager is None or inst_id not in managed_ids:
-                self._driver_hashes[inst_id] = digest
-                continue
+        if manager is None:
+            return []
+        updated: list[str] = []
+
+        for inst_id, cfg, digest in plan.changed:
             try:
                 await manager.reload_driver(inst_id, cfg)
             except Exception as exc:
@@ -248,11 +270,39 @@ class ReloadEngine:
                 ) from exc
             self._driver_hashes[inst_id] = digest
             self._record("driver", inst_id, "ok")
-            reloaded.append(inst_id)
+            updated.append(inst_id)
 
-        if reloaded:
-            logger.info(f"Reloaded {len(reloaded)} driver(s): {', '.join(reloaded)}")
-        return reloaded
+        for platform, inst_id, cfg, digest in plan.added:
+            try:
+                await manager.add_driver(platform, inst_id, cfg)
+            except Exception as exc:
+                self._record("driver", inst_id, "error")
+                raise ReloadError(
+                    f"Failed to add driver '{inst_id}': {exc}",
+                    code="driver_add_failed",
+                    details={"instance_id": inst_id},
+                ) from exc
+            self._driver_hashes[inst_id] = digest
+            self._record("driver", inst_id, "ok")
+            updated.append(inst_id)
+
+        for inst_id in plan.removed:
+            try:
+                await manager.remove_driver(inst_id)
+            except Exception as exc:
+                self._record("driver", inst_id, "error")
+                raise ReloadError(
+                    f"Failed to remove driver '{inst_id}': {exc}",
+                    code="driver_remove_failed",
+                    details={"instance_id": inst_id},
+                ) from exc
+            self._driver_hashes.pop(inst_id, None)
+            self._record("driver", inst_id, "ok")
+            logger.info(f"Removed driver instance: {inst_id}")
+
+        if updated:
+            logger.info(f"Updated {len(updated)} driver(s): {', '.join(updated)}")
+        return updated
 
     async def reload_all(self) -> dict:
         async with self.lock:
@@ -260,19 +310,19 @@ class ReloadEngine:
             validated = self.validate_global(raw)
             data, _ = self.read_rules_file()
             rules = self.parse_rules(data)
-            changed = self._plan_driver_reloads(raw)
+            plan = self._plan_driver_reloads(raw)
 
             # Everything validated successfully — apply now.
             self.apply_config(raw)
             self._record("config", "", "ok")
             self.apply_rules(rules)
             self._record("rules", "", "ok")
-            reloaded = await self._apply_driver_reloads(changed)
+            updated = await self._apply_driver_reloads(plan)
             logger.info("Full reload completed")
             return {
                 "rules": len(rules),
                 "command_prefix": validated.command_prefix,
-                "drivers": reloaded,
+                "drivers": updated,
             }
 
     # ------------------------------------------------------------------
