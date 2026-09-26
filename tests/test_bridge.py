@@ -247,6 +247,69 @@ class TestMatchesFrom:
         from_cfg = {"inst1": {"id": "123"}}
         assert bridge._matches_from(msg, from_cfg)
 
+
+class TestMatchesConditions:
+    def test_empty_block_matches(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", text="hello")
+        assert bridge._matches_conditions(msg, None)
+        assert bridge._matches_conditions(msg, {})
+
+    def test_keyword_match_is_case_insensitive(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", text="Hello World")
+        assert bridge._matches_conditions(msg, {"keywords": ["world"]})
+
+    def test_keyword_any_of(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", text="deploy failed")
+        assert bridge._matches_conditions(msg, {"keywords": ["alert", "deploy"]})
+
+    def test_keyword_no_match(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", text="hello")
+        assert not bridge._matches_conditions(msg, {"keywords": ["world"]})
+
+    def test_users_include_platform_id(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", user_id="u1")
+        db = MagicMock()
+        db.get_global_user_id.return_value = None
+        with patch("services.bridge.msg_db", return_value=db):
+            assert bridge._matches_conditions(msg, {"users": {"include": ["u1"]}})
+
+    def test_users_include_rejects_others(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", user_id="u1")
+        db = MagicMock()
+        db.get_global_user_id.return_value = None
+        with patch("services.bridge.msg_db", return_value=db):
+            assert not bridge._matches_conditions(msg, {"users": {"include": ["u2"]}})
+
+    def test_users_exclude(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", user_id="u1")
+        db = MagicMock()
+        db.get_global_user_id.return_value = None
+        with patch("services.bridge.msg_db", return_value=db):
+            assert not bridge._matches_conditions(msg, {"users": {"exclude": ["u1"]}})
+
+    def test_users_exclude_wins_over_include(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", user_id="u1")
+        db = MagicMock()
+        db.get_global_user_id.return_value = None
+        match = {"users": {"include": ["u1"], "exclude": ["u1"]}}
+        with patch("services.bridge.msg_db", return_value=db):
+            assert not bridge._matches_conditions(msg, match)
+
+    def test_users_include_by_global_id(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", user_id="u1")
+        db = MagicMock()
+        db.get_global_user_id.return_value = "global-7"
+        with patch("services.bridge.msg_db", return_value=db):
+            assert bridge._matches_conditions(msg, {"users": {"include": ["global-7"]}})
+
+    def test_keywords_and_users_combined(self, bridge):
+        msg = NormalizedMessage(instance_id="inst1", user_id="u1", text="ping")
+        db = MagicMock()
+        db.get_global_user_id.return_value = None
+        match = {"keywords": ["ping"], "users": {"include": ["u2"]}}
+        with patch("services.bridge.msg_db", return_value=db):
+            assert not bridge._matches_conditions(msg, match)
+
     def test_private_message_does_not_match_group_source(self, bridge):
         msg = NormalizedMessage(instance_id="qq", channel={"user_id": "user1"})
         from_cfg = {"qq": {"group_id": "group1"}}

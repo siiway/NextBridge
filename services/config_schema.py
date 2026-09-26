@@ -434,6 +434,29 @@ class _DriverConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class MatchUsers(BaseModel):
+    """User allow/deny lists for a rule ``match`` block."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include: list[str] = []
+    """Only route messages from these users (platform user id or global user id)."""
+
+    exclude: list[str] = []
+    """Never route messages from these users (takes precedence over include)."""
+
+
+class MatchCondition(BaseModel):
+    """Optional per-rule conditions evaluated against the source message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    keywords: list[str] = []
+    """Route only if the message text contains at least one of these (case-insensitive)."""
+
+    users: MatchUsers = MatchUsers()
+
+
 class Rule(BaseModel):
     """Pydantic model for a single routing rule."""
 
@@ -444,6 +467,7 @@ class Rule(BaseModel):
     channels: dict[str, object] | None = None
     from_: dict[str, object] | None = Field(None, alias="from")
     to: dict[str, object] | None = None
+    match: MatchCondition | None = None
     msg: dict[str, object] | None = None
 
 

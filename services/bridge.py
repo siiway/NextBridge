@@ -769,6 +769,9 @@ class Bridge:
                 )
 
         for rule in self._rules:
+            if not self._matches_conditions(msg, rule.get("match")):
+                continue
+
             rule_id = str(rule.get("id", ""))
             if not rule_id:
                 rule_id = config.stable_rule_hash(rule)
@@ -829,6 +832,44 @@ class Bridge:
                 return False
             matched = True
         return matched
+
+    def _matches_conditions(
+        self, msg: NormalizedMessage, match_cfg: dict | None
+    ) -> bool:
+        """Return True if *msg* satisfies a rule's optional ``match`` block.
+
+        Missing/empty blocks impose no constraint. ``keywords`` match any
+        (case-insensitive) substring of the message text. ``users.include``
+        and ``users.exclude`` compare against the platform user id and the
+        bound global user id; exclude always wins.
+        """
+        if not match_cfg:
+            return True
+
+        keywords = match_cfg.get("keywords") or []
+        if keywords:
+            text = (msg.text or "").lower()
+            if not any(str(k).lower() in text for k in keywords):
+                return False
+
+        users = match_cfg.get("users") or {}
+        include = {str(x) for x in (users.get("include") or [])}
+        exclude = {str(x) for x in (users.get("exclude") or [])}
+        if not include and not exclude:
+            return True
+
+        identity: set[str] = set()
+        if msg.user_id:
+            identity.add(str(msg.user_id))
+            global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+            if global_id:
+                identity.add(str(global_id))
+
+        if exclude and identity & exclude:
+            return False
+        if include and not (identity & include):
+            return False
+        return True
 
     def _build_formatted(
         self, msg: NormalizedMessage, msg_cfg: dict, is_webhook: bool = False
