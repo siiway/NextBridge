@@ -383,6 +383,7 @@ async def main():
         health_check_interval=plugin_cfg.health_check_interval,
     )
     bridge.set_driver_manager(driver_manager)
+    driver_manager.set_context(ctx)
 
     logger.info(f"========== NextBridge v{version} Starting ==========")
 
@@ -390,7 +391,15 @@ async def main():
         for inst_id, cfg in validated.get(platform, {}).items():
             drv = driver_cls(inst_id, cfg, ctx)
             drv.attach_http_server(http_server)
-            await driver_manager.register_and_start(platform, inst_id, drv, cfg)
+
+            def _factory(iid, inst_cfg, _cls=driver_cls):
+                built = _cls(iid, inst_cfg, ctx)
+                built.attach_http_server(http_server)
+                return built
+
+            await driver_manager.register_and_start(
+                platform, inst_id, drv, cfg, _factory
+            )
             logger.info(f"Registered driver: {platform}/{inst_id}")
 
     has_drivers = bool(driver_manager.drivers)

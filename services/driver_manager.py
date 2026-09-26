@@ -44,6 +44,7 @@ class ManagedDriver:
     restart_count: int = 0
     last_error: Exception | None = None
     config_snapshot: Any = None
+    factory: Callable[[str, Any], BaseDriver] | None = None
 
 
 class DriverManager:
@@ -67,6 +68,11 @@ class DriverManager:
         self._max_restart_attempts = max_restart_attempts
         self._health_check_interval = health_check_interval
         self._health_task: asyncio.Task | None = None
+        self._ctx = None
+
+    def set_context(self, ctx) -> None:
+        """Store the shared driver context used to rebuild drivers."""
+        self._ctx = ctx
 
     @property
     def drivers(self) -> dict[str, ManagedDriver]:
@@ -82,12 +88,14 @@ class DriverManager:
         instance_id: str,
         driver: BaseDriver,
         config_snapshot: Any = None,
+        factory: Callable[[str, Any], BaseDriver] | None = None,
     ) -> None:
         managed = ManagedDriver(
             platform=platform,
             instance_id=instance_id,
             driver=driver,
             config_snapshot=config_snapshot,
+            factory=factory,
         )
         self._managed[instance_id] = managed
         await self._start_driver(managed)
@@ -208,6 +216,55 @@ class DriverManager:
         managed.last_error = None
         await self._start_driver(managed)
         logger.debug(f"Driver '{instance_id}' restarted")
+
+    async def reload_driver(self, instance_id: str, new_config: Any = None) -> None:
+        """Rebuild a driver instance, optionally with a new validated config.
+
+        The old instance is stopped, its bridge registrations are cleared,
+        and a fresh instance is created through the stored factory.  If the
+        factory (or config validation) fails, the old instance/config are
+        restored and restarted, then the error is re-raised.
+        """
+        managed = self._managed.get(instance_id)
+        if not managed:
+            raise KeyError(f"Unknown driver instance: {instance_id}")
+        if managed.factory is None:
+            raise RuntimeError(f"No factory registered for driver: {instance_id}")
+
+        old_driver = managed.driver
+        old_config = managed.config_snapshot
+        config = new_config if new_config is not None else old_config
+
+        await self.stop_driver(instance_id)
+        self._clear_instance_registrations(instance_id)
+
+        try:
+            new_driver = managed.factory(instance_id, config)
+        except Exception:
+            logger.opt(exception=True).error(
+                f"Failed to rebuild driver '{instance_id}', rolling back"
+            )
+            managed.driver = old_driver
+            managed.config_snapshot = old_config
+            managed.restart_count = 0
+            managed.last_error = None
+            await self._start_driver(managed)
+            raise
+
+        managed.driver = new_driver
+        managed.config_snapshot = config
+        managed.restart_count = 0
+        managed.last_error = None
+        await self._start_driver(managed)
+        logger.debug(f"Driver '{instance_id}' reloaded")
+
+    def _clear_instance_registrations(self, instance_id: str) -> None:
+        """Drop bridge callbacks owned by the given instance, if possible."""
+        if self._ctx is None:
+            return
+        clear = getattr(self._ctx.bridge, "clear_instance", None)
+        if clear is not None:
+            clear(instance_id)
 
     async def stop_all(self) -> None:
         if self._health_task and not self._health_task.done():
