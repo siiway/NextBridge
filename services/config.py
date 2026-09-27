@@ -6,9 +6,20 @@ from typing import Any
 import services.util as u
 import services.logger as log
 import services.config_io as config_io
-from services.config_schema import UNSET
+from services.config_schema import RulesFile, UNSET
+
+from pydantic import ValidationError
 
 logger = log.get_logger("config")
+
+
+class RulesValidationError(ValueError):
+    """Raised when a rules document fails schema validation."""
+
+    def __init__(self, message: str, errors: list | None = None):
+        super().__init__(message)
+        self.errors = errors or []
+
 
 _config_cache = None
 _config_path: Path | None = None
@@ -68,13 +79,41 @@ def normalize_rules_with_ids(rules: list[dict]) -> list[dict]:
     return normalized
 
 
-def load_rules_with_ids() -> tuple[list[dict], Path | None]:
-    """Load rules file and normalize every rule with a stable id."""
+def parse_rules(data: Any) -> list[dict]:
+    """Validate a rules document and return its rules normalized with ids.
+
+    Raises :class:`RulesValidationError` when the document fails schema
+    validation.
+    """
+    if not isinstance(data, dict):
+        raise RulesValidationError("Rules file must be a mapping")
+
+    try:
+        RulesFile.model_validate(data)
+    except ValidationError as exc:
+        raise RulesValidationError("Invalid rules", exc.errors()) from exc
+
+    raw_rules = data.get("rules", [])
+    if not isinstance(raw_rules, list):
+        raise RulesValidationError("'rules' must be an array")
+
+    return normalize_rules_with_ids(raw_rules)
+
+
+def load_rules_with_ids(validate: bool = False) -> tuple[list[dict], Path | None]:
+    """Load rules file and normalize every rule with a stable id.
+
+    When *validate* is true, the document is schema-validated first and
+    :class:`RulesValidationError` is raised on failure.
+    """
     rules_path = config_io.find_rules(Path(u.get_data_path()))
     if rules_path is None:
         return [], None
 
     data = config_io.load_config(rules_path)
+    if validate:
+        return parse_rules(data), rules_path
+
     raw_rules = data.get("rules", [])
     if not isinstance(raw_rules, list):
         logger.warning("Invalid rules format: 'rules' must be an array")
@@ -149,6 +188,25 @@ def set(key: str, value):
         _config_cache = config
     except Exception as e:
         raise RuntimeError(f"Save config failed: {e}")
+
+
+def apply_raw(data: dict, path: Path | None = None) -> None:
+    """Replace the in-memory config cache with *data* (used after a reload)."""
+    global _config_cache, _config_path
+    _config_cache = data
+    if path is not None:
+        _config_path = Path(path)
+
+
+def refresh(path: Path | None = None) -> dict:
+    """Re-read the config file into the cache and return it."""
+    global _config_cache, _config_path
+    p = path or _config_path or config_io.find_config(Path(u.get_data_path()))
+    if p is None:
+        raise FileNotFoundError("No config file found")
+    _config_path = Path(p)
+    _config_cache = config_io.load_config(_config_path)
+    return _config_cache
 
 
 def get_proxy(

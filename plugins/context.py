@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from services.bridge import Bridge
@@ -29,6 +29,9 @@ class PluginContext:
         self._config = config or {}
         self._version = version
         self._config_path = config_path
+        self._commands: list[str] = []
+        self._events: list[tuple[str, Callable]] = []
+        self._middleware_names: list[str] = []
 
     @property
     def bridge(self):
@@ -57,6 +60,47 @@ class PluginContext:
     @property
     def config_path(self) -> Path | None:
         return self._config_path
+
+    def register_command(self, name: str, handler: Callable) -> None:
+        """Register a ``/<prefix> <name>`` command and track it for cleanup."""
+        self._bridge.register_command(name, handler)
+        self._commands.append(name)
+
+    def on_event(self, event: str, handler: Callable) -> None:
+        """Subscribe to an EventBus event and track it for cleanup."""
+        if self._event_bus is not None:
+            self._event_bus.on(event, handler)
+        self._events.append((event, handler))
+
+    def add_receive_middleware(
+        self, name: str, handler: Callable, priority: int = 100
+    ) -> None:
+        """Add a receive middleware and track it for cleanup."""
+        if self._middleware is not None:
+            self._middleware.add_receive(name, handler, priority)
+        self._middleware_names.append(name)
+
+    def add_send_middleware(
+        self, name: str, handler: Callable, priority: int = 100
+    ) -> None:
+        """Add a send middleware and track it for cleanup."""
+        if self._middleware is not None:
+            self._middleware.add_send(name, handler, priority)
+        self._middleware_names.append(name)
+
+    def cleanup(self) -> None:
+        """Undo every tracked registration; safe to call repeatedly."""
+        for name in self._commands:
+            self._bridge.unregister_command(name)
+        for event, handler in self._events:
+            if self._event_bus is not None:
+                self._event_bus.off(event, handler)
+        for name in self._middleware_names:
+            if self._middleware is not None:
+                self._middleware.remove(name)
+        self._commands.clear()
+        self._events.clear()
+        self._middleware_names.clear()
 
     @property
     def data_path(self) -> str:

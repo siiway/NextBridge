@@ -44,6 +44,7 @@ class ManagedDriver:
     restart_count: int = 0
     last_error: Exception | None = None
     config_snapshot: Any = None
+    factory: Callable[[str, Any], BaseDriver] | None = None
 
 
 class DriverManager:
@@ -67,6 +68,16 @@ class DriverManager:
         self._max_restart_attempts = max_restart_attempts
         self._health_check_interval = health_check_interval
         self._health_task: asyncio.Task | None = None
+        self._ctx = None
+        self._metrics = None
+
+    def set_context(self, ctx) -> None:
+        """Store the shared driver context used to rebuild drivers."""
+        self._ctx = ctx
+
+    def set_metrics(self, metrics) -> None:
+        """Store the metrics collector used to record driver restarts."""
+        self._metrics = metrics
 
     @property
     def drivers(self) -> dict[str, ManagedDriver]:
@@ -82,12 +93,14 @@ class DriverManager:
         instance_id: str,
         driver: BaseDriver,
         config_snapshot: Any = None,
+        factory: Callable[[str, Any], BaseDriver] | None = None,
     ) -> None:
         managed = ManagedDriver(
             platform=platform,
             instance_id=instance_id,
             driver=driver,
             config_snapshot=config_snapshot,
+            factory=factory,
         )
         self._managed[instance_id] = managed
         await self._start_driver(managed)
@@ -208,6 +221,120 @@ class DriverManager:
         managed.last_error = None
         await self._start_driver(managed)
         logger.debug(f"Driver '{instance_id}' restarted")
+
+    async def reload_driver(self, instance_id: str, new_config: Any = None) -> None:
+        """Rebuild a driver instance, optionally with a new validated config.
+
+        The old instance is stopped, its bridge registrations are cleared,
+        and a fresh instance is created through the stored factory.  If the
+        factory (or config validation) fails, the old instance/config are
+        restored and restarted, then the error is re-raised.
+        """
+        managed = self._managed.get(instance_id)
+        if not managed:
+            raise KeyError(f"Unknown driver instance: {instance_id}")
+        if managed.factory is None:
+            raise RuntimeError(f"No factory registered for driver: {instance_id}")
+
+        old_driver = managed.driver
+        old_config = managed.config_snapshot
+        config = new_config if new_config is not None else old_config
+
+        await self.stop_driver(instance_id)
+        self._clear_instance_registrations(instance_id)
+
+        try:
+            new_driver = managed.factory(instance_id, config)
+        except Exception:
+            logger.opt(exception=True).error(
+                f"Failed to rebuild driver '{instance_id}', rolling back"
+            )
+            managed.driver = old_driver
+            managed.config_snapshot = old_config
+            managed.restart_count = 0
+            managed.last_error = None
+            await self._start_driver(managed)
+            raise
+
+        managed.driver = new_driver
+        managed.config_snapshot = config
+        managed.restart_count = 0
+        managed.last_error = None
+        await self._start_driver(managed)
+
+        # Give the replacement a chance to run its initial start().  If it
+        # fails right away (state is neither STARTING nor RUNNING), restore
+        # the previous instance instead of keeping a dead driver.
+        await asyncio.sleep(0)
+        if managed.state not in (DriverState.STARTING, DriverState.RUNNING):
+            logger.error(
+                f"Driver '{instance_id}' failed to start after reload, rolling back"
+            )
+            await self.stop_driver(instance_id)
+            managed.driver = old_driver
+            managed.config_snapshot = old_config
+            managed.restart_count = 0
+            managed.last_error = None
+            await self._start_driver(managed)
+            raise RuntimeError(f"Driver '{instance_id}' failed to start")
+
+        if self._metrics:
+            self._metrics.inc_driver_restart(managed.platform, instance_id)
+        logger.debug(f"Driver '{instance_id}' reloaded")
+
+    def make_factory(self, platform: str) -> Callable[[str, Any], BaseDriver] | None:
+        """Build a factory for *platform* from the stored context.
+
+        Returns ``None`` when the platform is unknown or no context has been
+        provided.
+        """
+        from drivers.registry import get_driver
+
+        entry = get_driver(platform)
+        if entry is None or self._ctx is None:
+            return None
+        _, driver_cls = entry
+        http_server = getattr(self._ctx, "http_server", None)
+
+        def factory(instance_id: str, config: Any) -> BaseDriver:
+            driver = driver_cls(instance_id, config, self._ctx)
+            if http_server is not None:
+                driver.attach_http_server(http_server)
+            return driver
+
+        return factory
+
+    async def add_driver(
+        self,
+        platform: str,
+        instance_id: str,
+        config: Any,
+        factory: Callable[[str, Any], BaseDriver] | None = None,
+    ) -> None:
+        """Construct and start a new driver instance at runtime."""
+        factory = factory or self.make_factory(platform)
+        if factory is None:
+            raise RuntimeError(f"No factory available for platform: {platform}")
+        driver = factory(instance_id, config)
+        await self.register_and_start(platform, instance_id, driver, config, factory)
+
+    async def remove_driver(self, instance_id: str) -> None:
+        """Stop a managed driver, forget it, and clear its callbacks."""
+        managed = self._managed.get(instance_id)
+        if managed is None:
+            return
+        await self.stop_driver(instance_id)
+        self._clear_instance_registrations(instance_id)
+        self._managed.pop(instance_id, None)
+        logger.debug(f"Driver '{instance_id}' removed")
+
+    def _clear_instance_registrations(self, instance_id: str) -> None:
+        """Drop bridge callbacks owned by the given instance, if possible."""
+        if self._ctx is None:
+            return
+        clear = getattr(self._ctx.bridge, "clear_instance", None)
+        if clear is not None:
+            clear(instance_id)
 
     async def stop_all(self) -> None:
         if self._health_task and not self._health_task.done():

@@ -59,6 +59,7 @@ class DiscordConfig(_DriverConfig):
     auto_link_image_hosts: list[str] = ["discordmedia.com", "tenor.com"]
     auto_link_image_show_original_url: CoercedBool = True
     proxy: str | None = UNSET
+    enable_native_commands: CoercedBool = True
 
     @field_validator("cqface_webhook_fallback", mode="before")
     def _normalize_cqface_webhook_fallback(cls, value):
@@ -125,11 +126,37 @@ def _host_matches(host: str, allowed_hosts: list[str]) -> bool:
     return False
 
 
+_DISCORD_COMMAND_NAME_RE = re.compile(r"[a-z0-9_-]{1,32}")
+
+
+def build_native_command_text(prefix: str, *parts: str | None) -> str:
+    """Build the internal command text for a native slash command.
+
+    Empty/``None`` parts are skipped so optional arguments simply disappear.
+    """
+    tokens = [f"/{prefix}"]
+    tokens.extend(part for part in parts if part)
+    return " ".join(tokens)
+
+
+def resolve_native_command_name(prefix: str) -> str:
+    """Return a Discord-valid root command name derived from *prefix*.
+
+    Discord only accepts 1-32 lowercase letters, digits, ``-`` or ``_``.
+    Falls back to ``nb`` when the prefix cannot be used as a command name.
+    """
+    name = (prefix or "nb").strip().lstrip("/").lower()
+    if _DISCORD_COMMAND_NAME_RE.fullmatch(name):
+        return name
+    return "nb"
+
+
 class DiscordDriver(BaseDriver[DiscordConfig]):
     def __init__(self, instance_id: str, config: DiscordConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self.config = config
         self._client: discord.Client | None = None
+        self._tree: discord.app_commands.CommandTree | None = None
         self._session: aiohttp.ClientSession | None = None
         self._send_method: str = config.send_method
         self._bot_token: str | None = config.bot_token or None
@@ -207,6 +234,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             intents=intents, connector=connector, proxy=self._proxy
         )
 
+        if self.config.enable_native_commands:
+            self._tree = discord.app_commands.CommandTree(self._client)
+            self._register_native_commands()
+
         @self._client.event
         async def on_ready():
             if self._client is None:
@@ -215,6 +246,26 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 )
                 return
             self.logger.debug(f"logged in as {self._client.user}")
+            if self._tree and self.config.enable_native_commands:
+                self.logger.info(
+                    f"Discord [{self.instance_id}] registering {len(self._tree.get_commands())} native command(s)"
+                )
+                try:
+                    synced = await self._tree.sync()
+                    self.logger.info(
+                        f"Discord [{self.instance_id}] synced {len(synced)} native command(s): "
+                        f"{[cmd.name for cmd in synced]}"
+                    )
+                except discord.Forbidden as e:
+                    self.logger.error(
+                        f"Discord [{self.instance_id}] failed to sync native commands: "
+                        f"missing 'applications.commands' scope or insufficient permissions. "
+                        f"Error: {e}"
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"Discord [{self.instance_id}] failed to sync native commands: {e}"
+                    )
 
         @self._client.event
         async def on_message(message: discord.Message):
@@ -281,6 +332,180 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 f"Discord [{self.instance_id}] reconnecting in {delay:.0f}s"
             )
             await asyncio.sleep(delay)
+
+    def _register_native_commands(self) -> None:
+        if self._tree is None:
+            return
+
+        tree = self._tree
+        prefix = (self.bridge.command_prefix or "nb").strip().lstrip("/") or "nb"
+        root_name = resolve_native_command_name(prefix)
+        if root_name != prefix.lower():
+            self.logger.warning(
+                f"command_prefix '{prefix}' is not a valid Discord command name; "
+                f"native commands will use '/{root_name}' "
+                f"(text commands still use '/{prefix}')"
+            )
+
+        @tree.command(name="ping", description="Ping the bot")
+        async def ping_command(interaction: discord.Interaction):
+            await interaction.response.send_message("Pong!", ephemeral=True)
+
+        nb = discord.app_commands.Group(
+            name=root_name, description="NextBridge commands"
+        )
+
+        # --- /<prefix> bind ---
+        bind = discord.app_commands.Group(
+            name="bind", description="Link your accounts across platforms"
+        )
+
+        @bind.command(name="setup", description="Generate a code to link an account")
+        async def bind_setup(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "bind", "setup")
+            )
+
+        @bind.command(name="confirm", description="Confirm a linking code")
+        @discord.app_commands.describe(
+            code="The linking code generated on the other platform"
+        )
+        async def bind_confirm(interaction: discord.Interaction, code: str):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "bind", "confirm", code),
+            )
+
+        @bind.command(name="rm", description="Remove an account link")
+        @discord.app_commands.describe(
+            instance_id="Platform instance to unlink (omit to remove all)"
+        )
+        async def bind_rm(interaction: discord.Interaction, instance_id: str = ""):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "bind", "rm", instance_id or None),
+            )
+
+        @bind.command(name="list", description="List your linked accounts")
+        async def bind_list(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "bind", "list")
+            )
+
+        nb.add_command(bind)
+
+        # --- /<prefix> notify ---
+        notify = discord.app_commands.Group(
+            name="notify", description="Manage cross-platform mention notifications"
+        )
+
+        @notify.command(name="mode", description="Set the mention notification mode")
+        @discord.app_commands.describe(mode="Notification mode")
+        @discord.app_commands.choices(
+            mode=[
+                discord.app_commands.Choice(name="all", value="all"),
+                discord.app_commands.Choice(name="whitelist", value="whitelist"),
+                discord.app_commands.Choice(name="blacklist", value="blacklist"),
+            ]
+        )
+        async def notify_mode(
+            interaction: discord.Interaction,
+            mode: discord.app_commands.Choice[str],
+        ):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "notify", "mode", mode.value),
+            )
+
+        @notify.command(name="add", description="Add a platform to notify from")
+        @discord.app_commands.describe(instance_id="Platform instance to add")
+        async def notify_add(interaction: discord.Interaction, instance_id: str):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "notify", "add", instance_id),
+            )
+
+        @notify.command(name="rm", description="Remove a platform from notifications")
+        @discord.app_commands.describe(instance_id="Platform instance to remove")
+        async def notify_rm(interaction: discord.Interaction, instance_id: str):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "notify", "rm", instance_id),
+            )
+
+        @notify.command(name="list", description="List notification settings")
+        async def notify_list(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "notify", "list")
+            )
+
+        nb.add_command(notify)
+
+        # --- direct subcommands ---
+        @nb.command(name="status", description="Show bridge status")
+        async def nb_status(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "status")
+            )
+
+        @nb.command(name="help", description="Show NextBridge command help")
+        async def nb_help(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "help")
+            )
+
+        tree.add_command(nb)
+
+    async def _dispatch_native_command(
+        self, interaction: discord.Interaction, text: str
+    ) -> None:
+        """Forward a native slash command to the bridge as a text command."""
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+        except discord.errors.InteractionResponded:
+            self.logger.debug("interaction already acknowledged, continuing")
+        except Exception as e:
+            self.logger.error(f"failed to defer interaction: {e}")
+            return
+
+        self.logger.debug(
+            f"native command {text!r} from {interaction.user} "
+            f"in {interaction.guild_id or 'DM'}"
+        )
+
+        msg = NormalizedMessage(
+            platform="discord",
+            instance_id=self.instance_id,
+            channel={
+                "server_id": str(interaction.guild_id) if interaction.guild_id else "",
+                "channel_id": str(interaction.channel_id),
+            },
+            nickname=interaction.user.display_name,
+            user_id=str(interaction.user.id),
+            user_avatar=str(interaction.user.display_avatar.url)
+            if interaction.user.display_avatar
+            else "",
+            text=text,
+            message_id=str(interaction.id),
+            username=interaction.user.name,
+            is_dm=interaction.guild_id is None,
+        )
+
+        try:
+            self.logger.debug("calling bridge.on_message...")
+            await self.bridge.on_message(msg)
+            self.logger.debug("bridge.on_message completed")
+            await interaction.followup.send("Command executed.", ephemeral=True)
+        except Exception as e:
+            import traceback
+
+            tb = traceback.format_exc()
+            self.logger.error(f"native command error: {e}\n{tb}")
+            try:
+                await interaction.followup.send(f"Error: {e}", ephemeral=True)
+            except Exception as e2:
+                self.logger.error(f"failed to send error response: {e2}")
 
     async def stop(self):
         self._stopping = True

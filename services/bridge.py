@@ -81,6 +81,16 @@ class Bridge:
         self.is_dev: bool = False
         self.started_at: float = time.monotonic()
         self._driver_manager = None
+        self._metrics = None
+
+    def set_metrics(self, metrics) -> None:
+        self._metrics = metrics
+
+    def _sender_platform(self, instance_id: str) -> str:
+        sender_info = self._senders.get(instance_id)
+        if sender_info and sender_info[0]:
+            return str(sender_info[0])
+        return instance_id
 
     def set_driver_manager(self, manager) -> None:
         self._driver_manager = manager
@@ -102,9 +112,14 @@ class Bridge:
     # Setup
     # ------------------------------------------------------------------
 
+    def apply_rules(self, rules: list[dict]) -> None:
+        """Replace the active rule set with *rules* (already normalized)."""
+        self._rules = rules
+        logger.info(f"Applied {len(self._rules)} bridge rule(s)")
+
     def load_rules(self):
-        # Load rules and normalize each rule with a stable id
-        rules, rules_path = config.load_rules_with_ids()
+        # Load and validate rules, normalize each rule with a stable id
+        rules, rules_path = config.load_rules_with_ids(validate=True)
         if rules_path is None:
             logger.warning("No rules file found")
             self._rules = []
@@ -202,6 +217,35 @@ class Bridge:
     def unregister_command(self, name: str) -> None:
         self._commands.pop(name, None)
         logger.debug(f"Unregistered command: {name}")
+
+    def unregister_sender(self, instance_id: str) -> None:
+        self._senders.pop(instance_id, None)
+        logger.debug(f"Unregistered sender for instance: {instance_id}")
+
+    def unregister_editor(self, instance_id: str) -> None:
+        self._editors.pop(instance_id, None)
+
+    def unregister_deleter(self, instance_id: str) -> None:
+        self._deleters.pop(instance_id, None)
+
+    def unregister_pinner(self, instance_id: str) -> None:
+        self._pinners.pop(instance_id, None)
+
+    def unregister_unpinner(self, instance_id: str) -> None:
+        self._unpinners.pop(instance_id, None)
+
+    def clear_instance(self, instance_id: str) -> None:
+        """Remove every callback registered by *instance_id*.
+
+        Used before rebuilding/replacing a driver instance so stale callbacks
+        never point at a dead object.
+        """
+        self._senders.pop(instance_id, None)
+        self._editors.pop(instance_id, None)
+        self._deleters.pop(instance_id, None)
+        self._pinners.pop(instance_id, None)
+        self._unpinners.pop(instance_id, None)
+        logger.debug(f"Cleared registrations for instance: {instance_id}")
 
     async def send_message(
         self, instance_id: str, channel: dict, text: str, **kwargs
@@ -621,6 +665,11 @@ class Bridge:
     async def on_message(self, msg: NormalizedMessage):
         logger.info(f"on_message: {msg!s}")
 
+        if self._metrics and not (
+            msg.is_edit or msg.is_recall or msg.is_pin or msg.is_unpin
+        ):
+            self._metrics.inc_message(msg.platform, msg.instance_id, "recv")
+
         if self._event_bus:
             self._event_bus.emit(
                 "bridge.message",
@@ -769,6 +818,9 @@ class Bridge:
                 )
 
         for rule in self._rules:
+            if not self._matches_conditions(msg, rule.get("match")):
+                continue
+
             rule_id = str(rule.get("id", ""))
             if not rule_id:
                 rule_id = config.stable_rule_hash(rule)
@@ -778,6 +830,8 @@ class Bridge:
                 matched = self._matches_channel(msg, rule.get("channels", {}))
                 # logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
                 if matched:
+                    if self._metrics:
+                        self._metrics.inc_rule_match(rule_id)
                     if msg.message_id:
                         msg_db().save_mapping(
                             bridge_id, msg.instance_id, msg.channel, msg.message_id
@@ -785,6 +839,8 @@ class Bridge:
                     await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:
                 if self._matches_from(msg, rule.get("from", {})):
+                    if self._metrics:
+                        self._metrics.inc_rule_match(rule_id)
                     if msg.message_id:
                         msg_db().save_mapping(
                             bridge_id, msg.instance_id, msg.channel, msg.message_id
@@ -829,6 +885,44 @@ class Bridge:
                 return False
             matched = True
         return matched
+
+    def _matches_conditions(
+        self, msg: NormalizedMessage, match_cfg: dict | None
+    ) -> bool:
+        """Return True if *msg* satisfies a rule's optional ``match`` block.
+
+        Missing/empty blocks impose no constraint. ``keywords`` match any
+        (case-insensitive) substring of the message text. ``users.include``
+        and ``users.exclude`` compare against the platform user id and the
+        bound global user id; exclude always wins.
+        """
+        if not match_cfg:
+            return True
+
+        keywords = match_cfg.get("keywords") or []
+        if keywords:
+            text = (msg.text or "").lower()
+            if not any(str(k).lower() in text for k in keywords):
+                return False
+
+        users = match_cfg.get("users") or {}
+        include = {str(x) for x in (users.get("include") or [])}
+        exclude = {str(x) for x in (users.get("exclude") or [])}
+        if not include and not exclude:
+            return True
+
+        identity: set[str] = set()
+        if msg.user_id:
+            identity.add(str(msg.user_id))
+            global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+            if global_id:
+                identity.add(str(global_id))
+
+        if exclude and identity & exclude:
+            return False
+        if include and not (identity & include):
+            return False
+        return True
 
     def _build_formatted(
         self, msg: NormalizedMessage, msg_cfg: dict, is_webhook: bool = False
@@ -1019,9 +1113,17 @@ class Bridge:
                     msg_db().save_mapping(
                         bridge_id, target_id, target_channel, str(new_msg_id)
                     )
+            if self._metrics:
+                self._metrics.inc_message(
+                    self._sender_platform(target_id), target_id, "send"
+                )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            if self._metrics:
+                self._metrics.inc_send_failure(
+                    self._sender_platform(target_id), type(exc).__name__
+                )
             logger.exception(f"Failed to send to '{target_id}'")
 
     async def _dispatch_guarded(
@@ -1041,6 +1143,8 @@ class Bridge:
         try:
             await asyncio.wait_for(asyncio.shield(send_task), timeout=self.send_timeout)
         except asyncio.TimeoutError:
+            if self._metrics:
+                self._metrics.inc_send_timeout(self._sender_platform(target_id))
             self._ensure_slow_worker()
             self._slow_queue.put_nowait(send_task)
         except asyncio.CancelledError:

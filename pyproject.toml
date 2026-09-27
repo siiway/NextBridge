@@ -14,6 +14,7 @@ dependencies = [
     "khl-py>=0.3.17",
     "yunhu>=0.0.11",
     "pyyaml>=6.0",
+    "ruamel.yaml>=0.18",
     "tomli-w>=1.0",
     "mautrix>=0.21.0",
     "vodozemac>=0.6.0",
@@ -34,6 +35,7 @@ dependencies = [
     "fresholm>=0.2.4",
     "tzlocal>=5.3.1",
     "psycopg2-binary>=2.9",
+    "prometheus-client>=0.21",
 ]
 
 [[tool.uv.index]]

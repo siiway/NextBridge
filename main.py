@@ -11,19 +11,22 @@ from tomllib import load as load_toml
 from pydantic import ValidationError
 
 import services.error  # noqa: F401
+import services.audit as audit
 import services.logger as log
 import services.util as u
 from services import config_io
 from services.bridge import bridge
 from services.config_schema import GlobalConfig, RulesFile
-from services.db import db_target_version, init_db
+from services.db import db_target_version, init_db, msg_db
 from services.driver_context import DriverContext
 from services.driver_manager import DriverManager
 from services.event_bus import EventBus
 from services.http_server import HttpServerManager
 from services.media import close_all_sessions
+from services.metrics import MetricsCollector, snapshot_loop
 from services.middleware import MiddlewareChain
 from services.plugin_loader import load_all_drivers
+from services.reload import ReloadEngine, install_sighup_handler
 from plugins.context import PluginContext
 from plugins.loader import load_plugins as load_plugin_modules
 from plugins.manager import PluginManager
@@ -253,7 +256,11 @@ async def main():
         )
         return
 
-    bridge.load_rules()
+    try:
+        bridge.load_rules()
+    except Exception as exc:
+        logger.opt(exception=exc).critical("Rules configuration error")
+        return
 
     logger.info(f"Loading config from: {config_path}")
     raw: dict = config_io.load_config(config_path)
@@ -293,6 +300,14 @@ async def main():
     middleware = MiddlewareChain()
     bridge.set_middleware(middleware)
     bridge.set_event_bus(event_bus)
+
+    audit.configure(
+        validated_global.log.dir,
+        rotation=validated_global.log.rotation_size,
+        retention=validated_global.log.retention_days,
+        compression=validated_global.log.compression,
+        event_bus=event_bus,
+    )
 
     plugin_cfg = validated_global.plugins
     general_cfg = plugin_cfg.general
@@ -383,6 +398,7 @@ async def main():
         health_check_interval=plugin_cfg.health_check_interval,
     )
     bridge.set_driver_manager(driver_manager)
+    driver_manager.set_context(ctx)
 
     logger.info(f"========== NextBridge v{version} Starting ==========")
 
@@ -390,7 +406,15 @@ async def main():
         for inst_id, cfg in validated.get(platform, {}).items():
             drv = driver_cls(inst_id, cfg, ctx)
             drv.attach_http_server(http_server)
-            await driver_manager.register_and_start(platform, inst_id, drv, cfg)
+
+            def _factory(iid, inst_cfg, _cls=driver_cls):
+                built = _cls(iid, inst_cfg, ctx)
+                built.attach_http_server(http_server)
+                return built
+
+            await driver_manager.register_and_start(
+                platform, inst_id, drv, cfg, _factory
+            )
             logger.info(f"Registered driver: {platform}/{inst_id}")
 
     has_drivers = bool(driver_manager.drivers)
@@ -428,7 +452,42 @@ async def main():
     for name in enabled_plugins:
         await plugin_manager.enable_plugin(name)
 
+    # ------------------------------------------------------------------
+    # Runtime metrics
+    # ------------------------------------------------------------------
+    metrics = MetricsCollector()
+    try:
+        metrics.restore(msg_db().load_metrics_counters())
+    except Exception:
+        logger.opt(exception=True).warning("Failed to restore metrics counters")
+    bridge.set_metrics(metrics)
+    driver_manager.set_metrics(metrics)
+
+    # ------------------------------------------------------------------
+    # Hot-reload engine
+    # ------------------------------------------------------------------
+    reload_engine = ReloadEngine(
+        bridge,
+        config_path=config_path,
+        driver_manager=driver_manager,
+        metrics=metrics,
+    )
+    reload_engine.seed(raw)
+    http_server.set_reload_engine(reload_engine)
+    if install_sighup_handler(reload_engine):
+        logger.info("SIGHUP handler installed for configuration reload")
+
     all_tasks: list[asyncio.Task] = []
+    if (
+        validated_global.metrics.enabled
+        and validated_global.metrics.snapshot_interval > 0
+    ):
+        all_tasks.append(
+            asyncio.create_task(
+                snapshot_loop(metrics, validated_global.metrics.snapshot_interval),
+                name="metrics/snapshot",
+            )
+        )
     http_enable = validated_global.http.enable
     if http_enable == "false":
         if http_server.has_mounts():
@@ -439,6 +498,10 @@ async def main():
         logger.info("Shared HTTP server disabled by configuration (http.enable=false)")
     elif http_server.should_start():
         admin_cfg = plugin_cfg.admin
+        http_server.set_bridge(bridge)
+        http_server.set_driver_manager(driver_manager)
+        http_server.set_plugin_manager(plugin_manager)
+        http_server.set_metrics(metrics)
         if admin_cfg.enable:
             if not admin_cfg.password:
                 logger.critical(
@@ -446,8 +509,13 @@ async def main():
                     "(global.plugins.admin.password). Refusing to start."
                 )
                 return
-            http_server.set_driver_manager(driver_manager, password=admin_cfg.password)
-        http_server.set_plugin_manager(plugin_manager)
+            http_server.configure_admin(
+                enabled=True, user=admin_cfg.user, password=admin_cfg.password
+            )
+            logger.info("Admin API enabled at /_nextbridge/*")
+        else:
+            http_server.configure_admin(enabled=False)
+            logger.info("Admin API disabled; only /_nextbridge/health is exposed")
         http_task = asyncio.create_task(http_server.run(), name="http/shared")
         all_tasks.append(http_task)
     else:

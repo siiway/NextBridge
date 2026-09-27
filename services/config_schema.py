@@ -175,8 +175,13 @@ class AdminApiConfig(BaseModel):
 
     Disabled by default.  When enabled, ``password`` must also be set."""
 
+    user: str = "admin"
+    """Username for admin API access (HTTP Basic Auth).
+
+    Checked together with ``password``."""
+
     password: str = ""
-    """Password for admin API access (HTTP Basic Auth, username ignored).
+    """Password for admin API access (HTTP Basic Auth).
 
     Must be non-empty when ``enable`` is true."""
 
@@ -292,6 +297,19 @@ class MiddlewareConfig(BaseModel):
     """Middleware names to enable (evaluated in list order)."""
 
 
+class MetricsConfig(BaseModel):
+    """Runtime metrics collection configuration."""
+
+    enabled: CoercedBool = True
+    """Whether to collect and expose runtime metrics."""
+
+    snapshot_interval: int = 60
+    """Seconds between periodic counter snapshots to the database.
+
+    Set to ``0`` to disable periodic persistence (counters stay in memory).
+    """
+
+
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
@@ -358,6 +376,9 @@ class GlobalConfig(BaseModel):
 
     middleware: MiddlewareConfig = MiddlewareConfig()
     """Message middleware configuration."""
+
+    metrics: MetricsConfig = MetricsConfig()
+    """Runtime metrics collection configuration."""
 
     @field_validator("command_prefix", mode="before")
     def normalize_command_prefix(cls, v):
@@ -434,6 +455,29 @@ class _DriverConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class MatchUsers(BaseModel):
+    """User allow/deny lists for a rule ``match`` block."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include: list[str] = []
+    """Only route messages from these users (platform user id or global user id)."""
+
+    exclude: list[str] = []
+    """Never route messages from these users (takes precedence over include)."""
+
+
+class MatchCondition(BaseModel):
+    """Optional per-rule conditions evaluated against the source message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    keywords: list[str] = []
+    """Route only if the message text contains at least one of these (case-insensitive)."""
+
+    users: MatchUsers = MatchUsers()
+
+
 class Rule(BaseModel):
     """Pydantic model for a single routing rule."""
 
@@ -444,6 +488,7 @@ class Rule(BaseModel):
     channels: dict[str, object] | None = None
     from_: dict[str, object] | None = Field(None, alias="from")
     to: dict[str, object] | None = None
+    match: MatchCondition | None = None
     msg: dict[str, object] | None = None
 
 
