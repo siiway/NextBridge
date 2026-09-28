@@ -25,6 +25,8 @@ import io
 import json
 from pathlib import Path
 import re
+import time
+import traceback
 from html import unescape
 from urllib.parse import urlparse
 
@@ -460,14 +462,25 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self, interaction: discord.Interaction, text: str
     ) -> None:
         """Forward a native slash command to the bridge as a text command."""
+        age = (
+            discord.utils.utcnow() - discord.utils.snowflake_time(interaction.id)
+        ).total_seconds()
+        acknowledged = False
+        started = time.monotonic()
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
+            acknowledged = True
         except discord.errors.InteractionResponded:
             self.logger.debug("interaction already acknowledged, continuing")
+            acknowledged = True
         except Exception as e:
-            self.logger.error(f"failed to defer interaction: {e}")
-            return
+            elapsed = time.monotonic() - started
+            self.logger.warning(
+                f"failed to defer interaction (received {age:.2f}s ago, "
+                f"defer took {elapsed:.2f}s): {e}; "
+                f"continuing so the command can still reply in the channel"
+            )
 
         self.logger.debug(
             f"native command {text!r} from {interaction.user} "
@@ -492,20 +505,25 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             is_dm=interaction.guild_id is None,
         )
 
+        error: Exception | None = None
         try:
             self.logger.debug("calling bridge.on_message...")
             await self.bridge.on_message(msg)
             self.logger.debug("bridge.on_message completed")
-            await interaction.followup.send("Command executed.", ephemeral=True)
         except Exception as e:
-            import traceback
-
+            error = e
             tb = traceback.format_exc()
             self.logger.error(f"native command error: {e}\n{tb}")
-            try:
-                await interaction.followup.send(f"Error: {e}", ephemeral=True)
-            except Exception as e2:
-                self.logger.error(f"failed to send error response: {e2}")
+
+        if not acknowledged:
+            return
+        try:
+            if error is None:
+                await interaction.followup.send("Command executed.", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Error: {error}", ephemeral=True)
+        except Exception as e:
+            self.logger.error(f"failed to send interaction response: {e}")
 
     async def stop(self):
         self._stopping = True
