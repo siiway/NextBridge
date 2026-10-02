@@ -852,6 +852,38 @@ class MessageDB:
             s.commit()
             return int(getattr(result, "rowcount", 0) or 0)
 
+    def purge_forward_assets_by_page_ids(self, page_ids: list[str]) -> int:
+        if not page_ids:
+            return 0
+        with self._session() as s:
+            result = s.execute(
+                delete(ForwardAsset).where(ForwardAsset.page_id.in_(page_ids))
+            )
+            s.commit()
+            return int(getattr(result, "rowcount", 0) or 0)
+
+    def purge_expired_forward_pages(self, now: int | None = None) -> tuple[int, int]:
+        cutoff = int(now or time.time())
+        condition = (
+            ForwardPage.expires_at <= cutoff
+        ) | ForwardPage.destroyed_at.is_not(None)
+        with self._session() as s:
+            page_ids = list(
+                s.execute(select(ForwardPage.page_id).where(condition)).scalars()
+            )
+            if not page_ids:
+                return 0, 0
+
+            assets = s.execute(
+                delete(ForwardAsset).where(ForwardAsset.page_id.in_(page_ids))
+            )
+            pages = s.execute(delete(ForwardPage).where(condition))
+            s.commit()
+            return (
+                int(getattr(pages, "rowcount", 0) or 0),
+                int(getattr(assets, "rowcount", 0) or 0),
+            )
+
     def get_bridge_id(self, instance_id: str, platform_msg_id: str) -> str | None:
         """Find the bridge ID for a given platform-specific message ID."""
         with self._session() as s:

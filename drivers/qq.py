@@ -439,6 +439,8 @@ class QqDriver(BaseDriver[QqConfig]):
                     msg_db().mark_forward_page_destroyed(
                         page_id, int(page.destroyed_at.timestamp())
                     )
+                self._forward_pages.pop(page_id, None)
+                raise HTTPException(status_code=404, detail="Forward page expired")
 
             return HTMLResponse(content=page.html_content, status_code=200)
 
@@ -485,20 +487,32 @@ class QqDriver(BaseDriver[QqConfig]):
     async def _forward_gc_loop(self) -> None:
         while True:
             await asyncio.sleep(60)
-            now = _utc_now()
-            expired = [
-                page_id
-                for page_id, page in self._forward_pages.items()
-                if page.expires_at <= now
-            ]
-            for page_id in expired:
-                if self.config.forward_render_persist_enabled:
-                    msg_db().mark_forward_page_destroyed(page_id, int(now.timestamp()))
-                self._forward_pages.pop(page_id, None)
-            deleted_assets = msg_db().purge_expired_forward_assets(int(now.timestamp()))
-            if deleted_assets:
-                self.logger.debug(
-                    f"NapCat [{self.instance_id}] purged {deleted_assets} expired forward asset(s)"
+            try:
+                now = _utc_now()
+                now_ts = int(now.timestamp())
+                expired = [
+                    page_id
+                    for page_id, page in self._forward_pages.items()
+                    if page.expires_at <= now
+                ]
+                for page_id in expired:
+                    if self.config.forward_render_persist_enabled:
+                        msg_db().mark_forward_page_destroyed(page_id, now_ts)
+                    self._forward_pages.pop(page_id, None)
+
+                page_assets = msg_db().purge_forward_assets_by_page_ids(expired)
+                deleted_pages, destroyed_assets = msg_db().purge_expired_forward_pages(
+                    now_ts
+                )
+                expired_assets = msg_db().purge_expired_forward_assets(now_ts)
+                if deleted_pages or page_assets or destroyed_assets or expired_assets:
+                    self.logger.debug(
+                        f"NapCat [{self.instance_id}] purged {deleted_pages} expired forward page(s) "
+                        f"and {page_assets + destroyed_assets + expired_assets} forward asset(s)"
+                    )
+            except Exception:
+                self.logger.exception(
+                    f"NapCat [{self.instance_id}] forward renderer garbage collection failed"
                 )
 
     # ------------------------------------------------------------------

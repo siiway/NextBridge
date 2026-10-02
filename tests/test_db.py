@@ -136,6 +136,33 @@ class TestMessageDB:
         assert db.get_forward_asset("asset1") is None
         assert db.get_forward_asset("asset2") is not None
 
+    def test_purge_expired_or_destroyed_forward_pages(self, db):
+        now = int(time.time())
+        db.save_forward_page("expired", "inst1", "<html/>", now - 20, now - 10)
+        db.save_forward_page("destroyed", "inst1", "<html/>", now, now + 3600)
+        db.save_forward_page("active", "inst1", "<html/>", now, now + 3600)
+        db.mark_forward_page_destroyed("destroyed", now)
+        for page_id in ("expired", "destroyed", "active"):
+            db.save_forward_asset(
+                f"asset-{page_id}",
+                page_id,
+                "inst1",
+                "text/plain",
+                b"data",
+                now,
+                None,
+            )
+
+        pages, assets = db.purge_expired_forward_pages(now)
+
+        assert (pages, assets) == (2, 2)
+        assert db.get_forward_page("expired") is None
+        assert db.get_forward_page("destroyed") is None
+        assert db.get_forward_asset("asset-expired") is None
+        assert db.get_forward_asset("asset-destroyed") is None
+        assert db.get_forward_page("active") is not None
+        assert db.get_forward_asset("asset-active") is not None
+
     def test_normalize_channel_id_handles_types(self, db):
         assert db._normalize_channel_id(None) == ""
         assert db._normalize_channel_id(123) == "123"
