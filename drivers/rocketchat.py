@@ -55,6 +55,7 @@ import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
 from services.config import get_proxy, UNSET
+from services.util import LRUDict
 from drivers import BaseDriver
 
 
@@ -92,7 +93,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
     def __init__(self, instance_id: str, config: RocketChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
-        self._username_cache: dict[str, str] = {}
+        self._username_cache: LRUDict[str, str] = LRUDict(maxsize=1000)
         self._proxy = get_proxy(config.proxy)
         self._msg_queue: asyncio.Queue = asyncio.Queue()
         self._msg_worker_task: asyncio.Task | None = None

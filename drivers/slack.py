@@ -49,6 +49,7 @@ from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
+from services.util import LRUDict
 
 
 class SlackConfig(_DriverConfig):
@@ -90,9 +91,9 @@ class SlackDriver(BaseDriver[SlackConfig]):
         self._web: AsyncWebClient | None = None
         self._sm: SocketModeClient | None = None
         self._session: aiohttp.ClientSession | None = None
-        self._user_cache: dict[
-            str, tuple[str, str]
-        ] = {}  # user_id → (name, avatar_url)
+        self._user_cache: LRUDict[str, tuple[str, str]] = LRUDict(
+            maxsize=1000
+        )  # user_id → (name, avatar_url)
         self._proxy = get_proxy(config.proxy)
         self._msg_queue: asyncio.Queue = asyncio.Queue()
         self._msg_worker_task: asyncio.Task | None = None

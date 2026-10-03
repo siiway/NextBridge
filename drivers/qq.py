@@ -43,7 +43,7 @@ from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
 from services.message_format import parse_richheader_tag
-from services.util import mask_url_credentials
+from services.util import LRUDict, mask_url_credentials
 
 
 class QqConfig(_DriverConfig):
@@ -188,12 +188,12 @@ class QqDriver(BaseDriver[QqConfig]):
         # multiple frames would corrupt the outgoing JSON action).
         self._send_lock = asyncio.Lock()
         self._proxy = get_proxy(config.proxy)
-        # Cache for user qid to avoid repeated API calls
-        self._qid_cache: dict[str, str] = {}
+        # Cache for user qid to avoid repeated API calls (bounded LRU)
+        self._qid_cache: LRUDict[str, str] = LRUDict(maxsize=10000)
         # user_id → monotonic timestamp of last failed qid lookup (negative cache)
-        self._qid_miss_cache: dict[str, float] = {}
+        self._qid_miss_cache: LRUDict[str, float] = LRUDict(maxsize=10000)
         self._forward_pages: dict[str, _ForwardPage] = {}
-        self._forward_file_url_cache: dict[str, str | None] = {}
+        self._forward_file_url_cache: LRUDict[str, str | None] = LRUDict(maxsize=1000)
         self._forward_gc_task: asyncio.Task | None = None
         self._forward_mount_registered = False
         # Ordered FIFO queue + single worker: events must be processed in the

@@ -40,6 +40,7 @@ from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
+from services.util import LRUDict
 
 
 class VoceChatConfig(_DriverConfig):
@@ -56,7 +57,7 @@ class VoceChatDriver(BaseDriver[VoceChatConfig]):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
         # uid → (name, avatar)
-        self._user_cache: dict[int, tuple[str, str]] = {}
+        self._user_cache: LRUDict[int, tuple[str, str]] = LRUDict(maxsize=1000)
         self._proxy = get_proxy(config.proxy)
         self._msg_queue: asyncio.Queue = asyncio.Queue()
         self._msg_worker_task: asyncio.Task | None = None

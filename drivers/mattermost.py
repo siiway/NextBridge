@@ -29,6 +29,7 @@ from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
 from services.message_format import apply_rich_header
 from services.config import get_proxy, UNSET
+from services.util import LRUDict
 from drivers import BaseDriver
 
 
@@ -44,8 +45,8 @@ class MattermostDriver(BaseDriver[MattermostConfig]):
         super().__init__(instance_id, config, bridge)
         self._session: aiohttp.ClientSession | None = None
         self._bot_user_id: str = ""
-        self._user_cache: dict[str, tuple[str, str]] = {}
-        self._username_cache: dict[str, str] = {}
+        self._user_cache: LRUDict[str, tuple[str, str]] = LRUDict(maxsize=1000)
+        self._username_cache: LRUDict[str, str] = LRUDict(maxsize=1000)
         self._proxy = get_proxy(config.proxy)
 
     # ------------------------------------------------------------------

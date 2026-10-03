@@ -88,6 +88,23 @@ class TestMessageDB:
         assert count == 2
         assert db.get_bridge_id("inst1", "msg001") is None
 
+    def test_purge_expired_mappings(self, db, monkeypatch):
+        db.save_mapping("old", "inst1", {"id": "ch1"}, "msg-old")
+        db.save_mapping("new", "inst1", {"id": "ch1"}, "msg-new")
+        now = int(time.time())
+        with db.session() as session:
+            from services.db import MessageMapping
+
+            session.query(MessageMapping).filter_by(platform_msg_id="msg-old").update(
+                {"created_at": now - 31 * 86400}
+            )
+            session.commit()
+        monkeypatch.setattr("services.db.config.get", lambda key, default=None: 30)
+
+        assert db.purge_expired_mappings(now) == 1
+        assert db.get_bridge_id("inst1", "msg-old") is None
+        assert db.get_bridge_id("inst1", "msg-new") == "new"
+
     def test_stats(self, db):
         db.save_mapping("bridge1", "inst1", {"id": "ch1"}, "msg001")
         db.save_user("inst1", "user1", "Alice")

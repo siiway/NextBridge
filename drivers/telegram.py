@@ -59,6 +59,7 @@ from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig, CoercedBool
 from services.message import Attachment, NormalizedMessage
 from services.message_format import telegram_richheader_html
+from services.util import LRUDict
 
 
 class _HTTPXRequestCommonKwargs(TypedDict, total=False):
@@ -310,8 +311,9 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app: Application | None = None
         self._proxy = get_proxy(config.proxy)
         # user_id → (monotonic timestamp, avatar URL) cache to avoid re-fetching
-        # the user's profile photo on every inbound message.
-        self._avatar_cache: dict[str, tuple[float, str]] = {}
+        # the user's profile photo on every inbound message. Bounded LRU to
+        # prevent unbounded growth on large groups.
+        self._avatar_cache: LRUDict[str, tuple[float, str]] = LRUDict(maxsize=1000)
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)

@@ -58,6 +58,7 @@ from services import media
 from services.config_schema import _DriverConfig
 from services.message_format import apply_rich_header
 from services.message import Attachment, NormalizedMessage
+from services.util import LRUDict
 
 
 class FeishuConfig(_DriverConfig):
@@ -100,8 +101,9 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         self._client: lark.Client | None = None
         self._handler = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        # open_id → (display_name, avatar_url)
-        self._user_cache: dict[str, tuple[str, str]] = {}
+        # open_id → (display_name, avatar_url). Bounded LRU to prevent
+        # unbounded growth over long uptimes.
+        self._user_cache: LRUDict[str, tuple[str, str]] = LRUDict(maxsize=1000)
 
     # ------------------------------------------------------------------
     # Lifecycle

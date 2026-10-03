@@ -23,8 +23,25 @@ logger = log.get_logger("media")
 
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
+# Cap concurrent media downloads so that a burst of large attachments cannot
+# multiply the per-download buffer (up to max_bytes each) into an OOM spike.
+_MAX_CONCURRENT_DOWNLOADS = 8
+
 _sessions: dict[str | None, aiohttp.ClientSession] = {}
 _ffmpeg_available: bool | None = None
+_download_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_download_semaphore() -> asyncio.Semaphore:
+    """Return the process-wide download semaphore, created lazily.
+
+    Created on first use inside a running event loop so the semaphore binds to
+    the correct loop; safe because NextBridge runs a single asyncio loop.
+    """
+    global _download_semaphore
+    if _download_semaphore is None:
+        _download_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
+    return _download_semaphore
 
 
 def _sniff_image_mime(data: bytes) -> str | None:
@@ -253,7 +270,9 @@ async def fetch(
 
     Streams the response and aborts as soon as the body exceeds *max_bytes*,
     so oversized files are never fully buffered in memory.  Local file URLs
-    (``file://`` or absolute paths) are read directly from disk.
+    (``file://`` or absolute paths) are read directly from disk.  Concurrent
+    downloads are capped by a semaphore so that parallel attachments cannot
+    collectively blow up memory.
 
     Returns ``(data, content_type)`` on success, or ``None`` if the file is
     oversized, the URL is empty, or the download fails.
@@ -261,6 +280,13 @@ async def fetch(
     if not url:
         return None
 
+    async with _get_download_semaphore():
+        return await _fetch_inner(url, max_bytes, proxy)
+
+
+async def _fetch_inner(
+    url: str, max_bytes: int, proxy: str | None
+) -> tuple[bytes, str] | None:
     local_path = _local_path_of(url)
     if local_path is not None:
         return await _read_local_file(local_path, max_bytes)
@@ -276,7 +302,7 @@ async def fetch(
             url, timeout=aiohttp.ClientTimeout(total=60), headers=_DEFAULT_HEADERS
         ) as resp:
             resp.raise_for_status()
-            chunks: list[bytes] = []
+            data = bytearray()
             total = 0
             async for chunk in resp.content.iter_chunked(65536):
                 total += len(chunk)
@@ -285,8 +311,8 @@ async def fetch(
                         f"media.fetch: {url!r} exceeded {max_bytes} bytes, aborting"
                     )
                     return None
-                chunks.append(chunk)
-            return b"".join(chunks), resp.content_type or "application/octet-stream"
+                data.extend(chunk)
+            return bytes(data), resp.content_type or "application/octet-stream"
 
     except Exception as e:
         logger.error(f"media.fetch failed for {url!r}: {e}")

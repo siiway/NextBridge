@@ -66,6 +66,9 @@ class DatabaseConfig(BaseModel):
     """PostgreSQL application name for connection identification.
     Only applies to PostgreSQL backends."""
 
+    message_mapping_retention_days: int = 30
+    """Days to retain message mappings. Set to ``0`` to disable automatic cleanup."""
+
 
 class LoggingConfig(BaseModel):
     """Logging configuration for controlling log output and rotation."""

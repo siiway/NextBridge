@@ -74,7 +74,8 @@ class Bridge:
         self.mention_notify_control: bool = True
         self.command_prefix: str = "nb"
         self.send_timeout: float = 2.0
-        self._slow_queue: asyncio.Queue = asyncio.Queue()
+        self.slow_queue_maxsize: int = 1000
+        self._slow_queue: asyncio.Queue = asyncio.Queue(maxsize=self.slow_queue_maxsize)
         self._slow_worker_task: asyncio.Task | None = None
         self.version: str = ""
         self.commit_hash: str | None = None
@@ -1146,8 +1147,18 @@ class Bridge:
             if self._metrics:
                 self._metrics.inc_send_timeout(self._sender_platform(target_id))
             self._ensure_slow_worker()
-            self._slow_queue.put_nowait(send_task)
+            try:
+                self._slow_queue.put_nowait(send_task)
+            except asyncio.QueueFull:
+                logger.warning(
+                    f"Slow send queue is full (maxsize={self.slow_queue_maxsize}), "
+                    f"dropping slow task for '{target_id}'"
+                )
+                send_task.cancel()
         except asyncio.CancelledError:
+            if send_task.done() and send_task.cancelled():
+                logger.info(f"Send task for '{target_id}' was cancelled")
+                return
             send_task.cancel()
             raise
 

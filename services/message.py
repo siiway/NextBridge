@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 
-@dataclass
+@dataclass(slots=True)
 class Attachment:
     """A media attachment carried alongside a NormalizedMessage."""
 
@@ -12,7 +12,7 @@ class Attachment:
     data: bytes | None = None  # pre-fetched bytes; if set, skip URL download
 
 
-@dataclass
+@dataclass(slots=True)
 class NormalizedMessage:
     """Platform-agnostic message passed through the bridge."""
 

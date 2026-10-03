@@ -41,7 +41,7 @@ import services.cqface as cqface
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header, parse_richheader_tag
-from services.util import get_data_path, mask_url_credentials
+from services.util import LRUDict, get_data_path, mask_url_credentials
 from services.config_schema import _DriverConfig, CoercedBool
 from services.config import get_proxy, get as get_config, UNSET
 from drivers import BaseDriver
@@ -164,7 +164,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         self._bot_token: str | None = config.bot_token or None
         self._proxy = get_proxy(config.proxy)
         # face_id (str) → "<:name:id>" resolved Discord emoji string
-        self._emoji_cache: dict[str, str] = {}
+        self._emoji_cache: LRUDict[str, str] = LRUDict(maxsize=1000)
         # Message IDs we deleted ourselves (bridged recalls). Used to ignore the
         # raw delete event Discord dispatches back so we don't loop.
         self._recall_suppress: set[str] = set()

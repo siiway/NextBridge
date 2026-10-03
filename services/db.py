@@ -31,6 +31,8 @@ from services.db_migrations import MigrationStep
 
 logger = log.get_logger("db")
 
+_MESSAGE_MAPPING_CLEANUP_INTERVAL = 3600
+
 
 class _Base(DeclarativeBase):
     pass
@@ -42,9 +44,11 @@ class MessageMapping(_Base):
     instance_id = Column(String, primary_key=True)
     channel_id = Column(String, nullable=False)
     platform_msg_id = Column(String, primary_key=True)
+    created_at = Column(Integer, nullable=False, default=lambda: int(time.time()))
 
 
 Index("idx_bridge_id", MessageMapping.bridge_id)
+Index("idx_message_mappings_created_at", MessageMapping.created_at)
 
 
 class UserMapping(_Base):
@@ -151,6 +155,8 @@ class MessageDB:
         # partially-initialized database.
         _Base.metadata.create_all(self._engine)
         self._run_migrations(self._engine)
+        self.purge_expired_mappings()
+        self._last_mapping_cleanup_at = int(time.time())
 
     @staticmethod
     def _create_engine_from_config() -> Engine:
@@ -737,11 +743,37 @@ class MessageDB:
                         instance_id=instance_id,
                         channel_id=normalized_channel,
                         platform_msg_id=platform_msg_id,
+                        created_at=int(time.time()),
                     )
                 )
                 s.commit()
+            self._maybe_purge_expired_mappings()
         except Exception as e:
             logger.error(f"Failed to save message mapping: {e}")
+
+    def _maybe_purge_expired_mappings(self) -> None:
+        now = int(time.time())
+        if now - self._last_mapping_cleanup_at < _MESSAGE_MAPPING_CLEANUP_INTERVAL:
+            return
+        self.purge_expired_mappings(now)
+        self._last_mapping_cleanup_at = now
+
+    def purge_expired_mappings(self, now: int | None = None) -> int:
+        """Delete mappings older than the configured retention period."""
+        retention_days = int(config.get("database.message_mapping_retention_days", 30))
+        if retention_days <= 0:
+            return 0
+        cutoff = int(now or time.time()) - retention_days * 86400
+        try:
+            with self._session() as s:
+                result = s.execute(
+                    delete(MessageMapping).where(MessageMapping.created_at < cutoff)
+                )
+                s.commit()
+                return int(getattr(result, "rowcount", 0) or 0)
+        except Exception as e:
+            logger.error(f"Failed to purge expired message mappings: {e}")
+            return 0
 
     def save_forward_page(
         self,
