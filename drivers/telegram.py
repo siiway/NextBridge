@@ -538,7 +538,11 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         # If pre-download failed, keep the raw file_path as url so downstream
         # media fetch can attempt download with credentials/session if supported,
         # but if pre-download succeeded or file_path is empty, use the sanitized url.
-        url = f.file_path or "" if file_bytes is None else _sanitize_telegram_url(f.file_path)
+        url = (
+            f.file_path or ""
+            if file_bytes is None
+            else _sanitize_telegram_url(f.file_path)
+        )
         actual_size = len(file_bytes) if file_bytes is not None else file_size
         return Attachment(
             type=att_type,
