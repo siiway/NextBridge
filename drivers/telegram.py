@@ -500,19 +500,51 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self, file_source: Any, att_type: str, name: str, size: int = -1
     ) -> Attachment:
         f = await file_source.get_file()
-        file_bytes: bytes | None = None
-        try:
-            file_bytes = bytes(await f.download_as_bytearray())
-        except Exception as e:
+        file_size = getattr(f, "file_size", None)
+        if file_size is None or file_size < 0:
+            file_size = size
+
+        max_allowed = max(1, int(self.config.max_file_size or 50 * 1024 * 1024))
+        if file_size and file_size > max_allowed:
             self.logger.warning(
-                f"Telegram [{self.instance_id}] failed to pre-download {att_type}: {e}"
+                f"Telegram [{self.instance_id}] {att_type} size {file_size} exceeds max_file_size ({max_allowed}), skipping pre-download"
             )
-        sanitized_url = _sanitize_telegram_url(f.file_path)
+            # Return attachment without downloading bytes, keeping sanitized url
+            return Attachment(
+                type=att_type,
+                url=_sanitize_telegram_url(f.file_path),
+                name=name,
+                size=file_size,
+                data=None,
+            )
+
+        file_bytes: bytes | None = None
+        # Attempt pre-download with a retry on transient failure
+        for attempt in range(2):
+            try:
+                file_bytes = bytes(await f.download_as_bytearray())
+                break
+            except Exception as e:
+                if attempt == 0:
+                    self.logger.debug(
+                        f"Telegram [{self.instance_id}] transient download error for {att_type}, retrying: {e}"
+                    )
+                    await asyncio.sleep(0.5)
+                else:
+                    self.logger.warning(
+                        f"Telegram [{self.instance_id}] failed to pre-download {att_type} after retry: {e}"
+                    )
+
+        # If pre-download failed, keep the raw file_path as url so downstream
+        # media fetch can attempt download with credentials/session if supported,
+        # but if pre-download succeeded or file_path is empty, use the sanitized url.
+        url = f.file_path or "" if file_bytes is None else _sanitize_telegram_url(f.file_path)
+        actual_size = len(file_bytes) if file_bytes is not None else file_size
         return Attachment(
             type=att_type,
-            url=sanitized_url,
+            url=url,
             name=name,
-            size=size,
+            size=actual_size,
             data=file_bytes,
         )
 
