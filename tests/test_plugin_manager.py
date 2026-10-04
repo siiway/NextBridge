@@ -121,6 +121,28 @@ class TestPluginContextCleanup:
         ctx.cleanup()
         ctx.cleanup()
 
+    def test_cleanup_does_not_unregister_replacement_handler(self):
+        bridge = Bridge()
+        ctx1 = PluginContext(bridge=bridge)
+
+        def handler1(*_args):
+            return "h1"
+
+        def handler2(*_args):
+            return "h2"
+
+        ctx1.register_command("rec", handler1)
+        assert bridge._commands["rec"] is handler1
+
+        # A new context replaces the command with handler2
+        ctx2 = PluginContext(bridge=bridge)
+        ctx2.register_command("rec", handler2)
+        assert bridge._commands["rec"] is handler2
+
+        # Cleaning up the old context should not remove the new handler
+        ctx1.cleanup()
+        assert bridge._commands.get("rec") is handler2
+
 
 class TestPluginManagerLifecycle:
     @pytest.fixture

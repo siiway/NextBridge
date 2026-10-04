@@ -29,7 +29,7 @@ class PluginContext:
         self._config = config or {}
         self._version = version
         self._config_path = config_path
-        self._commands: list[str] = []
+        self._commands: dict[str, Callable] = {}
         self._events: list[tuple[str, Callable]] = []
         self._middleware_names: list[str] = []
 
@@ -64,7 +64,7 @@ class PluginContext:
     def register_command(self, name: str, handler: Callable) -> None:
         """Register a ``/<prefix> <name>`` command and track it for cleanup."""
         self._bridge.register_command(name, handler)
-        self._commands.append(name)
+        self._commands[name] = handler
 
     def on_event(self, event: str, handler: Callable) -> None:
         """Subscribe to an EventBus event and track it for cleanup."""
@@ -90,12 +90,16 @@ class PluginContext:
 
     def cleanup(self) -> None:
         """Undo every tracked registration; safe to call repeatedly."""
-        for name in self._commands:
-            self._bridge.unregister_command(name)
-        for event, handler in self._events:
+        for name, handler in list(self._commands.items()):
+            # Only unregister if the bridge still maps this name to the exact handler
+            # registered by this context, preventing accidental removal of replacement
+            # instances or other plugins that registered under the same name.
+            if self._bridge._commands.get(name) is handler:
+                self._bridge.unregister_command(name)
+        for event, handler in list(self._events):
             if self._event_bus is not None:
                 self._event_bus.off(event, handler)
-        for name in self._middleware_names:
+        for name in list(self._middleware_names):
             if self._middleware is not None:
                 self._middleware.remove(name)
         self._commands.clear()

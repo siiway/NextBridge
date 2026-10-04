@@ -526,16 +526,20 @@ async def main():
     except asyncio.CancelledError:
         logger.info("NextBridge shutting down...")
     finally:
-        await driver_manager.stop_all()
-        await plugin_manager.unload_all()
+        try:
+            await driver_manager.stop_all()
+            await plugin_manager.unload_all()
 
-        for task in all_tasks:
-            if not task.done():
-                task.cancel()
-        if all_tasks:
-            await asyncio.gather(*all_tasks, return_exceptions=True)
+            for task in all_tasks:
+                if not task.done():
+                    task.cancel()
+            if all_tasks:
+                await asyncio.gather(*all_tasks, return_exceptions=True)
 
-        logger.info("NextBridge stopped.")
+            logger.info("NextBridge stopped.")
+        finally:
+            # Close all active HTTP client sessions before the event loop exits
+            await close_all_sessions()
 
 
 if __name__ == "__main__":
@@ -600,6 +604,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-    finally:
-        # close all sessions to avoid connection leaks
-        asyncio.run(close_all_sessions())

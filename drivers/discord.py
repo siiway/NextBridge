@@ -1180,8 +1180,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 files.append((data_bytes, mime, fname))
             else:
                 # Size exceeded or download failed — append URL or name as text
-                label = att.name or att.url
-                ref = f"({att.url})" if att.url else ""
+                safe_url = mask_url_credentials(att.url) if att.url else ""
+                label = mask_url_credentials(att.name) if att.name else safe_url
+                ref = f"({safe_url})" if safe_url else ""
                 payload["content"] += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
         url = webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true"
@@ -1276,8 +1277,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     discord.File(io.BytesIO(data_bytes), filename=fname)
                 )
             else:
-                label = att.name or att.url
-                ref = f"({att.url})" if att.url else ""
+                safe_url = mask_url_credentials(att.url) if att.url else ""
+                label = mask_url_credentials(att.name) if att.name else safe_url
+                ref = f"({safe_url})" if safe_url else ""
                 text += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
         reply_to_id = kwargs.get("reply_to_id")

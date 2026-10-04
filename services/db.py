@@ -56,6 +56,7 @@ class UserMapping(_Base):
     instance_id = Column(String, primary_key=True)
     platform_user_id = Column(String, primary_key=True)
     display_name = Column(String, nullable=False)
+    avatar_url = Column(String, nullable=True)
 
 
 class BindingCode(_Base):
@@ -209,7 +210,7 @@ class MessageDB:
             }
 
         # PostgreSQL-specific settings
-        elif url.startswith("postgresql"):
+        if url.startswith("postgresql"):
             pg_connect_args = {}
             sslmode = db_config.get("sslmode")
             if sslmode:
@@ -224,7 +225,7 @@ class MessageDB:
                 engine_kwargs["connect_args"] = pg_connect_args
 
         # Pool settings for non-SQLite databases
-        else:
+        if not url.startswith("sqlite"):
             if "pool_size" in db_config:
                 engine_kwargs["pool_size"] = db_config["pool_size"]
             if "max_overflow" in db_config:
@@ -662,20 +663,46 @@ class MessageDB:
     # User mappings
     # ------------------------------------------------------------------
 
-    def save_user(self, instance_id: str, platform_user_id: str, display_name: str):
+    def save_user(
+        self,
+        instance_id: str,
+        platform_user_id: str,
+        display_name: str,
+        avatar_url: str | None = None,
+    ):
         """Store or update a user's display name for an instance."""
         try:
             with self._session() as s:
-                s.merge(
-                    UserMapping(
-                        instance_id=instance_id,
-                        platform_user_id=platform_user_id,
-                        display_name=display_name,
-                    )
+                user = s.get(
+                    UserMapping,
+                    {"instance_id": instance_id, "platform_user_id": platform_user_id},
                 )
+                if user is None:
+                    s.add(
+                        UserMapping(
+                            instance_id=instance_id,
+                            platform_user_id=platform_user_id,
+                            display_name=display_name,
+                            avatar_url=avatar_url,
+                        )
+                    )
+                else:
+                    user.display_name = display_name  # ty: ignore[invalid-assignment]
+                    if avatar_url is not None:
+                        user.avatar_url = avatar_url  # ty: ignore[invalid-assignment]
                 s.commit()
         except Exception as e:
             logger.error(f"Failed to save user mapping: {e}")
+
+    def get_user_avatar(self, instance_id: str, platform_user_id: str) -> str | None:
+        """Find a platform-specific avatar URL by their user ID."""
+        with self._session() as s:
+            return s.execute(
+                select(UserMapping.avatar_url).where(
+                    UserMapping.instance_id == instance_id,
+                    UserMapping.platform_user_id == platform_user_id,
+                )
+            ).scalar_one_or_none()
 
     def get_user_name(self, instance_id: str, platform_user_id: str) -> str | None:
         """Find a platform-specific display name by their user ID."""

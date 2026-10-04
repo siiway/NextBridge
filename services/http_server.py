@@ -82,6 +82,8 @@ class HttpServerManager:
         self.start_without_mounts = start_without_mounts
         self.version = version
 
+        self._root_app: FastAPI = FastAPI()
+        self._server: uvicorn.Server | None = None
         self._mounts: list[HttpMount] = []
         self._mounted_paths: set[str] = set()
         self._ready = asyncio.Event()
@@ -107,20 +109,42 @@ class HttpServerManager:
     def mount(self, instance_id: str, path: str, app: Any) -> None:
         """Register an ASGI sub-app for a driver.
 
-        Must be called before the HTTP server starts.
+        Can be called before or after the HTTP server starts.
+        If instance_id is already mounted, it is cleanly unmounted first.
         """
-        if self._started:
-            raise RuntimeError("HTTP server already started; cannot mount new apps")
-
         normalized = self._normalize_path(path)
+
+        # If this instance_id already has a mount, unmount it first
+        self.unmount(instance_id)
+
         if normalized in self._mounted_paths:
             raise ValueError(f"Duplicate HTTP mount path: {normalized}")
 
         self._mounted_paths.add(normalized)
-        self._mounts.append(
-            HttpMount(instance_id=instance_id, path=normalized, app=app)
-        )
+        mount_entry = HttpMount(instance_id=instance_id, path=normalized, app=app)
+        self._mounts.append(mount_entry)
+        self._root_app.mount(normalized, app)
+        logger.debug(f"HTTP mount registered: {instance_id} -> {normalized}")
+
         self._ready.set()
+
+    def unmount(self, instance_id: str) -> None:
+        """Unmount any ASGI sub-apps registered for *instance_id*."""
+        to_remove = [m for m in self._mounts if m.instance_id == instance_id]
+        if not to_remove:
+            return
+        for m in to_remove:
+            self._mounts.remove(m)
+            self._mounted_paths.discard(m.path)
+            self._remove_route_by_path(m.path)
+            logger.debug(f"HTTP unmounted: {instance_id} -> {m.path}")
+
+    def _remove_route_by_path(self, path: str) -> None:
+        routes = getattr(self._root_app.router, "routes", None)
+        if routes is not None:
+            self._root_app.router.routes = [
+                r for r in routes if getattr(r, "path", None) != path
+            ]
 
     def set_driver_manager(self, manager: DriverManager) -> None:
         self._driver_manager = manager
@@ -158,25 +182,23 @@ class HttpServerManager:
         if not self.should_start():
             return
 
-        root = FastAPI()
-
-        admin_app = build_admin_app(
-            version=self.version,
-            debug=self.log_level == "debug",
-            bridge=self._bridge,
-            driver_manager=self._driver_manager,
-            plugin_manager=self._plugin_manager,
-            reload_engine=self._reload_engine,
-            metrics=self._metrics,
-            admin_enabled=self._admin_enabled,
-            admin_user=self._admin_user,
-            admin_password=self._admin_password,
-        )
-        root.mount("/_nextbridge", admin_app)
-
-        for mount in self._mounts:
-            root.mount(mount.path, mount.app)
-            logger.debug(f"HTTP mount registered: {mount.instance_id} -> {mount.path}")
+        if not any(
+            getattr(r, "path", None) == "/_nextbridge"
+            for r in getattr(self._root_app.router, "routes", [])
+        ):
+            admin_app = build_admin_app(
+                version=self.version,
+                debug=self.log_level == "debug",
+                bridge=self._bridge,
+                driver_manager=self._driver_manager,
+                plugin_manager=self._plugin_manager,
+                reload_engine=self._reload_engine,
+                metrics=self._metrics,
+                admin_enabled=self._admin_enabled,
+                admin_user=self._admin_user,
+                admin_password=self._admin_password,
+            )
+            self._root_app.mount("/_nextbridge", admin_app)
 
         host = f"[{self.host}]" if ":" in self.host else self.host
         root_path = self.root_path if not self.root_path == "/" else ""
@@ -189,7 +211,7 @@ class HttpServerManager:
         _configure_uvicorn_logging(self.log_level)
 
         cfg = uvicorn.Config(
-            app=root,
+            app=self._root_app,
             host=self.host,
             port=self.port,
             log_level=self.log_level,
@@ -198,5 +220,11 @@ class HttpServerManager:
             log_config=None,
         )
         server = uvicorn.Server(cfg)
+        self._server = server
         self._started = True
         await server.serve()
+
+    async def stop(self) -> None:
+        """Gracefully stop the running uvicorn server."""
+        if self._server is not None:
+            self._server.should_exit = True

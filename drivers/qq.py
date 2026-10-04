@@ -2211,11 +2211,13 @@ class QqDriver(BaseDriver[QqConfig]):
             self._pending[echo] = fut
             payload = {"action": action, "params": params, "echo": echo}
             try:
-                async with self._send_lock:
-                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
-                return await asyncio.wait_for(fut, timeout=timeout)
+                try:
+                    async with self._send_lock:
+                        await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                    return await asyncio.wait_for(fut, timeout=timeout)
+                finally:
+                    self._pending.pop(echo, None)
             except TimeoutError:
-                self._pending.pop(echo, None)
                 if attempt >= max_attempts:
                     self.logger.warning(
                         f"NapCat [{self.instance_id}] action '{action}' timed out "
@@ -2228,7 +2230,6 @@ class QqDriver(BaseDriver[QqConfig]):
                 )
                 await asyncio.sleep(min(2.0, 0.3 * (2 ** (attempt - 1))))
             except Exception as e:
-                self._pending.pop(echo, None)
                 if attempt >= max_attempts:
                     self.logger.error(
                         f"NapCat [{self.instance_id}] action '{action}' error "
