@@ -1,9 +1,20 @@
 import os
+import re
 from collections import OrderedDict
 from typing import Any, Generic, TypeVar
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-_SENSITIVE_QUERY_KEYS = {"access_token", "token", "key", "secret", "password"}
+_SENSITIVE_QUERY_KEYS = {
+    "access_token",
+    "token",
+    "key",
+    "secret",
+    "password",
+    "sig",
+    "signature",
+    "auth",
+}
+_BOT_TOKEN_PATH_RE = re.compile(r"(/bot)([^/]+)", re.IGNORECASE)
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -64,4 +75,8 @@ def mask_url_credentials(url: str) -> str:
             ]
         )
         parts = parts._replace(query=masked)
+    path = parts.path
+    if "/bot" in path.lower():
+        path = _BOT_TOKEN_PATH_RE.sub(r"\1***", path)
+        parts = parts._replace(path=path)
     return urlunsplit(parts)

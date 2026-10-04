@@ -31,7 +31,7 @@ import html
 import io
 import re
 import time
-from typing import TypedDict
+from typing import Any, TypedDict
 from urllib.parse import urlencode
 
 # Runtime import (not TYPE_CHECKING): httpx.Proxy / httpx.URL are referenced in
@@ -60,6 +60,12 @@ from services.config_schema import _DriverConfig, CoercedBool
 from services.message import Attachment, NormalizedMessage
 from services.message_format import telegram_richheader_html
 from services.util import LRUDict
+
+
+def _sanitize_telegram_url(url: str | None) -> str:
+    if not url:
+        return ""
+    return re.sub(r"/bot[^/]+/", "/bot***/", url)
 
 
 class _HTTPXRequestCommonKwargs(TypedDict, total=False):
@@ -490,6 +496,26 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 except Exception as e:
                     self.logger.warning(f"recall: delete message {mid} failed: {e}")
 
+    async def _resolve_attachment(
+        self, file_source: Any, att_type: str, name: str, size: int = -1
+    ) -> Attachment:
+        f = await file_source.get_file()
+        file_bytes: bytes | None = None
+        try:
+            file_bytes = bytes(await f.download_as_bytearray())
+        except Exception as e:
+            self.logger.warning(
+                f"Telegram [{self.instance_id}] failed to pre-download {att_type}: {e}"
+            )
+        sanitized_url = _sanitize_telegram_url(f.file_path)
+        return Attachment(
+            type=att_type,
+            url=sanitized_url,
+            name=name,
+            size=size,
+            data=file_bytes,
+        )
+
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = update.message
         if not msg:
@@ -587,58 +613,42 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         try:
             if msg.photo:
                 largest = max(msg.photo, key=lambda p: p.file_size or 0)
-                f = await largest.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="image",
-                        url=f.file_path,
-                        name="photo.jpg",
-                        size=largest.file_size or -1,
+                    await self._resolve_attachment(
+                        largest, "image", "photo.jpg", largest.file_size or -1
                     )
                 )
             elif msg.video:
-                f = await msg.video.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="video",
-                        url=f.file_path,
-                        name=msg.video.file_name or "video.mp4",
-                        size=msg.video.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.video,
+                        "video",
+                        msg.video.file_name or "video.mp4",
+                        msg.video.file_size or -1,
                     )
                 )
             elif msg.voice:
-                f = await msg.voice.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="voice",
-                        url=f.file_path,
-                        name="voice.ogg",
-                        size=msg.voice.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.voice, "voice", "voice.ogg", msg.voice.file_size or -1
                     )
                 )
             elif msg.audio:
-                f = await msg.audio.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="voice",
-                        url=f.file_path,
-                        name=msg.audio.file_name or "audio.mp3",
-                        size=msg.audio.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.audio,
+                        "voice",
+                        msg.audio.file_name or "audio.mp3",
+                        msg.audio.file_size or -1,
                     )
                 )
             elif msg.animation:
-                f = await msg.animation.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="video",
-                        url=f.file_path,
-                        name="animation.gif",
-                        size=msg.animation.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.animation,
+                        "video",
+                        "animation.gif",
+                        msg.animation.file_size or -1,
                     )
                 )
             elif msg.sticker:
@@ -648,14 +658,12 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         text = msg.sticker.emoji
                 else:
                     try:
-                        f = await msg.sticker.get_file()
-                        assert f.file_path is not None
                         attachments.append(
-                            Attachment(
-                                type="image",
-                                url=f.file_path,
-                                name="sticker.webp",
-                                size=msg.sticker.file_size or -1,
+                            await self._resolve_attachment(
+                                msg.sticker,
+                                "image",
+                                "sticker.webp",
+                                msg.sticker.file_size or -1,
                             )
                         )
                     except Exception as e:
@@ -665,14 +673,12 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         if msg.sticker.emoji:
                             text = msg.sticker.emoji
             elif msg.document:
-                f = await msg.document.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="file",
-                        url=f.file_path,
-                        name=msg.document.file_name or "document",
-                        size=msg.document.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.document,
+                        "file",
+                        msg.document.file_name or "document",
+                        msg.document.file_size or -1,
                     )
                 )
         except Exception as e:

@@ -219,14 +219,13 @@ class PluginManager:
         prev_instance = managed.instance
         prev_ctx = managed.ctx
 
-        # Build the replacement first; the current instance keeps running
-        # (and stays registered) until the new one has loaded successfully.
+        # Build replacement instance first without retiring the existing one.
         candidate = ManagedPlugin(info=managed.info, config=managed.config)
         if not await self._load_instance(name, candidate):
-            # Previous instance/ctx were never touched and remain functional.
+            # Load failed; leave running instance untouched.
             raise PluginError(f"Failed to reload plugin '{name}'")
 
-        # New instance is ready — retire the previous one.
+        # Candidate loaded successfully: now retire and cleanup previous registrations
         if was_enabled and prev_instance is not None:
             try:
                 await prev_instance.on_disable()

@@ -1073,13 +1073,23 @@ class Bridge:
 
     async def _slow_worker(self):
         while True:
-            task = await self._slow_queue.get()
             try:
-                await task
+                task = await self._slow_queue.get()
             except asyncio.CancelledError:
-                raise
-            except Exception:
-                pass
+                break
+
+            try:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling() > 0:
+                        raise
+                    logger.debug(
+                        "Bridge slow send task was cancelled, continuing worker"
+                    )
+                except Exception as exc:
+                    logger.opt(exception=exc).warning("Error in bridge slow send task")
             finally:
                 self._slow_queue.task_done()
 

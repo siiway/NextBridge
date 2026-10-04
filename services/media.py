@@ -12,7 +12,9 @@ import asyncio
 import ipaddress
 import os
 import shutil
-from urllib.parse import urlparse, unquote
+import tempfile
+from pathlib import Path
+from urllib.parse import unquote, urljoin, urlparse
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
@@ -90,6 +92,7 @@ async def _convert_amr_to_ogg(data: bytes) -> tuple[bytes, str] | None:
             logger.warning("media: ffmpeg not found; AMR audio will be forwarded as-is")
             return None
 
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -117,9 +120,21 @@ async def _convert_amr_to_ogg(data: bytes) -> tuple[bytes, str] | None:
         return stdout, "audio/ogg"
     except TimeoutError:
         logger.warning("media: ffmpeg AMR->OGG conversion timed out")
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception as e:
+                logger.debug(f"media: error killing ffmpeg process: {e}")
         return None
     except Exception as e:
         logger.warning(f"media: ffmpeg AMR->OGG conversion error: {e}")
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception as kill_err:
+                logger.debug(f"media: error killing ffmpeg process: {kill_err}")
         return None
 
 
@@ -222,27 +237,86 @@ async def _validate_url(url: str) -> bool:
     return True
 
 
+_SAFE_LOCAL_ROOTS: set[str] = {os.path.realpath(tempfile.gettempdir())}
+
+
+def add_safe_local_root(path: str | Path) -> None:
+    """Register an additional safe root directory for local media file reads."""
+    _SAFE_LOCAL_ROOTS.add(os.path.realpath(str(path)))
+
+
+def _is_safe_local_path(path: str) -> bool:
+    """Validate that *path* resides inside a designated safe temporary/cache directory.
+
+    Rejects traversal, sensitive system directories, and sensitive file names.
+    """
+    try:
+        real_path = os.path.realpath(path)
+    except Exception:
+        return False
+
+    # Block sensitive system prefixes and files
+    sensitive_prefixes = ("/etc", "/proc", "/sys", "/dev", "/root", "/boot")
+    if any(real_path.startswith(prefix) for prefix in sensitive_prefixes):
+        return False
+
+    name = os.path.basename(real_path).lower()
+    if name in {
+        ".env",
+        "config.yaml",
+        "config.yml",
+        "passwd",
+        "shadow",
+        "id_rsa",
+        "id_ed25519",
+    }:
+        return False
+
+    for root in _SAFE_LOCAL_ROOTS:
+        try:
+            real_root = os.path.realpath(root)
+            if (
+                os.path.commonpath([real_path, real_root]) == real_root
+                and real_path != real_root
+            ):
+                return True
+        except ValueError:
+            continue
+
+    return False
+
+
 def _local_path_of(url: str) -> str | None:
-    """Return a local filesystem path if *url* refers to one, else ``None``.
+    """Return a local filesystem path if *url* refers to a safe one, else ``None``.
 
     Local drivers (e.g. QQ / NapCat) deliver cached media as absolute paths on
-    the bridge host rather than http(s) URLs.  We accept ``file://`` URLs and
-    absolute paths so those attachments can be read directly instead of being
-    rejected by the SSRF guard.
+    the bridge host rather than http(s) URLs. We accept ``file://`` URLs and
+    absolute paths only if they reside strictly within designated safe temporary
+    or cache directories.
     """
+    path: str | None = None
     if url.startswith("file://"):
         rest = unquote(url[7:])
         # file:///abs -> "/abs"; file://host/abs is not supported.
         if rest.startswith("/"):
-            return rest
-        return None
-    if os.path.isabs(url):
-        return url
+            path = rest
+    elif os.path.isabs(url):
+        path = url
+
+    if path is not None:
+        if _is_safe_local_path(path):
+            return path
+        logger.warning(
+            f"media: blocked local file path outside safe directories: {path!r}"
+        )
     return None
 
 
 async def _read_local_file(path: str, max_bytes: int) -> tuple[bytes, str] | None:
     """Read a local file up to *max_bytes* with the same size guard as ``fetch``."""
+    if not _is_safe_local_path(path):
+        logger.warning(f"media.fetch: rejected unsafe local file path: {path!r}")
+        return None
     try:
         if not os.path.isfile(path):
             logger.warning(f"media.fetch: local file not found {path!r}")
@@ -291,32 +365,55 @@ async def _fetch_inner(
     if local_path is not None:
         return await _read_local_file(local_path, max_bytes)
 
-    if not await _validate_url(url):
-        logger.warning(f"media.fetch: blocked non-public URL {url!r}")
-        return None
-
     session = _get_session(proxy=proxy)
+    current_url = url
+    max_redirects = 3
 
-    try:
-        async with session.get(
-            url, timeout=aiohttp.ClientTimeout(total=60), headers=_DEFAULT_HEADERS
-        ) as resp:
-            resp.raise_for_status()
-            data = bytearray()
-            total = 0
-            async for chunk in resp.content.iter_chunked(65536):
-                total += len(chunk)
-                if total > max_bytes:
-                    logger.debug(
-                        f"media.fetch: {url!r} exceeded {max_bytes} bytes, aborting"
-                    )
-                    return None
-                data.extend(chunk)
-            return bytes(data), resp.content_type or "application/octet-stream"
+    for redirect_count in range(max_redirects + 1):
+        if not await _validate_url(current_url):
+            logger.warning(f"media.fetch: blocked non-public URL {current_url!r}")
+            return None
 
-    except Exception as e:
-        logger.error(f"media.fetch failed for {url!r}: {e}")
-        return None
+        try:
+            async with session.get(
+                current_url,
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=60),
+                headers=_DEFAULT_HEADERS,
+            ) as resp:
+                if resp.status in (301, 302, 303, 307, 308):
+                    if redirect_count >= max_redirects:
+                        logger.warning(
+                            f"media.fetch: exceeded max redirects ({max_redirects}) for {url!r}"
+                        )
+                        return None
+                    location = resp.headers.get("Location")
+                    if not location:
+                        logger.warning(
+                            f"media.fetch: redirect missing Location header for {current_url!r}"
+                        )
+                        return None
+                    current_url = urljoin(current_url, location)
+                    continue
+
+                resp.raise_for_status()
+                data = bytearray()
+                total = 0
+                async for chunk in resp.content.iter_chunked(65536):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        logger.debug(
+                            f"media.fetch: {current_url!r} exceeded {max_bytes} bytes, aborting"
+                        )
+                        return None
+                    data.extend(chunk)
+                return bytes(data), resp.content_type or "application/octet-stream"
+
+        except Exception as e:
+            logger.error(f"media.fetch failed for {current_url!r}: {e}")
+            return None
+
+    return None
 
 
 async def fetch_attachment(

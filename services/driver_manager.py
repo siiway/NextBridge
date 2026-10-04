@@ -180,6 +180,10 @@ class DriverManager:
         # Prevent auto-restart from triggering during shutdown.
         managed.restart_count = self._max_restart_attempts
 
+        http_server = getattr(self._ctx, "http_server", None)
+        if http_server is not None:
+            http_server.unmount(instance_id)
+
         if managed.task and not managed.task.done():
             managed.task.cancel()
             try:

@@ -536,6 +536,8 @@ async def main():
             await asyncio.gather(*all_tasks, return_exceptions=True)
 
         logger.info("NextBridge stopped.")
+        # Close all active HTTP client sessions before the event loop exits
+        await close_all_sessions()
 
 
 if __name__ == "__main__":
@@ -600,6 +602,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-    finally:
-        # close all sessions to avoid connection leaks
-        asyncio.run(close_all_sessions())

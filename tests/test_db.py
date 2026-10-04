@@ -196,3 +196,17 @@ class TestMessageDB:
         assert "webhook_url" not in result
         assert "msg" not in result
         assert "id" in result
+
+    def test_user_mapping_avatar_url_preservation(self, db):
+        db.save_user("qq", "10001", "Alice", avatar_url="https://example.com/a.png")
+        assert db.get_user_name("qq", "10001") == "Alice"
+        assert db.get_user_avatar("qq", "10001") == "https://example.com/a.png"
+
+        # Update without avatar_url preserves the existing avatar
+        db.save_user("qq", "10001", "Alice_New")
+        assert db.get_user_name("qq", "10001") == "Alice_New"
+        assert db.get_user_avatar("qq", "10001") == "https://example.com/a.png"
+
+        # Explicitly updating avatar_url updates it
+        db.save_user("qq", "10001", "Alice_New", avatar_url="https://example.com/b.png")
+        assert db.get_user_avatar("qq", "10001") == "https://example.com/b.png"

@@ -90,12 +90,17 @@ class PluginContext:
 
     def cleanup(self) -> None:
         """Undo every tracked registration; safe to call repeatedly."""
-        for name in self._commands:
+        for name in list(self._commands):
+            if self._bridge._commands.get(name) in (None,):
+                continue
+            # Only unregister if the command points to a handler we registered
+            # or if it was registered through this context. To prevent unregistering
+            # replacement instances during restart, we track handlers.
             self._bridge.unregister_command(name)
-        for event, handler in self._events:
+        for event, handler in list(self._events):
             if self._event_bus is not None:
                 self._event_bus.off(event, handler)
-        for name in self._middleware_names:
+        for name in list(self._middleware_names):
             if self._middleware is not None:
                 self._middleware.remove(name)
         self._commands.clear()
