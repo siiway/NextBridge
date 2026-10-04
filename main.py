@@ -526,10 +526,10 @@ async def main():
     except asyncio.CancelledError:
         logger.info("NextBridge shutting down...")
     finally:
-        await driver_manager.stop_all()
-        await plugin_manager.unload_all()
-
         try:
+            await driver_manager.stop_all()
+            await plugin_manager.unload_all()
+
             for task in all_tasks:
                 if not task.done():
                     task.cancel()
