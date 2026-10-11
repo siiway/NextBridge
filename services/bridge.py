@@ -77,6 +77,8 @@ class Bridge:
         self.slow_queue_maxsize: int = 1000
         self._slow_queue: asyncio.Queue = asyncio.Queue(maxsize=self.slow_queue_maxsize)
         self._slow_worker_task: asyncio.Task | None = None
+        self._slow_worker_tasks: list[asyncio.Task] = []
+        self.slow_worker_count: int = 4
         self.version: str = ""
         self.commit_hash: str | None = None
         self.is_dev: bool = False
@@ -1068,8 +1070,13 @@ class Bridge:
         return result
 
     def _ensure_slow_worker(self):
-        if self._slow_worker_task is None or self._slow_worker_task.done():
-            self._slow_worker_task = asyncio.create_task(self._slow_worker())
+        self._slow_worker_tasks = [
+            task for task in self._slow_worker_tasks if not task.done()
+        ]
+        while len(self._slow_worker_tasks) < self.slow_worker_count:
+            task = asyncio.create_task(self._slow_worker())
+            self._slow_worker_tasks.append(task)
+        self._slow_worker_task = self._slow_worker_tasks[0]
 
     async def _slow_worker(self):
         while True:
@@ -1185,6 +1192,7 @@ class Bridge:
             msg, rule.get("msg", {}), is_webhook=is_webhook
         )
 
+        send_tasks = []
         for target_id, target_channel in rule.get("to", {}).items():
             # Skip echo based on strict_echo_match configuration
             if self._should_skip_echo(target_id, target_channel, msg):
@@ -1257,9 +1265,19 @@ class Bridge:
                     continue
                 formatted_out, extra_out = mw_result
 
-            await self._dispatch_guarded(
-                target_id, target_channel, formatted_out, extra_out, msg, bridge_id
+            send_tasks.append(
+                self._dispatch_guarded(
+                    target_id,
+                    target_channel,
+                    formatted_out,
+                    extra_out,
+                    msg,
+                    bridge_id,
+                )
             )
+
+        if send_tasks:
+            await asyncio.gather(*send_tasks)
 
     async def _dispatch_connect(
         self,
@@ -1270,6 +1288,7 @@ class Bridge:
     ):
         """Fan-out to every channel in the connect rule except the source."""
         global_msg_cfg = rule.get("msg", {})
+        send_tasks = []
 
         for target_id, target_cfg in rule.get("channels", {}).items():
             # Strip the reserved "msg" key to get the bare channel address dict
@@ -1361,9 +1380,19 @@ class Bridge:
                     continue
                 formatted_out, extra_out = mw_result
 
-            await self._dispatch_guarded(
-                target_id, target_channel, formatted_out, extra_out, msg, bridge_id
+            send_tasks.append(
+                self._dispatch_guarded(
+                    target_id,
+                    target_channel,
+                    formatted_out,
+                    extra_out,
+                    msg,
+                    bridge_id,
+                )
             )
+
+        if send_tasks:
+            await asyncio.gather(*send_tasks)
 
     async def on_edit_message(self, msg: NormalizedMessage):
         """Called by drivers when a message is edited on their platform."""

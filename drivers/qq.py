@@ -192,6 +192,7 @@ class QqDriver(BaseDriver[QqConfig]):
         self._qid_cache: LRUDict[str, str] = LRUDict(maxsize=10000)
         # user_id → monotonic timestamp of last failed qid lookup (negative cache)
         self._qid_miss_cache: LRUDict[str, float] = LRUDict(maxsize=10000)
+        self._qid_refresh_tasks: set[asyncio.Task] = set()
         self._forward_pages: dict[str, _ForwardPage] = {}
         self._forward_file_url_cache: LRUDict[str, str | None] = LRUDict(maxsize=1000)
         self._forward_gc_task: asyncio.Task | None = None
@@ -756,6 +757,20 @@ class QqDriver(BaseDriver[QqConfig]):
             is_dm=True,
         )
         await self.bridge.on_message(msg)
+        self._schedule_qid_refresh(user_id)
+
+    def _schedule_qid_refresh(self, user_id: str) -> None:
+        """Refresh and persist qid without delaying message forwarding."""
+        if not user_id or user_id in self._qid_cache:
+            return
+        task = asyncio.create_task(self._refresh_qid(user_id))
+        self._qid_refresh_tasks.add(task)
+        task.add_done_callback(self._qid_refresh_tasks.discard)
+
+    async def _refresh_qid(self, user_id: str) -> None:
+        qid = await self._get_qid(user_id)
+        if qid:
+            msg_db().save_user_qid(self.instance_id, user_id, qid)
 
     async def _on_group_message(self, event: dict):
         # NapCat echoes the bot's own sent messages back as real events;
@@ -791,9 +806,12 @@ class QqDriver(BaseDriver[QqConfig]):
             )
             return
 
-        # Use qid for username when available (only after the empty check, so
-        # ignored messages don't trigger a blocking get_stranger_info call).
-        qid = (await self._get_qid(user_id, group_id)).strip()
+        # Do not resolve qid on the message-critical path.  The NapCat API
+        # lookup can be slow and this driver intentionally drains events with a
+        # single ordered worker; waiting here would stall every later message.
+        # user_id is a stable fallback and _get_qid remains available for
+        # features that explicitly need the human-readable QQ id.
+        username = user_id
 
         # QQ avatar endpoint (public, no auth)
         avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
@@ -814,9 +832,10 @@ class QqDriver(BaseDriver[QqConfig]):
             source_mentioned_self=source_mentioned_self,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
             source_proxy=self._media_proxy,
-            username=qid,
+            username=username,
         )
         await self.bridge.on_message(msg)
+        self._schedule_qid_refresh(user_id)
 
     async def _parse_message(
         self,
@@ -2741,10 +2760,10 @@ class QqDriver(BaseDriver[QqConfig]):
                         )
 
         main_segments: list[dict] = []
-        standalone_segments: list[dict | list[dict]] = []
+        standalone_segments: list[list[dict]] = []
         for seg in segments:
             if seg["type"] in ("video", "record"):
-                standalone_segments.append(seg)
+                standalone_segments.append([seg])
             else:
                 main_segments.append(seg)
 
@@ -2757,16 +2776,15 @@ class QqDriver(BaseDriver[QqConfig]):
                 # If only reply segment remains, attach it to the first standalone segment
                 standalone_segments[0] = [
                     main_segments[0],
-                    standalone_segments[0],
-                ]  # ty: ignore[invalid-assignment]
+                    *standalone_segments[0],
+                ]
                 main_segments = []
             else:
                 msg_id = await _send_msg(main_segments)
                 if msg_id:
                     msg_ids.append(msg_id)
 
-        for seg in standalone_segments:
-            msg_to_send = seg if isinstance(seg, list) else [seg]
+        for msg_to_send in standalone_segments:
             msg_id = await _send_msg(msg_to_send)
             if msg_id:
                 msg_ids.append(msg_id)
@@ -2830,7 +2848,7 @@ class QqDriver(BaseDriver[QqConfig]):
         except Exception as e:
             self.logger.warning(f"unpin: failed to unpin message {target_msg_id}: {e}")
 
-    async def delete(self, channel: dict, message_id: str, **kwargs):
+    async def delete(self, _channel: dict, message_id: str, **_kwargs):
         """Bridge a recall from another platform onto QQ via ``delete_msg``."""
         if not self.config.enable_recall:
             return None

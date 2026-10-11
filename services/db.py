@@ -57,6 +57,7 @@ class UserMapping(_Base):
     platform_user_id = Column(String, primary_key=True)
     display_name = Column(String, nullable=False)
     avatar_url = Column(String, nullable=True)
+    qid = Column(String, nullable=True)
 
 
 class BindingCode(_Base):
@@ -469,8 +470,8 @@ class MessageDB:
             ).scalar_one_or_none()
 
             if (
-                src_binding
-                and tgt_binding
+                src_binding is not None
+                and tgt_binding is not None
                 and src_binding.global_user_id != tgt_binding.global_user_id
             ):
                 logger.warning(
@@ -481,8 +482,12 @@ class MessageDB:
 
             global_id = (
                 src_binding.global_user_id
-                if src_binding
-                else (tgt_binding.global_user_id if tgt_binding else str(uuid.uuid4()))
+                if src_binding is not None
+                else (
+                    tgt_binding.global_user_id
+                    if tgt_binding is not None
+                    else str(uuid.uuid4())
+                )
             )
 
             s.merge(
@@ -669,8 +674,9 @@ class MessageDB:
         platform_user_id: str,
         display_name: str,
         avatar_url: str | None = None,
+        qid: str | None = None,
     ):
-        """Store or update a user's display name for an instance."""
+        """Store or update a user's display name, avatar, and optional QQ qid."""
         try:
             with self._session() as s:
                 user = s.get(
@@ -684,12 +690,23 @@ class MessageDB:
                             platform_user_id=platform_user_id,
                             display_name=display_name,
                             avatar_url=avatar_url,
+                            qid=qid,
                         )
                     )
                 else:
-                    user.display_name = display_name  # ty: ignore[invalid-assignment]
+                    values: dict[str, str] = {"display_name": display_name}
                     if avatar_url is not None:
-                        user.avatar_url = avatar_url  # ty: ignore[invalid-assignment]
+                        values["avatar_url"] = avatar_url
+                    if qid is not None:
+                        values["qid"] = qid
+                    s.execute(
+                        update(UserMapping)
+                        .where(
+                            UserMapping.instance_id == instance_id,
+                            UserMapping.platform_user_id == platform_user_id,
+                        )
+                        .values(**values)
+                    )
                 s.commit()
         except Exception as e:
             logger.error(f"Failed to save user mapping: {e}")
@@ -699,6 +716,32 @@ class MessageDB:
         with self._session() as s:
             return s.execute(
                 select(UserMapping.avatar_url).where(
+                    UserMapping.instance_id == instance_id,
+                    UserMapping.platform_user_id == platform_user_id,
+                )
+            ).scalar_one_or_none()
+
+    def save_user_qid(self, instance_id: str, platform_user_id: str, qid: str) -> None:
+        """Persist a QQ qid without overwriting the current display name."""
+        try:
+            with self._session() as s:
+                s.execute(
+                    update(UserMapping)
+                    .where(
+                        UserMapping.instance_id == instance_id,
+                        UserMapping.platform_user_id == platform_user_id,
+                    )
+                    .values(qid=qid)
+                )
+                s.commit()
+        except Exception as e:
+            logger.error(f"Failed to save user qid: {e}")
+
+    def get_user_qid(self, instance_id: str, platform_user_id: str) -> str | None:
+        """Find a persisted QQ qid by platform user ID."""
+        with self._session() as s:
+            return s.execute(
+                select(UserMapping.qid).where(
                     UserMapping.instance_id == instance_id,
                     UserMapping.platform_user_id == platform_user_id,
                 )
@@ -963,7 +1006,7 @@ class MessageDB:
                 MessageMapping.instance_id == instance_id,
             )
 
-            if channel_id:
+            if channel_id is not None:
                 # Try canonical form first.
                 normalized = self._normalize_channel_id(channel_id)
                 strict_stmt = base_stmt.where(MessageMapping.channel_id == normalized)
@@ -997,7 +1040,7 @@ class MessageDB:
                 MessageMapping.instance_id == instance_id,
             )
 
-            if channel_id:
+            if channel_id is not None:
                 normalized = self._normalize_channel_id(channel_id)
                 strict_hits = list(
                     s.execute(

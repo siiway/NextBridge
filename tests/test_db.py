@@ -35,6 +35,11 @@ class TestMessageDB:
         assert db.get_user_name("inst1", "user1") == "Alice"
         assert db.get_user_name("inst1", "unknown") is None
 
+    def test_save_and_get_user_qid(self, db):
+        db.save_user("qq", "123", "123")
+        db.save_user_qid("qq", "123", "qid-123")
+        assert db.get_user_qid("qq", "123") == "qid-123"
+
     def test_get_user_id_by_name(self, db):
         db.save_user("inst1", "user1", "Alice")
         assert db.get_user_id_by_name("inst1", "Alice") == "user1"
