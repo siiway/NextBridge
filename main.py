@@ -96,24 +96,95 @@ def _is_release_build() -> bool:
 
 
 def _discover_all_driver_modules() -> None:
-    """Import every .py in drivers/ to discover CLI hooks and registrations."""
+    """Import every driver module to discover CLI hooks and registrations.
+
+    Sources: built-in ``drivers/*.py``, pip packages advertising the
+    ``nextbridge.drivers`` entry-point group, and external drivers / plugin
+    paths declared in the config file.  Without the external sources, a
+    pip-installed driver's ``register_cli()`` hooks would never appear in
+    argparse (they are only imported later, inside ``main()``).
+    """
     drivers_dir = Path(__file__).parent / "drivers"
-    if not drivers_dir.is_dir():
+    if drivers_dir.is_dir():
+        for py_file in sorted(drivers_dir.glob("*.py")):
+            if py_file.name.startswith("_"):
+                continue
+            module_name = f"drivers.{py_file.stem}"
+            if module_name in sys.modules:
+                continue
+            if importlib.util.find_spec(module_name) is None:
+                continue
+            try:
+                importlib.import_module(module_name)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"Failed to import driver module: {module_name}"
+                )
+
+    _discover_external_driver_modules()
+
+
+def _import_driver_module(module_path: str, source: str) -> None:
+    """Best-effort import of one external driver module."""
+    module_name = module_path.split(":", 1)[0].strip()
+    if not module_name or module_name in sys.modules:
         return
-    for py_file in sorted(drivers_dir.glob("*.py")):
-        if py_file.name.startswith("_"):
-            continue
-        module_name = f"drivers.{py_file.stem}"
-        if module_name in sys.modules:
-            continue
-        if importlib.util.find_spec(module_name) is None:
-            continue
-        try:
-            importlib.import_module(module_name)
-        except Exception:
-            logger.opt(exception=True).warning(
-                f"Failed to import driver module: {module_name}"
-            )
+    try:
+        importlib.import_module(module_name)
+    except Exception:
+        logger.opt(exception=True).warning(
+            f"Failed to import {source} driver module: {module_name}"
+        )
+
+
+def _discover_external_driver_modules() -> None:
+    """Import entry-point and config-declared external driver modules.
+
+    Failures are logged and swallowed — the CLI must still work when a
+    third-party driver is broken or the config file is missing/invalid
+    (``validate`` relies on this).
+    """
+    import importlib.metadata
+
+    from services.plugin_loader import (
+        ENTRYPOINT_GROUP,
+        discover_local_drivers,
+    )
+
+    try:
+        for ep in importlib.metadata.entry_points(group=ENTRYPOINT_GROUP):
+            _import_driver_module(ep.value, "entry-point")
+    except Exception:
+        logger.opt(exception=True).warning("Entry-point driver discovery failed")
+
+    # Config-declared external drivers and plugin paths (best effort).
+    try:
+        config_path = config_io.find_config(Path(u.get_data_path()))
+        if config_path is None:
+            return
+        raw = config_io.load_config(config_path)
+        plugins_cfg = (raw.get("global") or {}).get("plugins") or {}
+        drivers_cfg = plugins_cfg.get("drivers") or {}
+        external = drivers_cfg.get("external") or {}
+        if isinstance(external, dict):
+            for entry in external.values():
+                if isinstance(entry, dict) and entry.get("module"):
+                    _import_driver_module(str(entry["module"]), "external")
+        paths = plugins_cfg.get("paths") or []
+        if isinstance(paths, list) and paths:
+            from services.plugin_loader import _load_module
+
+            for info in discover_local_drivers([str(p) for p in paths]).values():
+                try:
+                    _load_module(info)
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        f"Failed to import local driver module: {info.module_path}"
+                    )
+    except Exception:
+        logger.opt(exception=True).warning(
+            "Config-declared external driver discovery failed"
+        )
 
 
 def cmd_convert(src: str, dst: str) -> None:
