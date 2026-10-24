@@ -1,10 +1,14 @@
 # QQ driver for OneBot 11 WebSocket protocol.
-# The QQ bot server acts as a WebSocket endpoint; this driver connects as a client,
-# receives push events, and sends actions over the same connection.
+# By default the QQ bot server acts as a WebSocket endpoint and this driver
+# connects as a client. In reverse mode, NapCat connects to a WebSocket endpoint
+# hosted by NextBridge. Both modes receive push events and send actions over the
+# same connection.
 #
 # Config keys (under qq.<instance_id>):
-#   ws_url        – WebSocket URL, e.g. "ws://127.0.0.1:3001"
-#   ws_token      – Optional access token
+#   connection_mode – "forward" (default) or "reverse"
+#   ws_url          – NapCat WebSocket URL in forward mode, e.g. "ws://127.0.0.1:3001"
+#   ws_token        – Optional access token
+#   reverse_ws_path – NextBridge WebSocket path in reverse mode
 #   max_file_size    – Max bytes to download when bridging media (default 10 MB)
 #   file_send_mode   – How to upload files/videos to QQ: \"stream\" (default) or \"base64\"
 #                      stream: chunked upload_file_stream → upload_group_file with path
@@ -30,7 +34,7 @@ from typing import Any, Literal
 
 import websockets
 import websockets.exceptions
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse, Response
 
 import services.logger as log
@@ -48,8 +52,10 @@ from services.util import LRUDict, mask_url_credentials
 
 class QqConfig(_DriverConfig):
     protocol: Literal["napcat", "lagrange", "onebot_v11"] = "napcat"
+    connection_mode: Literal["forward", "reverse"] = "forward"
     ws_url: str = "ws://127.0.0.1:3001"
     ws_token: str = ""
+    reverse_ws_path: str = ""
     ws_ssl_verify: bool = True
     max_file_size: int = 10 * 1024 * 1024
     file_send_mode: Literal["stream", "base64"] = "stream"
@@ -197,6 +203,8 @@ class QqDriver(BaseDriver[QqConfig]):
         self._forward_file_url_cache: LRUDict[str, str | None] = LRUDict(maxsize=1000)
         self._forward_gc_task: asyncio.Task | None = None
         self._forward_mount_registered = False
+        self._reverse_mount_registered = False
+        self._reverse_connection_event = asyncio.Event()
         # Ordered FIFO queue + single worker: events must be processed in the
         # order they arrive on the WebSocket, otherwise bridged messages can be
         # reordered (fire-and-forget create_task interleaves concurrent handlers).
@@ -221,9 +229,20 @@ class QqDriver(BaseDriver[QqConfig]):
         self.bridge.register_pinner(self.instance_id, self.pin)
         self.bridge.register_unpinner(self.instance_id, self.unpin)
         self._ensure_forward_http_mount()
+        self._ensure_reverse_ws_mount()
         self._ensure_forward_gc_task()
         if self._event_worker_task is None or self._event_worker_task.done():
             self._event_worker_task = asyncio.create_task(self._event_worker())
+
+        if self.config.connection_mode == "reverse":
+            self.logger.info(
+                f"waiting for NapCat reverse WebSocket connection at {self._reverse_ws_path()}"
+            )
+            try:
+                await self._reverse_connection_event.wait()
+            finally:
+                self._reverse_connection_event.clear()
+            return
 
         ws_url = self.config.ws_url
         if self.config.ws_token:
@@ -269,6 +288,94 @@ class QqDriver(BaseDriver[QqConfig]):
 
             self.logger.info("reconnecting in 5s...")
             await asyncio.sleep(5)
+
+    def _reverse_ws_path(self) -> str:
+        configured = (self.config.reverse_ws_path or "").strip()
+        if configured:
+            return self._normalize_mount_path(configured)
+        return f"/onebot/v11/{self.instance_id}"
+
+    def _ensure_reverse_ws_mount(self) -> None:
+        if self.config.connection_mode != "reverse" or self._reverse_mount_registered:
+            return
+        if self.http_server is None:
+            raise RuntimeError(
+                f"NapCat [{self.instance_id}] reverse WebSocket requires the shared HTTP server"
+            )
+
+        app = FastAPI()
+
+        @app.websocket("/")
+        async def _reverse_websocket(websocket: WebSocket) -> None:
+            if self.config.ws_token:
+                authorization = websocket.headers.get("authorization", "")
+                expected = f"Bearer {self.config.ws_token}"
+                if authorization != expected:
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    self.logger.warning(
+                        f"NapCat [{self.instance_id}] rejected unauthenticated reverse WebSocket connection"
+                    )
+                    return
+
+            await websocket.accept()
+            if self._ws is not None:
+                await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
+                self.logger.warning(
+                    f"NapCat [{self.instance_id}] rejected a second reverse WebSocket connection"
+                )
+                return
+
+            self._ws = websocket
+            self._reverse_connection_event.set()
+            self.logger.info("NapCat reverse WebSocket connected")
+            try:
+                await self._listen(websocket)
+            except WebSocketDisconnect:
+                self.logger.info("NapCat reverse WebSocket disconnected")
+            finally:
+                if self._ws is websocket:
+                    self._ws = None
+
+        self.http_server.mount(
+            instance_id=f"{self.instance_id}/reverse-ws",
+            path=self._reverse_ws_path(),
+            app=app,
+        )
+        self._reverse_mount_registered = True
+        self.logger.info(
+            f"NapCat [{self.instance_id}] reverse WebSocket mounted at {self._reverse_ws_path()}"
+        )
+
+    async def stop(self) -> None:
+        if self._ws is not None:
+            try:
+                await self._ws.close()
+            except Exception:
+                self.logger.debug("NapCat reverse WebSocket close failed")
+            finally:
+                self._ws = None
+        if self.http_server is not None:
+            self.http_server.unmount(f"{self.instance_id}/reverse-ws")
+            self.http_server.unmount(f"{self.instance_id}/forward")
+        for task in (
+            self._event_worker_task,
+            self._forward_gc_task,
+            self._essence_poll_task,
+        ):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(
+            *(
+                task
+                for task in (
+                    self._event_worker_task,
+                    self._forward_gc_task,
+                    self._essence_poll_task,
+                )
+                if task is not None
+            ),
+            return_exceptions=True,
+        )
 
     def _normalize_mount_path(self, path: str) -> str:
         normalized = (path or "/qq-forward").strip()
@@ -521,8 +628,13 @@ class QqDriver(BaseDriver[QqConfig]):
     # ------------------------------------------------------------------
 
     async def _listen(self, ws):
-        async for raw in ws:
+        while True:
             try:
+                raw = (
+                    await ws.receive_text()
+                    if isinstance(ws, WebSocket)
+                    else await ws.recv()
+                )
                 data = json.loads(raw)
                 # Action responses carry an "echo" field and "status" — route
                 # them to any waiting _call() coroutine, then skip normal handling.
@@ -533,6 +645,10 @@ class QqDriver(BaseDriver[QqConfig]):
                         fut.set_result(data)
                     continue
                 self._spawn_event_task(data)
+            except WebSocketDisconnect:
+                raise
+            except websockets.exceptions.ConnectionClosed:
+                return
             except json.JSONDecodeError:
                 self.logger.warning("invalid JSON received")
             except Exception as e:
@@ -2232,7 +2348,11 @@ class QqDriver(BaseDriver[QqConfig]):
             try:
                 try:
                     async with self._send_lock:
-                        await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                        encoded_payload = json.dumps(payload, ensure_ascii=False)
+                        if isinstance(self._ws, WebSocket):
+                            await self._ws.send_text(encoded_payload)
+                        else:
+                            await self._ws.send(encoded_payload)
                     return await asyncio.wait_for(fut, timeout=timeout)
                 finally:
                     self._pending.pop(echo, None)
