@@ -1496,7 +1496,21 @@ class Bridge:
                 continue
 
             try:
-                await editor(target_channel, target_msg_id, formatted_out, **extra_out)
+                edit_msg_id = await editor(
+                    target_channel, target_msg_id, formatted_out, **extra_out
+                )
+                if edit_msg_id:
+                    edit_msg_ids = (
+                        edit_msg_id if isinstance(edit_msg_id, list) else [edit_msg_id]
+                    )
+                    for mapped_msg_id in edit_msg_ids:
+                        if mapped_msg_id:
+                            msg_db().save_mapping(
+                                bridge_id,
+                                target_id,
+                                target_channel,
+                                str(mapped_msg_id),
+                            )
             except Exception:
                 logger.exception(f"Failed to edit message on '{target_id}'")
 

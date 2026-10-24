@@ -524,6 +524,52 @@ class TestRegisterSender:
         assert "inst1" not in bridge._senders
 
 
+class TestDispatchEdit:
+    @pytest.mark.asyncio
+    async def test_saves_mapping_for_edit_generated_message(self, bridge):
+        editor = AsyncMock(return_value="qq-edit-001")
+        bridge._senders = {"qq_target": ("qq", AsyncMock())}
+        bridge._editors = {"qq_target": editor}
+        bridge._sensitive = frozenset()
+
+        msg = NormalizedMessage(
+            instance_id="discord_source",
+            channel={"id": "source-channel"},
+            text="updated text",
+            message_id="source-message",
+        )
+        rule = {
+            "id": "rule1",
+            "type": "forward",
+            "to": {"qq_target": {"group_id": "123"}},
+            "msg": {"msg_format": "{msg}"},
+        }
+
+        with patch("services.bridge.msg_db") as mock_msg_db:
+            mock_db = MagicMock()
+            mock_db.get_platform_msg_id.return_value = "qq-original-001"
+            mock_msg_db.return_value = mock_db
+
+            await bridge._dispatch_edit(
+                msg, rule, "rule1:discord_source:source-message"
+            )
+
+        editor.assert_awaited_once()
+        editor_call = editor.await_args
+        assert editor_call is not None
+        assert editor_call.args == (
+            {"group_id": "123"},
+            "qq-original-001",
+            "updated text",
+        )
+        mock_db.save_mapping.assert_called_once_with(
+            "rule1:discord_source:source-message",
+            "qq_target",
+            {"group_id": "123"},
+            "qq-edit-001",
+        )
+
+
 class TestDispatchContinueOnError:
     """核心: 单个目标发送失败不应该中断后续目标 (issue #1)"""
 
