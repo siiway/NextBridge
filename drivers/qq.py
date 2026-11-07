@@ -47,7 +47,7 @@ from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
 from services.message_format import parse_richheader_tag
-from services.util import LRUDict, mask_url_credentials
+from services.util import LRUDict, mask_url_credentials, strip_invisible_chars
 
 
 class QqConfig(_DriverConfig):
@@ -1672,6 +1672,10 @@ class QqDriver(BaseDriver[QqConfig]):
                 nickname = value
                 break
 
+        # Sender names come from the platform verbatim and may contain zero-width
+        # or control characters that corrupt the rendered forward page.
+        nickname = strip_invisible_chars(nickname)
+
         return user_id, (nickname or "Unknown")
 
     @staticmethod
@@ -1798,6 +1802,9 @@ class QqDriver(BaseDriver[QqConfig]):
     ) -> dict | None:
         if not msg_format:
             return None
+
+        # The nickname may come from a caller that bypassed the bridge sanitizer.
+        nickname = strip_invisible_chars(nickname)
 
         avatar = (
             f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=160"

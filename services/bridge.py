@@ -12,6 +12,7 @@ from services import config, cqface
 from services.db import msg_db
 from services.message import NormalizedMessage
 from services.message_format import parse_richheader_tag
+from services.util import strip_invisible_chars
 
 CommandHandler = Callable[..., Awaitable[None]]
 
@@ -74,6 +75,7 @@ class Bridge:
         self.mention_notify_control: bool = True
         self.command_prefix: str = "nb"
         self.send_timeout: float = 2.0
+        self.sanitize_nickname: bool = True
         self.slow_queue_maxsize: int = 1000
         self._slow_queue: asyncio.Queue = asyncio.Queue(maxsize=self.slow_queue_maxsize)
         self._slow_worker_task: asyncio.Task | None = None
@@ -167,6 +169,19 @@ class Bridge:
         else:
             # Default mode: skip if either instance_id or channel matches
             return target_id == msg.instance_id or target_channel == msg.channel
+
+    def sanitize_names(self, msg: NormalizedMessage) -> None:
+        """Strip non-rendering Unicode characters from sender names in place.
+
+        Controlled by ``global.sanitize_nickname`` (default on). Removing zero
+        width/format/control characters keeps names from corrupting the bridge
+        output (e.g. ``&\u200bkilljsj``) and from breaking display-name based
+        lookups.
+        """
+        if not self.sanitize_nickname:
+            return
+        msg.nickname = strip_invisible_chars(msg.nickname)
+        msg.username = strip_invisible_chars(msg.username)
 
     def load_sensitive_values(self, config: dict):
         found: set[str] = set()
@@ -666,6 +681,7 @@ class Bridge:
     # ------------------------------------------------------------------
 
     async def on_message(self, msg: NormalizedMessage):
+        self.sanitize_names(msg)
         logger.info(f"on_message: {msg!s}")
 
         if self._metrics and not (
@@ -800,6 +816,7 @@ class Bridge:
             if result is None:
                 return
             msg = result
+            self.sanitize_names(msg)
 
         # Save sender's user mapping
         if msg.user_id:
@@ -943,23 +960,31 @@ class Bridge:
             )
         # Format username with @ prefix if it exists
         username_value = getattr(msg, "username", "")
+        if self.sanitize_nickname:
+            username_value = strip_invisible_chars(username_value)
         if username_value and not username_value.startswith("@"):
             username_value = f"@{username_value}"
         # If username is empty, fallback to user_id
         if not username_value:
             username_value = msg.user_id
 
+        display_nickname = msg.nickname
+        display_user = msg.user
+        if self.sanitize_nickname:
+            display_nickname = strip_invisible_chars(display_nickname)
+            display_user = display_nickname
+
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
             "from": msg.instance_id,
-            "user": msg.user,
+            "user": display_user,
             "user_id": msg.user_id,
             "user_avatar": msg.user_avatar,
             "msg": msg.text,
             "time": msg.time,
             "username": username_value,
-            "nickname": getattr(msg, "nickname", ""),
+            "nickname": display_nickname,
             "source_mentioned_self": getattr(msg, "source_mentioned_self", None),
         }
         try:
@@ -1396,6 +1421,7 @@ class Bridge:
 
     async def on_edit_message(self, msg: NormalizedMessage):
         """Called by drivers when a message is edited on their platform."""
+        self.sanitize_names(msg)
         logger.info(f"on_edit_message: {msg!s}")
         source_msg_id = msg.edit_target_id or msg.message_id
         if not source_msg_id:

@@ -28,6 +28,7 @@ HOT_RELOAD_GLOBAL_KEYS = frozenset(
         "fuzzy_mention_match",
         "mention_notify_control",
         "send_timeout",
+        "sanitize_nickname",
     }
 )
 """Global config keys that can be applied without a restart."""
@@ -148,6 +149,7 @@ class ReloadEngine:
         self._bridge.fuzzy_mention_match = validated.fuzzy_mention_match
         self._bridge.mention_notify_control = validated.mention_notify_control
         self._bridge.send_timeout = validated.send_timeout
+        self._bridge.sanitize_nickname = validated.sanitize_nickname
         config.apply_raw(raw, self._config_path)
         return validated
 

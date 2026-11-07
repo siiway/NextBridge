@@ -365,6 +365,18 @@ class GlobalConfig(BaseModel):
     Messages that exceed this timeout keep sending in the background while the
     main worker continues with the next message. Default is 2.0 seconds."""
 
+    sanitize_nickname: CoercedBool = True
+    """Strip non-rendering Unicode characters from sender names before bridging.
+
+    When True (default): control characters, zero-width/format characters
+    (including U+200B-U+200F and bidi overrides), line/paragraph separators and
+    other non-rendering code points are removed from ``nickname`` and
+    ``username`` (plus rich-header titles and forward-node names) before they
+    are formatted into outgoing messages or persisted as display names.
+
+    When False: names are bridged verbatim. Only disable this if a platform
+    legitimately needs invisible characters in display names."""
+
     log: LoggingConfig = LoggingConfig()
     """Logging configuration for controlling log output and rotation."""
 

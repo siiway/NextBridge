@@ -272,6 +272,7 @@ async def main():
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
     bridge.fuzzy_mention_match = global_config.get("fuzzy_mention_match", False)
     bridge.mention_notify_control = global_config.get("mention_notify_control", True)
+    bridge.sanitize_nickname = global_config.get("sanitize_nickname", True)
 
     try:
         validated_global = GlobalConfig.model_validate(global_config)
@@ -292,6 +293,7 @@ async def main():
     )
     bridge.command_prefix = validated_global.command_prefix
     bridge.send_timeout = validated_global.send_timeout
+    bridge.sanitize_nickname = validated_global.sanitize_nickname
 
     # ------------------------------------------------------------------
     # Set up plugin infrastructure (before init_db so migrations register)

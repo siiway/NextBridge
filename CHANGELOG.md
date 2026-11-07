@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   config patching, plugin enable/disable/restart, driver restart/reload, and a
   full reload, with a unified response envelope, optimistic concurrency
   (`If-Match` / `?force=true`), and config redaction.
+- **Nickname sanitization.** `global.sanitize_nickname` (default `true`) strips
+  non-rendering Unicode characters from sender names before bridging: control
+  characters, zero-width/format characters (including `U+200B`-`U+200F` and
+  bidi overrides), variation selectors, and line/paragraph separators are
+  removed from `nickname`/`username`, formatted bridge headers, and QQ
+  forward-node sender names. This prevents names such as `&` + `U+200B` +
+  `killjsj` from corrupting bridged output. Hot-reloadable.
 
 ### Changed
 

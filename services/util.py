@@ -1,5 +1,6 @@
 import os
 import re
+import unicodedata
 from collections import OrderedDict
 from typing import Any, Generic, TypeVar
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -15,6 +16,30 @@ _SENSITIVE_QUERY_KEYS = {
     "auth",
 }
 _BOT_TOKEN_PATH_RE = re.compile(r"(/bot)([^/]+)", re.IGNORECASE)
+
+# Unicode general categories that render as nothing (or as control behaviour)
+# and therefore must never be bridged as part of a display name:
+#   Cc = control, Cf = format (zero-width joiner/space, bidi overrides, ...),
+#   Cs = surrogate, Co = private use, Cn = unassigned,
+#   Zl = line separator, Zp = paragraph separator.
+# Note: Zs (spaces) is intentionally kept — names may legitimately contain a
+# normal space.
+_INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+# Variation selectors are category Mn (combining marks) yet render as nothing on
+# their own — they only modify the preceding glyph — so they are dropped too.
+_INVISIBLE_RANGES = (
+    (0xFE00, 0xFE0F),  # Variation Selectors
+    (0xE0100, 0xE01EF),  # Variation Selectors Supplement
+)
+
+
+def _is_invisible_char(ch: str) -> bool:
+    if unicodedata.category(ch) in _INVISIBLE_CATEGORIES:
+        return True
+    code = ord(ch)
+    return any(start <= code <= end for start, end in _INVISIBLE_RANGES)
+
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -54,6 +79,46 @@ def get_data_path():
 
 def get_env(env: str):
     return os.environ.get(env)
+
+
+def strip_invisible_chars(value: object, *, prefix: str = "") -> str:
+    """Remove non-rendering Unicode characters from a display string.
+
+    Drops control, format (zero-width spaces/joiners, bidi overrides),
+    surrogate, private-use, unassigned, line/paragraph separator characters and
+    variation selectors. Normal spaces and all visible characters are preserved.
+    Returns the input unchanged when it contains no such characters, and returns
+    an empty string for non-string values so callers can pass ``None``/ints
+    safely.
+    """
+    if not isinstance(value, str):
+        return ""
+    if not value:
+        return value
+    cleaned = "".join(ch for ch in value if not _is_invisible_char(ch))
+    if cleaned == value:
+        return value
+    return f"{prefix}{cleaned}" if prefix else cleaned
+
+
+def strip_invisible_chars_in_obj(obj: Any, *, prefix: str = "") -> Any:
+    """Recursively apply :func:`strip_invisible_chars` to strings/keys in *obj*."""
+    if isinstance(obj, str):
+        return strip_invisible_chars(obj, prefix=prefix)
+    if isinstance(obj, dict):
+        return {
+            (
+                strip_invisible_chars_in_obj(k, prefix=prefix)
+                if isinstance(k, str)
+                else k
+            ): strip_invisible_chars_in_obj(v, prefix=prefix)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [strip_invisible_chars_in_obj(item, prefix=prefix) for item in obj]
+    if isinstance(obj, tuple):
+        return tuple(strip_invisible_chars_in_obj(item, prefix=prefix) for item in obj)
+    return obj
 
 
 def mask_url_credentials(url: str) -> str:
