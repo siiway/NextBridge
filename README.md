@@ -50,6 +50,9 @@
  - slack-sdk
  - google-auth
  - neonize
+ - psycopg2
+ - ruamel.yaml
+ - prometheus-client
 
 ## License
 

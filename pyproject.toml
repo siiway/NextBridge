@@ -1,6 +1,6 @@
 [project]
 name = "nextbridge"
-version = "0.3.0"
+version = "0.4.0"
 description = "The chat bridge that links up all the major chat platforms!"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -14,6 +14,7 @@ dependencies = [
     "khl-py>=0.3.17",
     "yunhu>=0.0.11",
     "pyyaml>=6.0",
+    "ruamel.yaml>=0.18",
     "tomli-w>=1.0",
     "mautrix>=0.21.0",
     "vodozemac>=0.6.0",
@@ -33,11 +34,13 @@ dependencies = [
     "uvicorn>=0.43.0",
     "fresholm>=0.2.4",
     "tzlocal>=5.3.1",
+    "psycopg2-binary>=2.9",
+    "prometheus-client>=0.21",
 ]
 
 [[tool.uv.index]]
-name = "ustc"
-url = "https://mirrors.ustc.edu.cn/pypi/web/simple/"
+name = "pypi"
+url = "https://pypi.org/simple"
 
 # Backup
 # [[tool.uv.index]]
@@ -52,9 +55,18 @@ line-length = 88
 indent-width = 4
 
 [tool.ruff.lint]
+# Pin the rule set explicitly so linting stays deterministic across Ruff
+# releases. These are Ruff's historical defaults (pycodestyle errors + Pyflakes);
+# Ruff 0.16.0 broadened the implicit default selection, which would otherwise
+# enable hundreds of previously-unenforced rules on upgrade.
+select = ["E4", "E7", "E9", "F"]
 ignore = [
     "E741", # Ambiguous variable name: l / O / I
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.15.6", "ty>=0.0.23"]
+dev = ["ruff>=0.15.6", "ty>=0.0.23", "pytest>=8.0.0", "pytest-asyncio>=0.21.0,<1.0"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

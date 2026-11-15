@@ -11,6 +11,8 @@
 #   app_id        – Azure bot application (client) ID     (required)
 #   app_secret    – Azure bot client secret               (required)
 #   listen_path   – HTTP path for the messaging endpoint  (default: "/api/messages")
+#   webhook_secret – Optional secret appended as an extra path segment
+#                    (host:port/<listen_path>/<webhook_secret>). Omitted when unset.
 #   max_file_size – Max bytes per attachment when sending (default 20 MB)
 #
 # Rule channel keys:
@@ -27,24 +29,23 @@ from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
 from services import media
 from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
+from services.message_format import apply_rich_header
 
 
 class TeamsConfig(_DriverConfig):
     app_id: str
     app_secret: str
     listen_path: str = "/api/messages"
+    webhook_secret: str = ""
     max_file_size: int = 20 * 1024 * 1024
     proxy: str | None = UNSET
 
-
-logger = log.get_logger()
 
 _TOKEN_URL = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
 _SCOPE = "https://api.botframework.com/.default"
@@ -57,6 +58,8 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         self._access_token: str = ""
         self._token_expires: float = 0.0
         self._proxy = get_proxy(config.proxy)
+        self._msg_queue: asyncio.Queue = asyncio.Queue()
+        self._msg_worker_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -65,22 +68,25 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
     async def start(self):
         if self._proxy:
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
-            logger.info(f"Teams [{self.instance_id}] use proxy {self._proxy}")
+            self.logger.info(f"use proxy {self._proxy}")
         else:
             connector = aiohttp.TCPConnector(ssl=True)
 
         self._session = aiohttp.ClientSession(connector=connector)
         self.bridge.register_sender(self.instance_id, self.send)
 
+        route_path, log_path = self.webhook_route(
+            self.config.listen_path, self.config.webhook_secret
+        )
         app = FastAPI()
-        app.add_api_route("/", self._handle_activity, methods=["POST"])
+        app.add_api_route(route_path, self._handle_activity, methods=["POST"])
         if self.http_server is None:
-            logger.error(f"Teams [{self.instance_id}] shared HTTP server unavailable")
+            self.logger.error("shared HTTP server unavailable")
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        logger.info(
-            f"Teams [{self.instance_id}] webhook mounted at {self.config.listen_path}"
-        )
+        self.logger.info(f"webhook mounted at {log_path}")
+        if self._msg_worker_task is None or self._msg_worker_task.done():
+            self._msg_worker_task = asyncio.create_task(self._msg_worker())
         try:
             await asyncio.Event().wait()
         finally:
@@ -106,17 +112,14 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             async with self._session.post(_TOKEN_URL, data=data) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    logger.error(
-                        f"Teams [{self.instance_id}] token fetch failed "
-                        f"HTTP {resp.status}: {body}"
-                    )
+                    self.logger.error(f"token fetch failed HTTP {resp.status}: {body}")
                     return ""
                 js = await resp.json()
                 self._access_token = js.get("access_token", "")
                 self._token_expires = time.time() + js.get("expires_in", 3600)
                 return self._access_token
         except Exception as e:
-            logger.error(f"Teams [{self.instance_id}] token fetch error: {e}")
+            self.logger.error(f"token fetch error: {e}")
             return ""
 
     # ------------------------------------------------------------------
@@ -203,8 +206,20 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             mentions=mentions,
             source_proxy=self._media_proxy,
         )
-        asyncio.create_task(self.bridge.on_message(normalized))
+        self._msg_queue.put_nowait(normalized)
         return PlainTextResponse("ok", status_code=200)
+
+    async def _msg_worker(self) -> None:
+        while True:
+            msg = await self._msg_queue.get()
+            try:
+                await self.bridge.on_message(msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(f"message handler error: {e}")
+            finally:
+                self._msg_queue.task_done()
 
     # ------------------------------------------------------------------
     # Send
@@ -220,23 +235,20 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
         reply_to_id = kwargs.get("reply_to_id")
 
         if self._session is None:
-            logger.warning(f"Teams [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return
 
         service_url = channel.get("service_url", "").rstrip("/")
         conversation_id = channel.get("conversation_id", "")
         if not service_url or not conversation_id:
-            logger.warning(
-                f"Teams [{self.instance_id}] send: missing service_url or "
-                f"conversation_id in channel {channel}"
+            self.logger.warning(
+                f"send: missing service_url or conversation_id in channel {channel}"
             )
             return
 
         token = await self._get_token()
         if not token:
-            logger.error(
-                f"Teams [{self.instance_id}] send: could not obtain access token"
-            )
+            self.logger.error("send: could not obtain access token")
             return
 
         headers = {
@@ -246,9 +258,7 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         url = f"{service_url}/v3/conversations/{conversation_id}/activities"
 
@@ -346,12 +356,11 @@ class TeamsDriver(BaseDriver[TeamsConfig]):
             async with self._session.post(url, json=body, headers=headers) as resp:
                 if resp.status not in (200, 201):
                     text = await resp.text()
-                    logger.error(
-                        f"Teams [{self.instance_id}] post activity failed "
-                        f"HTTP {resp.status}: {text[:200]}"
+                    self.logger.error(
+                        f"post activity failed HTTP {resp.status}: {text[:200]}"
                     )
         except Exception as e:
-            logger.error(f"Teams [{self.instance_id}] post activity error: {e}")
+            self.logger.error(f"post activity error: {e}")
 
 
 register("teams", TeamsConfig, TeamsDriver)

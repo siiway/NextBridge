@@ -11,6 +11,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
@@ -25,9 +26,14 @@ COPY . .
 # 创建数据目录
 RUN mkdir -p /app/data
 
+# 注入 NextBridge 构建版本 (格式: vX.X-YYYYMMDD-<短commit hash>)
+ARG NB_VERSION=""
+LABEL org.opencontainers.image.version=${NB_VERSION}
+ENV NEXTBRIDGE_BUILD_VERSION=${NB_VERSION}
+
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1
-ENV NEXTBRIDGE_DATA_DIR=/app/data
+ENV NEXTBRIDGE_DATA_PATH=/app/data
 # 使用 uv 创建的虚拟环境
 ENV PATH="/app/.venv/bin:$PATH"
 

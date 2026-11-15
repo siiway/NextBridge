@@ -9,19 +9,63 @@
 
 import mimetypes
 import asyncio
+import ipaddress
+import os
 import shutil
+import tempfile
+from pathlib import Path
+from urllib.parse import unquote, urljoin, urlparse
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
 
 import services.logger as log
 
-logger = log.get_logger()
+logger = log.get_logger("media")
 
 _DEFAULT_MAX = 10 * 1024 * 1024  # 10 MB
 
+# Cap concurrent media downloads so that a burst of large attachments cannot
+# multiply the per-download buffer (up to max_bytes each) into an OOM spike.
+_MAX_CONCURRENT_DOWNLOADS = 8
+
 _sessions: dict[str | None, aiohttp.ClientSession] = {}
 _ffmpeg_available: bool | None = None
+_download_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_download_semaphore() -> asyncio.Semaphore:
+    """Return the process-wide download semaphore, created lazily.
+
+    Created on first use inside a running event loop so the semaphore binds to
+    the correct loop; safe because NextBridge runs a single asyncio loop.
+    """
+    global _download_semaphore
+    if _download_semaphore is None:
+        _download_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
+    return _download_semaphore
+
+
+def _sniff_image_mime(data: bytes) -> str | None:
+    """Detect the real image MIME type from magic bytes.
+
+    QQ (and some other platforms) deliver animated stickers as ``image``
+    segments whose filename hint / server Content-Type claims ``.jpg`` even
+    though the bytes are actually a GIF.  Magic bytes are authoritative, so we
+    use them to correct a mislabeled or generic MIME type before deciding the
+    outbound filename.
+    """
+    if len(data) < 12:
+        return None
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 def _looks_like_amr(data: bytes) -> bool:
@@ -48,6 +92,7 @@ async def _convert_amr_to_ogg(data: bytes) -> tuple[bytes, str] | None:
             logger.warning("media: ffmpeg not found; AMR audio will be forwarded as-is")
             return None
 
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -75,9 +120,21 @@ async def _convert_amr_to_ogg(data: bytes) -> tuple[bytes, str] | None:
         return stdout, "audio/ogg"
     except TimeoutError:
         logger.warning("media: ffmpeg AMR->OGG conversion timed out")
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception as e:
+                logger.debug(f"media: error killing ffmpeg process: {e}")
         return None
     except Exception as e:
         logger.warning(f"media: ffmpeg AMR->OGG conversion error: {e}")
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception as kill_err:
+                logger.debug(f"media: error killing ffmpeg process: {kill_err}")
         return None
 
 
@@ -122,14 +179,174 @@ async def close_all_sessions() -> None:
                 )
 
 
+_DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://qq.com/",
+}
+
+_LOOPBACK_HOSTS = {"localhost", "localhost.localdomain"}
+
+
+def _is_public_ip(ip_str: str) -> bool:
+    """Return True if *ip_str* is a globally routable IP address."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return bool(ip.is_global)
+
+
+async def _validate_url(url: str) -> bool:
+    """Reject non-http(s) URLs and URLs resolving to non-public addresses.
+
+    This is a defense-in-depth SSRF guard: media attachments are fetched from
+    URLs supplied by remote messages, so we block loopback, private, link-local,
+    reserved, and metadata-service addresses before issuing any request.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    if host.lower() in _LOOPBACK_HOSTS:
+        return False
+    # If the host is a literal IP it must be globally routable; hostnames
+    # are resolved below and their addresses are checked.
+    try:
+        ipaddress.ip_address(host)
+        if not _is_public_ip(host):
+            return False
+    except ValueError:
+        pass
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(host, None)
+    except Exception:
+        return False
+    for info in infos:
+        if not _is_public_ip(str(info[4][0])):
+            return False
+    return True
+
+
+_SAFE_LOCAL_ROOTS: set[str] = {os.path.realpath(tempfile.gettempdir())}
+
+
+def add_safe_local_root(path: str | Path) -> None:
+    """Register an additional safe root directory for local media file reads."""
+    _SAFE_LOCAL_ROOTS.add(os.path.realpath(str(path)))
+
+
+def _is_safe_local_path(path: str) -> bool:
+    """Validate that *path* resides inside a designated safe temporary/cache directory.
+
+    Rejects traversal, sensitive system directories, and sensitive file names.
+    """
+    try:
+        real_path = os.path.realpath(path)
+    except Exception:
+        return False
+
+    # Block sensitive system prefixes and files
+    sensitive_prefixes = ("/etc", "/proc", "/sys", "/dev", "/root", "/boot")
+    if any(real_path.startswith(prefix) for prefix in sensitive_prefixes):
+        return False
+
+    name = os.path.basename(real_path).lower()
+    if name in {
+        ".env",
+        "config.yaml",
+        "config.yml",
+        "passwd",
+        "shadow",
+        "id_rsa",
+        "id_ed25519",
+    }:
+        return False
+
+    for root in _SAFE_LOCAL_ROOTS:
+        try:
+            real_root = os.path.realpath(root)
+            if (
+                os.path.commonpath([real_path, real_root]) == real_root
+                and real_path != real_root
+            ):
+                return True
+        except ValueError:
+            continue
+
+    return False
+
+
+def _local_path_of(url: str) -> str | None:
+    """Return a local filesystem path if *url* refers to a safe one, else ``None``.
+
+    Local drivers (e.g. QQ / NapCat) deliver cached media as absolute paths on
+    the bridge host rather than http(s) URLs. We accept ``file://`` URLs and
+    absolute paths only if they reside strictly within designated safe temporary
+    or cache directories.
+    """
+    path: str | None = None
+    if url.startswith("file://"):
+        rest = unquote(url[7:])
+        # file:///abs -> "/abs"; file://host/abs is not supported.
+        if rest.startswith("/"):
+            path = rest
+    elif os.path.isabs(url):
+        path = url
+
+    if path is not None:
+        if _is_safe_local_path(path):
+            return path
+        logger.warning(
+            f"media: blocked local file path outside safe directories: {path!r}"
+        )
+    return None
+
+
+async def _read_local_file(path: str, max_bytes: int) -> tuple[bytes, str] | None:
+    """Read a local file up to *max_bytes* with the same size guard as ``fetch``."""
+    if not _is_safe_local_path(path):
+        logger.warning(f"media.fetch: rejected unsafe local file path: {path!r}")
+        return None
+    try:
+        if not os.path.isfile(path):
+            logger.warning(f"media.fetch: local file not found {path!r}")
+            return None
+        size = os.path.getsize(path)
+        if size > max_bytes:
+            logger.debug(
+                f"media.fetch: local {path!r} size {size} > {max_bytes}, skipping"
+            )
+            return None
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, lambda: open(path, "rb").read())
+    except Exception as e:
+        logger.error(f"media.fetch failed to read local {path!r}: {e}")
+        return None
+    mime, _ = mimetypes.guess_type(path)
+    return data, mime or "application/octet-stream"
+
+
 async def fetch(
     url: str, max_bytes: int = _DEFAULT_MAX, proxy: str | None = None
 ) -> tuple[bytes, str] | None:
     """
     Download *url* up to *max_bytes*.
 
-    Sends a HEAD request first to check Content-Length before committing to a
-    full download.  Falls back to streaming if the server doesn't support HEAD.
+    Streams the response and aborts as soon as the body exceeds *max_bytes*,
+    so oversized files are never fully buffered in memory.  Local file URLs
+    (``file://`` or absolute paths) are read directly from disk.  Concurrent
+    downloads are capped by a semaphore so that parallel attachments cannot
+    collectively blow up memory.
 
     Returns ``(data, content_type)`` on success, or ``None`` if the file is
     oversized, the URL is empty, or the download fails.
@@ -137,42 +354,66 @@ async def fetch(
     if not url:
         return None
 
+    async with _get_download_semaphore():
+        return await _fetch_inner(url, max_bytes, proxy)
+
+
+async def _fetch_inner(
+    url: str, max_bytes: int, proxy: str | None
+) -> tuple[bytes, str] | None:
+    local_path = _local_path_of(url)
+    if local_path is not None:
+        return await _read_local_file(local_path, max_bytes)
+
     session = _get_session(proxy=proxy)
+    current_url = url
+    max_redirects = 3
 
-    try:
-        # Pre-flight HEAD to skip obviously oversized files without downloading
+    for redirect_count in range(max_redirects + 1):
+        if not await _validate_url(current_url):
+            logger.warning(f"media.fetch: blocked non-public URL {current_url!r}")
+            return None
+
         try:
-            async with session.head(
-                url,
-                allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(total=10),
+            async with session.get(
+                current_url,
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=60),
+                headers=_DEFAULT_HEADERS,
             ) as resp:
-                cl = resp.headers.get("Content-Length")
-                if cl and int(cl) > max_bytes:
-                    logger.debug(
-                        f"media.fetch: skipping {url!r} — Content-Length {cl} > {max_bytes}"
-                    )
-                    return None
-        except Exception:
-            pass  # server doesn't support HEAD; proceed with GET
+                if resp.status in (301, 302, 303, 307, 308):
+                    if redirect_count >= max_redirects:
+                        logger.warning(
+                            f"media.fetch: exceeded max redirects ({max_redirects}) for {url!r}"
+                        )
+                        return None
+                    location = resp.headers.get("Location")
+                    if not location:
+                        logger.warning(
+                            f"media.fetch: redirect missing Location header for {current_url!r}"
+                        )
+                        return None
+                    current_url = urljoin(current_url, location)
+                    continue
 
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-            resp.raise_for_status()
-            chunks: list[bytes] = []
-            total = 0
-            async for chunk in resp.content.iter_chunked(65536):
-                total += len(chunk)
-                if total > max_bytes:
-                    logger.debug(
-                        f"media.fetch: {url!r} exceeded {max_bytes} bytes, aborting"
-                    )
-                    return None
-                chunks.append(chunk)
-            return b"".join(chunks), resp.content_type or "application/octet-stream"
+                resp.raise_for_status()
+                data = bytearray()
+                total = 0
+                async for chunk in resp.content.iter_chunked(65536):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        logger.debug(
+                            f"media.fetch: {current_url!r} exceeded {max_bytes} bytes, aborting"
+                        )
+                        return None
+                    data.extend(chunk)
+                return bytes(data), resp.content_type or "application/octet-stream"
 
-    except Exception as e:
-        logger.error(f"media.fetch failed for {url!r}: {e}")
-        return None
+        except Exception as e:
+            logger.error(f"media.fetch failed for {current_url!r}: {e}")
+            return None
+
+    return None
 
 
 async def fetch_attachment(
@@ -204,6 +445,17 @@ async def fetch_attachment(
         if converted:
             return converted
 
+    # Correct a mislabeled/generic image MIME using magic bytes so that the
+    # outbound filename gets the right extension (e.g. QQ animated stickers that
+    # arrive named ".jpg" but are actually GIF, which would otherwise render as
+    # a static image on the receiving platform).
+    sniffed = _sniff_image_mime(data)
+    if sniffed and sniffed != mime:
+        logger.debug(
+            f"media.fetch_attachment: {att.name!r} MIME {mime!r} -> {sniffed!r} (magic bytes)"
+        )
+        mime = sniffed
+
     return data, mime
 
 
@@ -222,6 +474,21 @@ def filename_for(name: str, content_type: str) -> str:
         "audio/amr": "amr",
     }
     if name:
+        # For image types, align the filename extension with the actual MIME so
+        # that receiving platforms (Discord etc.) render the file correctly.
+        # QQ, for example, delivers animated stickers named ".jpg" whose bytes
+        # are really GIF; keeping ".jpg" makes them show up as a static image.
+        # Restricted to images so video/voice hints (e.g. Telegram animations
+        # named ".gif" but served as mp4) are left untouched.
+        img_ext = _mime_ext.get(content_type)
+        if img_ext and content_type.startswith("image/"):
+            base, dot, cur = name.rpartition(".")
+            if dot:
+                cur_norm = "jpg" if cur.lower() == "jpeg" else cur.lower()
+                if cur_norm != img_ext:
+                    return f"{base}.{img_ext}"
+                return name
+            return f"{name}.{img_ext}"
         # Platforms like Yunhu CDN serve all images with a .tmp extension.
         # Replace it with an extension derived from the actual MIME type so
         # that receiving platforms (Discord etc.) render the file correctly.
@@ -247,3 +514,20 @@ def filename_for(name: str, content_type: str) -> str:
         "audio/amr": "voice.amr",
     }
     return _fallback.get(content_type, "attachment.bin")
+
+
+def mime_to_attachment_type(mime: str) -> str:
+    """Map a MIME type to one of ``"image"``, ``"video"``, ``"voice"``, or ``"file"``."""
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("video/"):
+        return "video"
+    if mime.startswith("audio/"):
+        return "voice"
+    return "file"
+
+
+def attachment_fallback_text(att_type: str, label: str) -> str:
+    """Generate a plain-text fallback label for a failed attachment."""
+    display_type = "Image" if att_type == "image" else att_type.capitalize()
+    return f"[{display_type}: {label}]"

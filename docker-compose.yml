@@ -14,7 +14,7 @@ services:
       - ./logs:/app/logs
     environment:
       # 设置数据目录
-      - NEXTBRIDGE_DATA_DIR=/app/data
+      - NEXTBRIDGE_DATA_PATH=/app/data
       # 设置日志级别
       - LOG_LEVEL=INFO
       # ports:

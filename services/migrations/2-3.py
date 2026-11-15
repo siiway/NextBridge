@@ -88,5 +88,5 @@ def upgrade(conn: Connection, dialect_name: str = "") -> None:
         return
 
     # Standard SQL path for PostgreSQL/MySQL-like dialects.
-    conn.exec_driver_sql("ALTER TABLE forward_pages DROP COLUMN token")
-    conn.exec_driver_sql("ALTER TABLE forward_assets DROP COLUMN token")
+    conn.exec_driver_sql("ALTER TABLE forward_pages DROP COLUMN IF EXISTS token")
+    conn.exec_driver_sql("ALTER TABLE forward_assets DROP COLUMN IF EXISTS token")

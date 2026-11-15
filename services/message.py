@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 
-@dataclass
+@dataclass(slots=True)
 class Attachment:
     """A media attachment carried alongside a NormalizedMessage."""
 
@@ -12,7 +12,7 @@ class Attachment:
     data: bytes | None = None  # pre-fetched bytes; if set, skip URL download
 
 
-@dataclass
+@dataclass(slots=True)
 class NormalizedMessage:
     """Platform-agnostic message passed through the bridge."""
 
@@ -38,6 +38,21 @@ class NormalizedMessage:
         None  # proxy URL for downloading attachments from source platform
     )
     username: str = ""  # user's platform-specific name
+    is_dm: bool = False  # whether this message is a direct/private message
+    is_edit: bool = False  # whether this is a message edit event
+    edit_target_id: str | None = (
+        None  # platform message ID being edited (same as message_id on edit)
+    )
+    is_recall: bool = False  # whether this is a message recall/delete event
+    recall_target_id: str | None = (
+        None  # platform message ID being recalled (same as message_id on recall)
+    )
+    is_pin: bool = False  # whether this is a message pin event
+    pin_target_id: str | None = (
+        None  # platform message ID being pinned (same as message_id on pin)
+    )
+    is_unpin: bool = False  # whether this is a message unpin event
+    unpin_target_id: str | None = None  # platform message ID being unpinned
 
     @property
     def user(self) -> str:
@@ -55,7 +70,8 @@ class NormalizedMessage:
             "user_avatar",
             "text",
             "reply_parent",
-            "time, source_proxy",
+            "time",
+            "source_proxy",
         ):
             if hasattr(self, i):
                 l.append(f"{i}: {getattr(self, i)!r}")

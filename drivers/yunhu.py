@@ -4,8 +4,11 @@
 #           sync-only yunhu.Openapi helper class).
 #
 # Config keys (under yunhu.<instance_id>):
-#   token        – Bot token from the Yunhu control console (required)
-#   webhook_path – HTTP path for the webhook endpoint (default "/yunhu-webhook")
+#   token          – Bot token from the Yunhu control console (required)
+#   webhook_path   – HTTP path for the webhook endpoint (default "/yunhu-webhook")
+#   webhook_secret – Optional secret appended to the webhook URL as an extra
+#                    path segment (host:port/<webhook_path>/<webhook_secret>).
+#                    When unset the URL stays host:port/<webhook_path>.
 #   proxy_host   – Cloudflare Worker base URL for the media proxy.
 #                  /pfp?url=  is used for Yunhu CDN avatars (adds Referer).
 #                  /media?url= is used for external CDN URLs (e.g. Discord)
@@ -24,10 +27,10 @@ from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+from services.message_format import apply_rich_header
 from services.config import get_proxy, UNSET
 from drivers import BaseDriver
 
@@ -35,12 +38,11 @@ from drivers import BaseDriver
 class YunhuConfig(_DriverConfig):
     token: str = ""
     webhook_path: str = "/yunhu-webhook"
+    webhook_secret: str = ""
     proxy_host: str = "https://yh-proxy.siiway.top"
     max_file_size: int = 10 * 1024 * 1024
     proxy: str | None = UNSET
 
-
-logger = log.get_logger()
 
 _SEND_URL = "https://chat-go.jwzhd.com/open-apis/v1/bot/send"
 _IMAGE_UPLOAD_URL = "https://chat-go.jwzhd.com/open-apis/v1/image/upload"
@@ -68,12 +70,10 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         self.bridge.register_sender(self.instance_id, self.send)
 
         if not self._token:
-            logger.warning(
-                f"Yunhu [{self.instance_id}] no token configured — send disabled"
-            )
+            self.logger.warning("no token configured — send disabled")
 
         if self._proxy:
-            logger.info(f"Yunhu [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.info(f"using proxy {self._proxy}")
             connector = ProxyConnector.from_url(self._proxy, rdns=True)
         else:
             connector = aiohttp.TCPConnector(ssl=True)
@@ -81,14 +81,17 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
         self._session = aiohttp.ClientSession(connector=connector)
 
         path: str = self.config.webhook_path
+        # When a secret is configured the webhook URL becomes
+        # host:port/<webhook_path>/<webhook_secret>; otherwise it stays bare.
+        route_path, log_path = self.webhook_route(path, self.config.webhook_secret)
 
         app = FastAPI()
-        app.add_api_route("/", self._handle_webhook, methods=["POST"])
+        app.add_api_route(route_path, self._handle_webhook, methods=["POST"])
         if self.http_server is None:
-            logger.error(f"Yunhu [{self.instance_id}] shared HTTP server unavailable")
+            self.logger.error("shared HTTP server unavailable")
             return
         self.http_server.mount(self.instance_id, path, app)
-        logger.info(f"Yunhu [{self.instance_id}] webhook mounted at {path}")
+        self.logger.info(f"webhook mounted at {log_path}")
 
         await asyncio.Event().wait()  # run indefinitely
 
@@ -166,16 +169,12 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                     res = await resp.json()
                     if res.get("code") == 1:
                         return res.get("data", {}).get(key_name)
-                    logger.error(
-                        f"Yunhu [{self.instance_id}] upload failed API error: {res}"
-                    )
+                    self.logger.error(f"upload failed API error: {res}")
                 else:
                     body = await resp.text()
-                    logger.error(
-                        f"Yunhu [{self.instance_id}] upload failed HTTP {resp.status}: {body}"
-                    )
+                    self.logger.error(f"upload failed HTTP {resp.status}: {body}")
         except Exception as e:
-            logger.error(f"Yunhu [{self.instance_id}] upload error: {e}")
+            self.logger.error(f"upload error: {e}")
         return None
 
     # ------------------------------------------------------------------
@@ -191,8 +190,8 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             if event_type in ("message.receive.normal", "message.receive.instruction"):
                 await self._on_message(event)
         except Exception as e:
-            logger.error(
-                f"Yunhu [{self.instance_id}] webhook handler error: {e} Traceback: {e.__traceback__}"
+            self.logger.error(
+                f"webhook handler error: {e} Traceback: {e.__traceback__}"
             )
 
         # Yunhu expects a 200 with code=0 to acknowledge receipt
@@ -229,8 +228,8 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                 if url:
                     attachments.append(Attachment(type="video", url=url, name=name))
             case "file":
-                logger.debug(
-                    f"Yunhu [{self.instance_id}] ignoring received file message: {message.get('msgId') or message.get('messageId') or ''}"
+                self.logger.debug(
+                    f"ignoring received file message: {message.get('msgId') or message.get('messageId') or ''}"
                 )
 
         if not text.strip() and not attachments:
@@ -253,6 +252,7 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
             message_id=str(mid) if mid else None,
             reply_parent=str(pid) if pid else None,
             source_proxy=self._media_proxy,
+            is_dm=chat_type == "user",
         )
         await self.bridge.on_message(msg)
 
@@ -269,30 +269,22 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
     ):
         chat_id = channel.get("chat_id")
         if not chat_id:
-            logger.warning(
-                f"Yunhu [{self.instance_id}] send: no chat_id in channel {channel}"
-            )
+            self.logger.warning(f"send: no chat_id in channel {channel}")
             return None
         if not self._token:
-            logger.warning(
-                f"Yunhu [{self.instance_id}] send: no token, message dropped"
-            )
+            self.logger.warning("send: no token, message dropped")
             return None
         if self._session is None:
-            logger.warning(
-                f"Yunhu [{self.instance_id}] send: session not ready, message dropped"
-            )
+            self.logger.warning("send: session not ready, message dropped")
             return None
 
         chat_type: str = channel.get("chat_type", "group")
         reply_to_id = kwargs.get("reply_to_id")
-        first_msg_id = None
+        msg_ids = []
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         # Build the list of payloads to send: text first, then each attachment
         # as its native Yunhu content type.
@@ -411,22 +403,17 @@ class YunhuDriver(BaseDriver[YunhuConfig]):
                                 or d.get("messageInfo", {}).get("messageId")
                             )
 
-                            if mid and not first_msg_id:
-                                first_msg_id = str(mid)
+                            if mid:
+                                msg_ids.append(str(mid))
                         else:
-                            logger.error(
-                                f"Yunhu [{self.instance_id}] send failed API error: {data}"
-                            )
+                            self.logger.error(f"send failed API error: {data}")
                     else:
                         body = await resp.text()
-                        logger.error(
-                            f"Yunhu [{self.instance_id}] send failed "
-                            f"HTTP {resp.status}: {body}"
-                        )
+                        self.logger.error(f"send failed HTTP {resp.status}: {body}")
             except Exception as e:
-                logger.error(f"Yunhu [{self.instance_id}] send failed: {e}")
+                self.logger.error(f"send failed: {e}")
 
-        return first_msg_id
+        return msg_ids if msg_ids else None
 
 
 register("yunhu", YunhuConfig, YunhuDriver)

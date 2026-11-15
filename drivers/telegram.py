@@ -29,7 +29,9 @@
 import asyncio
 import html
 import io
-from typing import TypedDict
+import re
+import time
+from typing import Any, TypedDict
 from urllib.parse import urlencode
 
 # Runtime import (not TYPE_CHECKING): httpx.Proxy / httpx.URL are referenced in
@@ -38,7 +40,13 @@ from urllib.parse import urlencode
 # (declared in pyproject and required by python-telegram-bot).
 import httpx
 from PIL import Image, UnidentifiedImageError
-from telegram import LinkPreviewOptions, ReplyParameters, Update
+from telegram import (
+    InputMediaPhoto,
+    InputMediaVideo,
+    LinkPreviewOptions,
+    ReplyParameters,
+    Update,
+)
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -48,8 +56,16 @@ from drivers import BaseDriver
 from drivers.registry import register
 from services import media
 from services.config import UNSET, get_proxy
-from services.config_schema import _DriverConfig
+from services.config_schema import _DriverConfig, CoercedBool
 from services.message import Attachment, NormalizedMessage
+from services.message_format import telegram_richheader_html
+from services.util import LRUDict
+
+
+def _sanitize_telegram_url(url: str | None) -> str:
+    if not url:
+        return ""
+    return re.sub(r"/bot[^/]+/", "/bot***/", url)
 
 
 class _HTTPXRequestCommonKwargs(TypedDict, total=False):
@@ -134,20 +150,21 @@ class TelegramConfig(_DriverConfig):
     rich_header_host: str = "https://richheader.siiway.top"
     avatar_proxy_host: str = ""  # Base URL for avatar proxy (e.g. "https://avatarproxy.yourname.workers.dev")
     photo_padding_color: str | None = "#000000"
+    sanitize_accidental_mentions: CoercedBool = True
+    # When enabled, a recall bridged from another platform deletes the matching
+    # Telegram message. Note: the Telegram Bot API cannot notify us when a user
+    # deletes a message, so recalls cannot be *detected* from Telegram sources.
+    enable_recall: CoercedBool = True
     proxy: str | None = UNSET
 
 
-logger = log.get_logger()
 _TG_PHOTO_MAX_SIDE = 10000
 _TG_PHOTO_MAX_RATIO = 20
 
+_logger = log.get_logger("telegram")
+
 
 # Catch all non-command message types that may carry content
-def _richheader_html(title: str, content: str) -> str:
-    """Render a rich header as a Telegram HTML snippet."""
-    t = html.escape(title)
-    c = html.escape(content)
-    return f"<b>{t}</b>" + (f" · <i>{c}</i>" if c else "")
 
 
 def _prepare_photo_for_telegram(
@@ -220,9 +237,7 @@ def _prepare_photo_for_telegram(
     except UnidentifiedImageError:
         return data, filename
     except Exception as e:
-        logger.debug(
-            f"Telegram [{__name__}] image preprocess skipped for {filename}: {e}"
-        )
+        _logger.debug(f"image preprocess skipped for {filename}: {e}")
         return data, filename
 
 
@@ -263,7 +278,7 @@ def _parse_padding_color(color: str | None, mode: str) -> tuple[int, ...]:
                 rgb = (r, g, b)
                 rgba = (r, g, b, a)
     except Exception as exc:
-        logger.warning(f"Parse padding color {color} failed: {exc}")
+        _logger.warning(f"Parse padding color {color} failed: {exc}")
 
     return rgba if mode == "RGBA" else rgb
 
@@ -279,16 +294,21 @@ def _attachment_fallback_label(
 
 
 _CONTENT_FILTER = (
-    filters.TEXT
-    | filters.PHOTO
-    | filters.VIDEO
-    | filters.VOICE
-    | filters.AUDIO
-    | filters.Document.ALL
-    | filters.ANIMATION
-) & ~filters.COMMAND
+    (
+        filters.TEXT
+        | filters.PHOTO
+        | filters.VIDEO
+        | filters.VOICE
+        | filters.AUDIO
+        | filters.Document.ALL
+        | filters.ANIMATION
+        | filters.Sticker.ALL
+    )
+    & ~filters.COMMAND
+    & ~filters.UpdateType.EDITED_MESSAGE
+)
 
-_COMMAND_FILTER = filters.COMMAND
+_COMMAND_FILTER = filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE
 
 
 class TelegramDriver(BaseDriver[TelegramConfig]):
@@ -296,6 +316,10 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         super().__init__(instance_id, config, bridge)
         self._app: Application | None = None
         self._proxy = get_proxy(config.proxy)
+        # user_id → (monotonic timestamp, avatar URL) cache to avoid re-fetching
+        # the user's profile photo on every inbound message. Bounded LRU to
+        # prevent unbounded growth on large groups.
+        self._avatar_cache: LRUDict[str, tuple[float, str]] = LRUDict(maxsize=1000)
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
@@ -320,9 +344,15 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         )
         self._app.add_handler(MessageHandler(_CONTENT_FILTER, self._on_message))
         self._app.add_handler(MessageHandler(_COMMAND_FILTER, self._on_command_message))
+        self._app.add_handler(
+            MessageHandler(filters.UpdateType.EDITED_MESSAGE, self._on_edited_message)
+        )
+        self._app.add_handler(
+            MessageHandler(filters.StatusUpdate.PINNED_MESSAGE, self._on_pinned_message)
+        )
         self._app.add_error_handler(self._on_error)
 
-        logger.info(f"Telegram [{self.instance_id}] starting application and polling.")
+        self.logger.debug("starting application and polling.")
 
         # ensure bot's get_me is retried on failure
         # error in start/start_polling shouldn't happen, so let it crash if it does
@@ -332,26 +362,31 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     await self._app.initialize()
                     break
                 except TelegramError as e:
-                    logger.error(
-                        f"Telegram [{self.instance_id}] initialization failed: {e}, retrying in 5 seconds..."
+                    self.logger.error(
+                        f"initialization failed: {e}, retrying in 5 seconds..."
                     )
                     await asyncio.sleep(5)
         except asyncio.CancelledError:
-            logger.info(f"Telegram [{self.instance_id}] initialization cancelled.")
+            self.logger.debug("initialization cancelled.")
             return
         await self._app.start()
+        self.bridge.register_editor(self.instance_id, self.edit)
+        if self.config.enable_recall:
+            self.bridge.register_deleter(self.instance_id, self.delete)
+        self.bridge.register_pinner(self.instance_id, self.pin)
+        self.bridge.register_unpinner(self.instance_id, self.unpin)
         assert self._app.updater is not None
-        logger.info(f"Telegram [{self.instance_id}] application started.")
+        self.logger.debug("application started.")
         await self._app.updater.start_polling(
             allowed_updates=Update.ALL_TYPES,
             timeout=10,
             bootstrap_retries=10,
         )
-        logger.info(f"Telegram [{self.instance_id}] polling started.")
+        self.logger.debug("polling started.")
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            logger.info(f"Telegram [{self.instance_id}] polling cancelled.")
+            self.logger.debug("polling cancelled.")
         finally:
             await self.stop()
 
@@ -367,7 +402,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         self._app = None
 
     async def _on_error(self, _: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logger.opt(exception=True).exception(
+        self.logger.opt(exception=True).exception(
             "Telegram [%s] handler error", self.instance_id
         )
 
@@ -389,6 +424,13 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             prefix = "nb"
         return root == prefix
 
+    def _is_recall_command_text(self, text: str) -> bool:
+        command_text = (text or "").strip()
+        if not command_text.startswith("/"):
+            return False
+        root = command_text[1:].split(maxsplit=1)[0].split("@", 1)[0].lower()
+        return root == "recall"
+
     async def _on_command_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
@@ -396,11 +438,119 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
         if not msg or not msg.text:
             return
 
+        # /recall: user-driven recall notification (workaround for the Bot API
+        # not delivering deletion updates). Reply to a message with /recall to
+        # signal that it should be recalled everywhere.
+        if self._is_recall_command_text(msg.text):
+            await self._on_recall_command(update, context)
+            return
+
         # Only forward NextBridge built-in commands (/ping and /<prefix> ...).
         if not self._is_nextbridge_command_text(msg.text):
             return
 
         await self._on_message(update, context)
+
+    async def _on_recall_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        if not self.config.enable_recall:
+            return
+        msg = update.message
+        if not msg:
+            return
+        chat_id = str(msg.chat_id)
+        reply = msg.reply_to_message
+        if not reply:
+            if self._app:
+                try:
+                    await self._app.bot.send_message(
+                        chat_id=int(chat_id),
+                        text="用法：回复要撤回的消息并发送 /recall。",
+                        reply_to_message_id=msg.message_id,
+                    )
+                except Exception as e:
+                    self.logger.warning(f"recall usage hint failed: {e}")
+            return
+
+        target_id = str(reply.message_id)
+        normalized = NormalizedMessage(
+            platform="telegram",
+            instance_id=self.instance_id,
+            channel={"chat_id": chat_id},
+            message_id=target_id,
+            recall_target_id=target_id,
+            is_recall=True,
+            is_dm=msg.chat_id > 0,
+        )
+        await self.bridge.on_recall_message(normalized)
+
+        # Also remove the original message and the /recall command message on
+        # Telegram itself (best-effort; requires delete permission).
+        if self._app:
+            for mid in (reply.message_id, msg.message_id):
+                try:
+                    await self._app.bot.delete_message(
+                        chat_id=int(chat_id), message_id=mid
+                    )
+                except Exception as e:
+                    self.logger.warning(f"recall: delete message {mid} failed: {e}")
+
+    async def _resolve_attachment(
+        self, file_source: Any, att_type: str, name: str, size: int = -1
+    ) -> Attachment:
+        f = await file_source.get_file()
+        file_size = getattr(f, "file_size", None)
+        if file_size is None or file_size < 0:
+            file_size = size
+
+        max_allowed = max(1, int(self.config.max_file_size or 50 * 1024 * 1024))
+        if file_size and file_size > max_allowed:
+            self.logger.warning(
+                f"Telegram [{self.instance_id}] {att_type} size {file_size} exceeds max_file_size ({max_allowed}), skipping pre-download"
+            )
+            # Return attachment without downloading bytes, keeping sanitized url
+            return Attachment(
+                type=att_type,
+                url=_sanitize_telegram_url(f.file_path),
+                name=name,
+                size=file_size,
+                data=None,
+            )
+
+        file_bytes: bytes | None = None
+        # Attempt pre-download with a retry on transient failure
+        for attempt in range(2):
+            try:
+                file_bytes = bytes(await f.download_as_bytearray())
+                break
+            except Exception as e:
+                if attempt == 0:
+                    self.logger.debug(
+                        f"Telegram [{self.instance_id}] transient download error for {att_type}, retrying: {e}"
+                    )
+                    await asyncio.sleep(0.5)
+                else:
+                    self.logger.warning(
+                        f"Telegram [{self.instance_id}] failed to pre-download {att_type} after retry: {e}"
+                    )
+
+        # If pre-download failed, keep the raw file_path as url so downstream
+        # media fetch can attempt download with credentials/session if supported,
+        # but if pre-download succeeded or file_path is empty, use the sanitized url.
+        url = (
+            f.file_path or ""
+            if file_bytes is None
+            else _sanitize_telegram_url(f.file_path)
+        )
+        actual_size = len(file_bytes) if file_bytes is not None else file_size
+        return Attachment(
+            type=att_type,
+            url=url,
+            name=name,
+            size=actual_size,
+            data=file_bytes,
+        )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = update.message
@@ -439,134 +589,136 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             if from_user
             else user_id
         )
-        username = from_user.username or "" if from_user else ""
+        username = (from_user.username or "") if from_user else ""
 
-        # Get user avatar
+        # Get user avatar (cached; TTL 1h)
         user_avatar = ""
         if from_user and self._app:
-            try:
-                photos = await self._app.bot.get_user_profile_photos(
-                    user_id=int(user_id), limit=1
-                )
-                if photos.photos:
-                    photo = photos.photos[0][-1]  # Get the largest size
-                    f = await photo.get_file()
+            cached = self._avatar_cache.get(user_id)
+            now = time.monotonic()
+            if cached is not None and now - cached[0] < 3600:
+                user_avatar = cached[1]
+            else:
+                try:
+                    photos = await self._app.bot.get_user_profile_photos(
+                        user_id=int(user_id), limit=1
+                    )
+                    if photos.photos:
+                        photo = photos.photos[0][-1]  # Get the largest size
+                        f = await photo.get_file()
 
-                    # Use avatar proxy if configured
-                    if f.file_path and self.config.avatar_proxy_host:
-                        host = self.config.avatar_proxy_host.rstrip("/")
-                        # file_path should be a relative path like 'photos/file_6.jpg'
-                        # If it's a full URL, extract the photos/ or profile_photos/ part
-                        file_path = f.file_path
-                        logger.debug(
-                            f"Telegram [{self.instance_id}] original file_path: {file_path}"
-                        )
-                        if file_path.startswith("http"):
-                            from urllib.parse import urlparse
+                        # Use avatar proxy if configured
+                        if f.file_path and self.config.avatar_proxy_host:
+                            host = self.config.avatar_proxy_host.rstrip("/")
+                            # file_path should be a relative path like 'photos/file_6.jpg'
+                            # If it's a full URL, extract the photos/ or profile_photos/ part
+                            file_path = f.file_path
+                            self.logger.debug(f"original file_path: {file_path}")
+                            if file_path.startswith("http"):
+                                from urllib.parse import urlparse
 
-                            parsed = urlparse(file_path)
-                            path = parsed.path.lstrip("/")
-                            logger.debug(
-                                f"Telegram [{self.instance_id}] parsed path: {path}"
+                                parsed = urlparse(file_path)
+                                path = parsed.path.lstrip("/")
+                                self.logger.debug(f"parsed path: {path}")
+                                # Extract the part after 'bot<token>/'
+                                parts = path.split("/")
+                                self.logger.debug(f"path parts: {parts}")
+                                if len(parts) >= 2:
+                                    # Find the index of 'photos' or 'profile_photos'
+                                    for i, part in enumerate(parts):
+                                        if part in ("photos", "profile_photos"):
+                                            file_path = "/".join(parts[i:])
+                                            self.logger.debug(
+                                                f"extracted file_path: {file_path}"
+                                            )
+                                            break
+                            self.logger.debug(
+                                f"final avatar URL: {host}/file/{file_path}"
                             )
-                            # Extract the part after 'bot<token>/'
-                            parts = path.split("/")
-                            logger.debug(
-                                f"Telegram [{self.instance_id}] path parts: {parts}"
-                            )
-                            if len(parts) >= 2:
-                                # Find the index of 'photos' or 'profile_photos'
-                                for i, part in enumerate(parts):
-                                    if part in ("photos", "profile_photos"):
-                                        file_path = "/".join(parts[i:])
-                                        logger.debug(
-                                            f"Telegram [{self.instance_id}] extracted file_path: {file_path}"
-                                        )
-                                        break
-                        logger.debug(
-                            f"Telegram [{self.instance_id}] final avatar URL: {host}/file/{file_path}"
-                        )
-                        user_avatar = f"{host}/file/{file_path}"
-                    elif f.file_path:
-                        # Fallback: use direct Telegram API URL
-                        user_avatar = f.file_path
-            except Exception as e:
-                logger.warning(
-                    f"Telegram [{self.instance_id}] failed to fetch avatar for user {user_id}: {e}"
-                )
+                            user_avatar = f"{host}/file/{file_path}"
+                            self._avatar_cache[user_id] = (now, user_avatar)
+                        # No proxy configured: f.file_path is a relative path that
+                        # downstream drivers cannot download, so leave empty.
+                except Exception as e:
+                    self.logger.warning(
+                        f"failed to fetch avatar for user {user_id}: {e}"
+                    )
 
         attachments: list[Attachment] = []
 
         try:
             if msg.photo:
                 largest = max(msg.photo, key=lambda p: p.file_size or 0)
-                f = await largest.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="image",
-                        url=f.file_path,
-                        name="photo.jpg",
-                        size=largest.file_size or -1,
+                    await self._resolve_attachment(
+                        largest, "image", "photo.jpg", largest.file_size or -1
                     )
                 )
             elif msg.video:
-                f = await msg.video.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="video",
-                        url=f.file_path,
-                        name=msg.video.file_name or "video.mp4",
-                        size=msg.video.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.video,
+                        "video",
+                        msg.video.file_name or "video.mp4",
+                        msg.video.file_size or -1,
                     )
                 )
             elif msg.voice:
-                f = await msg.voice.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="voice",
-                        url=f.file_path,
-                        name="voice.ogg",
-                        size=msg.voice.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.voice, "voice", "voice.ogg", msg.voice.file_size or -1
                     )
                 )
             elif msg.audio:
-                f = await msg.audio.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="voice",
-                        url=f.file_path,
-                        name=msg.audio.file_name or "audio.mp3",
-                        size=msg.audio.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.audio,
+                        "voice",
+                        msg.audio.file_name or "audio.mp3",
+                        msg.audio.file_size or -1,
                     )
                 )
             elif msg.animation:
-                f = await msg.animation.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="video",
-                        url=f.file_path,
-                        name="animation.gif",
-                        size=msg.animation.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.animation,
+                        "video",
+                        "animation.gif",
+                        msg.animation.file_size or -1,
                     )
                 )
+            elif msg.sticker:
+                if msg.sticker.is_animated or msg.sticker.is_video:
+                    # animated/video stickers can't be sent as static images
+                    if msg.sticker.emoji:
+                        text = msg.sticker.emoji
+                else:
+                    try:
+                        attachments.append(
+                            await self._resolve_attachment(
+                                msg.sticker,
+                                "image",
+                                "sticker.webp",
+                                msg.sticker.file_size or -1,
+                            )
+                        )
+                    except Exception as e:
+                        self.logger.warning(
+                            f"failed to fetch sticker, falling back to emoji: {e}"
+                        )
+                        if msg.sticker.emoji:
+                            text = msg.sticker.emoji
             elif msg.document:
-                f = await msg.document.get_file()
-                assert f.file_path is not None
                 attachments.append(
-                    Attachment(
-                        type="file",
-                        url=f.file_path,
-                        name=msg.document.file_name or "document",
-                        size=msg.document.file_size or -1,
+                    await self._resolve_attachment(
+                        msg.document,
+                        "file",
+                        msg.document.file_name or "document",
+                        msg.document.file_size or -1,
                     )
                 )
         except Exception as e:
-            logger.error(f"Telegram [{self.instance_id}] failed to resolve file: {e}")
+            self.logger.error(f"failed to resolve file: {e}")
 
         if not text.strip() and not attachments:
             return
@@ -588,8 +740,63 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             time=msg.date.isoformat() if msg.date else None,
             source_proxy=self._media_proxy,
             username=username,
+            is_dm=msg.chat_id > 0,
         )
         await self.bridge.on_message(normalized)
+
+    async def _on_edited_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        msg = update.edited_message
+        if not msg:
+            return
+        text = msg.text or msg.caption or ""
+        if not text.strip():
+            return
+        chat_id = str(msg.chat_id)
+        from_user = msg.from_user
+        user_id = str(from_user.id) if from_user else ""
+        nickname = (
+            (from_user.full_name or from_user.username or user_id)
+            if from_user
+            else user_id
+        )
+        username = (from_user.username or "") if from_user else ""
+        normalized = NormalizedMessage(
+            platform="telegram",
+            instance_id=self.instance_id,
+            channel={"chat_id": chat_id},
+            nickname=nickname,
+            user_id=user_id,
+            text=text,
+            message_id=str(msg.message_id),
+            edit_target_id=str(msg.message_id),
+            is_edit=True,
+            time=msg.edit_date.isoformat() if msg.edit_date else None,
+            source_proxy=self._media_proxy,
+            username=username,
+            is_dm=msg.chat_id > 0,
+        )
+        await self.bridge.on_edit_message(normalized)
+
+    async def _on_pinned_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        msg = update.message
+        if not msg or not msg.pinned_message:
+            return
+        chat_id = str(msg.chat_id)
+        pinned = msg.pinned_message
+
+        normalized = NormalizedMessage(
+            platform="telegram",
+            instance_id=self.instance_id,
+            channel={"chat_id": chat_id},
+            message_id=str(pinned.message_id),
+            pin_target_id=str(pinned.message_id),
+            is_pin=True,
+        )
+        await self.bridge.on_pin_message(normalized)
 
     # ------------------------------------------------------------------
     # Send
@@ -604,12 +811,10 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
     ):
         chat_id = channel.get("chat_id")
         if not chat_id:
-            logger.warning(
-                f"Telegram [{self.instance_id}] send: no chat_id in channel {channel}"
-            )
+            self.logger.warning(f"send: no chat_id in channel {channel}")
             return
         if self._app is None:
-            logger.warning(f"Telegram [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return
 
         cid = int(chat_id)
@@ -627,7 +832,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             except (ValueError, TypeError):
                 pass
 
-        first_msg_id = None
+        msg_ids = []
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
@@ -653,7 +858,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                 # Fallback: embed the header as HTML bold text (used when
                 # rich_header_host is not configured or when there are media
                 # attachments, since captions cannot carry link previews).
-                header = _richheader_html(
+                header = telegram_richheader_html(
                     rich_header.get("title", ""),
                     rich_header.get("content", ""),
                 )
@@ -678,8 +883,13 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     )
                     text = text.replace(f"@{html.escape(m['name'])}", link)
 
+        if self.config.sanitize_accidental_mentions:
+            text = re.sub(r"(^|\s)@([A-Za-z0-9_]+)", r"\1@" + "\u200b" + r"\2", text)
+
         source_proxy = self._source_proxy_from_kwargs(kwargs)
         try:
+            # Phase 1: download and prepare all attachments
+            prepared: list[dict] = []
             for att in attachments or []:
                 if not att.url and att.data is None:
                     continue
@@ -688,15 +898,15 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     att, self.config.max_file_size, source_proxy
                 )
                 if not result:
-                    # Oversized or failed — append as text (escape if in HTML mode)
                     label = att.name or att.url or ""
                     text += _attachment_fallback_label(att.type, label, parse_mode)
                     continue
 
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
+                is_gif = att.type == "image" and mime == "image/gif"
 
-                if att.type == "image":
+                if att.type == "image" and not is_gif:
                     data_bytes, fname = _prepare_photo_for_telegram(
                         data_bytes,
                         fname,
@@ -707,23 +917,86 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         text += _attachment_fallback_label("image", label, parse_mode)
                         continue
 
-                # validate photo data
                 if not data_bytes or len(data_bytes) == 0:
-                    logger.warning(f"Empty image data for {fname}, skipping")
+                    self.logger.warning(f"Empty image data for {fname}, skipping")
                     label = att.name or att.url or ""
                     text += _attachment_fallback_label(att.type, label, parse_mode)
                     continue
 
                 bio = io.BytesIO(data_bytes)
                 bio.name = fname
-                caption = text if not caption_used else None
+                prepared.append(
+                    {
+                        "type": att.type,
+                        "is_gif": is_gif,
+                        "bio": bio,
+                        "label": att.name or att.url or fname,
+                    }
+                )
+
+            # Phase 2: split into groupable (image/video non-GIF) and individual
+            groupable = [
+                p
+                for p in prepared
+                if p["type"] in ("image", "video") and not p["is_gif"]
+            ]
+            individual = [
+                p
+                for p in prepared
+                if not (p["type"] in ("image", "video") and not p["is_gif"])
+            ]
+
+            caption_used = False
+
+            # Send groupable in batches via send_media_group (max 10 per batch)
+            for i in range(0, len(groupable), 10):
+                batch = groupable[i : i + 10]
+                media_list: list[InputMediaPhoto | InputMediaVideo] = []
+                for j, item in enumerate(batch):
+                    cap = text if j == 0 and not caption_used else None
+                    if item["type"] == "image":
+                        media_list.append(
+                            InputMediaPhoto(
+                                media=item["bio"],
+                                caption=cap,
+                                parse_mode=parse_mode,
+                            )
+                        )
+                    else:
+                        media_list.append(
+                            InputMediaVideo(
+                                media=item["bio"],
+                                caption=cap,
+                                parse_mode=parse_mode,
+                            )
+                        )
 
                 try:
-                    match att.type:
-                        case "image":
-                            sent = await self._app.bot.send_photo(
+                    sent_messages = await self._app.bot.send_media_group(
+                        chat_id=cid,
+                        media=media_list,
+                        reply_parameters=reply_params,
+                    )
+                    for m in sent_messages:
+                        if m.message_id:
+                            msg_ids.append(str(m.message_id))
+                    caption_used = True
+                except Exception as e:
+                    for item in batch:
+                        text += _attachment_fallback_label(
+                            item["type"], item["label"], parse_mode
+                        )
+                    self.logger.warning(f"media group send failed: {e}")
+
+            # Send non-groupable items individually
+            for item in individual:
+                caption = text if not caption_used else None
+                try:
+                    match item["type"]:
+                        case "image":  # GIF animation
+                            sent = await self._app.bot.send_animation(
                                 chat_id=cid,
-                                photo=bio,
+                                animation=item["bio"],
                                 caption=caption,
                                 parse_mode=parse_mode,
                                 reply_parameters=reply_params,
@@ -731,7 +1004,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         case "voice":
                             sent = await self._app.bot.send_voice(
                                 chat_id=cid,
-                                voice=bio,
+                                voice=item["bio"],
                                 caption=caption,
                                 parse_mode=parse_mode,
                                 reply_parameters=reply_params,
@@ -739,7 +1012,7 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         case "video":
                             sent = await self._app.bot.send_video(
                                 chat_id=cid,
-                                video=bio,
+                                video=item["bio"],
                                 caption=caption,
                                 parse_mode=parse_mode,
                                 reply_parameters=reply_params,
@@ -747,22 +1020,20 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                         case _:
                             sent = await self._app.bot.send_document(
                                 chat_id=cid,
-                                document=bio,
+                                document=item["bio"],
                                 caption=caption,
                                 parse_mode=parse_mode,
                                 reply_parameters=reply_params,
                             )
 
-                    if not first_msg_id:
-                        first_msg_id = str(sent.message_id)
+                    if sent and sent.message_id:
+                        msg_ids.append(str(sent.message_id))
                     caption_used = True
                 except Exception as e:
-                    label = att.name or att.url or fname
-                    text += _attachment_fallback_label(att.type, label, parse_mode)
-                    logger.warning(
-                        f"Telegram [{self.instance_id}] attachment send failed ({att.type}): {e}"
+                    text += _attachment_fallback_label(
+                        item["type"], item["label"], parse_mode
                     )
-                    continue
+                    self.logger.warning(f"attachment send failed ({item['type']}): {e}")
 
             # Send text-only if no attachments consumed it
             if text and not caption_used:
@@ -773,14 +1044,114 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
                     link_preview_options=link_preview_opts,
                     reply_parameters=reply_params,
                 )
-                if not first_msg_id:
-                    first_msg_id = str(sent.message_id)
+                if sent and sent.message_id:
+                    msg_ids.append(str(sent.message_id))
 
-            return first_msg_id
+            return msg_ids if msg_ids else None
 
         except Exception as e:
-            logger.error(f"Telegram [{self.instance_id}] send failed: {e}")
+            self.logger.error(f"send failed: {e}")
             return None
+
+    # ------------------------------------------------------------------
+    # Edit
+    # ------------------------------------------------------------------
+
+    async def edit(self, channel: dict, message_id: str, text: str, **kwargs):
+        """Edit a previously sent message by ID."""
+        chat_id = channel.get("chat_id")
+        if not chat_id or self._app is None:
+            return
+        parse_mode: str | None = None
+        link_preview_opts: LinkPreviewOptions | None = None
+        rich_header = kwargs.get("rich_header")
+        if rich_header:
+            host = self.config.rich_header_host.rstrip("/")
+            if host:
+                params: dict = {
+                    "title": rich_header.get("title", ""),
+                    "content": rich_header.get("content", ""),
+                }
+                if av := rich_header.get("avatar", ""):
+                    params["avatar"] = av
+                from urllib.parse import urlencode
+
+                rh_url = f"{host}/richheader?{urlencode(params)}"
+                link_preview_opts = LinkPreviewOptions(
+                    url=rh_url,
+                    prefer_small_media=True,
+                    show_above_text=True,
+                )
+            else:
+                header = telegram_richheader_html(
+                    rich_header.get("title", ""),
+                    rich_header.get("content", ""),
+                )
+                body = html.escape(text) if text else ""
+                text = f"{header}\n{body}" if body else header
+                parse_mode = "HTML"
+        try:
+            await self._app.bot.edit_message_text(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                text=log.replace_sensitive(text),
+                parse_mode=parse_mode,
+                link_preview_options=link_preview_opts,
+            )
+        except Exception as e:
+            self.logger.warning(f"edit failed for message {message_id}: {e}")
+
+    # ------------------------------------------------------------------
+    # Delete / recall
+    # ------------------------------------------------------------------
+
+    async def delete(self, channel: dict, message_id: str, **kwargs):
+        """Delete (recall) a previously sent message by ID.
+
+        Note: the Telegram Bot API provides no update when a user deletes a
+        message, so a recall can be *applied* to Telegram but never *detected*
+        from a Telegram source.
+        """
+        if not self.config.enable_recall:
+            return
+        chat_id = channel.get("chat_id")
+        if not chat_id or self._app is None or not message_id:
+            return
+        try:
+            await self._app.bot.delete_message(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+            )
+        except Exception as e:
+            self.logger.warning(f"delete failed for message {message_id}: {e}")
+
+    # ------------------------------------------------------------------
+    # Pin
+    # ------------------------------------------------------------------
+
+    async def pin(self, channel: dict, target_msg_id: str):
+        chat_id = channel.get("chat_id")
+        if not chat_id or self._app is None or not target_msg_id:
+            return
+        try:
+            await self._app.bot.pin_chat_message(
+                chat_id=int(chat_id),
+                message_id=int(target_msg_id),
+            )
+        except Exception as e:
+            self.logger.warning(f"pin failed for message {target_msg_id}: {e}")
+
+    async def unpin(self, channel: dict, target_msg_id: str):
+        chat_id = channel.get("chat_id")
+        if not chat_id or self._app is None or not target_msg_id:
+            return
+        try:
+            await self._app.bot.unpin_chat_message(
+                chat_id=int(chat_id),
+                message_id=int(target_msg_id),
+            )
+        except Exception as e:
+            self.logger.warning(f"unpin failed for message {target_msg_id}: {e}")
 
 
 register("telegram", TelegramConfig, TelegramDriver)

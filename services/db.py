@@ -1,6 +1,5 @@
-import json
-import importlib
 import importlib.util
+import json
 import time
 import uuid
 from functools import lru_cache
@@ -9,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import (
     Column,
+    Float,
     Index,
     Integer,
     LargeBinary,
@@ -16,6 +16,8 @@ from sqlalchemy import (
     Text,
     create_engine,
     delete,
+    event,
+    func,
     select,
     update,
 )
@@ -24,11 +26,12 @@ from sqlalchemy.orm import DeclarativeBase, Session
 
 import services.logger as log
 import services.util as u
-from services import config
-from services import db_migrations
+from services import config, db_migrations
 from services.db_migrations import MigrationStep
 
-logger = log.get_logger()
+logger = log.get_logger("db")
+
+_MESSAGE_MAPPING_CLEANUP_INTERVAL = 3600
 
 
 class _Base(DeclarativeBase):
@@ -41,9 +44,11 @@ class MessageMapping(_Base):
     instance_id = Column(String, primary_key=True)
     channel_id = Column(String, nullable=False)
     platform_msg_id = Column(String, primary_key=True)
+    created_at = Column(Integer, nullable=False, default=lambda: int(time.time()))
 
 
 Index("idx_bridge_id", MessageMapping.bridge_id)
+Index("idx_message_mappings_created_at", MessageMapping.created_at)
 
 
 class UserMapping(_Base):
@@ -51,6 +56,8 @@ class UserMapping(_Base):
     instance_id = Column(String, primary_key=True)
     platform_user_id = Column(String, primary_key=True)
     display_name = Column(String, nullable=False)
+    avatar_url = Column(String, nullable=True)
+    qid = Column(String, nullable=True)
 
 
 class BindingCode(_Base):
@@ -69,6 +76,13 @@ class UserBinding(_Base):
 
 
 Index("idx_global_user", UserBinding.global_user_id)
+
+
+class MentionNotifyPreference(_Base):
+    __tablename__ = "mention_notify_prefs"
+    global_user_id = Column(String, primary_key=True)
+    mode = Column(String, default="all")
+    platforms = Column(Text, nullable=True)
 
 
 class ForwardPage(_Base):
@@ -102,16 +116,32 @@ Index("idx_forward_assets_page_id", ForwardAsset.page_id)
 Index("idx_forward_assets_expires_at", ForwardAsset.expires_at)
 
 
+class MetricsCounter(_Base):
+    __tablename__ = "metrics_counters"
+
+    name = Column(String, primary_key=True)
+    labels = Column(String, primary_key=True)
+    value = Column(Float, nullable=False, default=0.0)
+    updated_at = Column(Integer, nullable=False, default=0)
+
+
 class MessageDB:
     """Handles mapping of message IDs between different platforms."""
 
     _SCHEMA_VERSION = max(
-        (step.to_version for step in db_migrations.MIGRATIONS), default=0
+        (step.to_version for step in db_migrations.get_migrations()), default=0
     )
 
     @classmethod
+    def _compute_target_version(cls) -> int:
+        return max(
+            (int(step.to_version) for step in cls._load_migration_steps()),
+            default=int(cls._SCHEMA_VERSION),
+        )
+
+    @classmethod
     def target_db_version(cls) -> int:
-        return int(cls._SCHEMA_VERSION)
+        return cls._compute_target_version()
 
     def __init__(self, engine: Engine | None = None):
         """Initialize the database handler.
@@ -120,7 +150,15 @@ class MessageDB:
             engine: Optional SQLAlchemy engine. If not provided, will be created from config.
         """
         self._engine = engine or self._create_engine_from_config()
+        # Create the base ORM schema BEFORE running incremental migrations.
+        # Tables like `user_mappings` are defined only by the ORM models, and
+        # migrations (e.g. 3->4 `ALTER TABLE user_mappings ...`) assume they
+        # already exist. Running migrations first would fail on a fresh or
+        # partially-initialized database.
         _Base.metadata.create_all(self._engine)
+        self._run_migrations(self._engine)
+        self.purge_expired_mappings()
+        self._last_mapping_cleanup_at = int(time.time())
 
     @staticmethod
     def _create_engine_from_config() -> Engine:
@@ -167,10 +205,28 @@ class MessageDB:
 
         # SQLite-specific settings
         if url.startswith("sqlite:///"):
-            engine_kwargs["connect_args"] = {"check_same_thread": False}
+            engine_kwargs["connect_args"] = {
+                "check_same_thread": False,
+                "timeout": 30,
+            }
+
+        # PostgreSQL-specific settings
+        if url.startswith("postgresql"):
+            pg_connect_args = {}
+            sslmode = db_config.get("sslmode")
+            if sslmode:
+                pg_connect_args["sslmode"] = sslmode
+            connect_timeout = db_config.get("connect_timeout")
+            if connect_timeout is not None:
+                pg_connect_args["connect_timeout"] = int(connect_timeout)
+            app_name = db_config.get("application_name")
+            if app_name:
+                pg_connect_args["application_name"] = app_name
+            if pg_connect_args:
+                engine_kwargs["connect_args"] = pg_connect_args
 
         # Pool settings for non-SQLite databases
-        else:
+        if not url.startswith("sqlite"):
             if "pool_size" in db_config:
                 engine_kwargs["pool_size"] = db_config["pool_size"]
             if "max_overflow" in db_config:
@@ -181,7 +237,14 @@ class MessageDB:
         logger.info(f"Initializing database engine: {url.split('://')[0]}")
         engine = create_engine(url, **engine_kwargs)
 
-        MessageDB._run_migrations(engine)
+        if url.startswith("sqlite:///"):
+
+            @event.listens_for(engine, "connect")
+            def _set_sqlite_pragmas(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
+                cursor.close()
 
         return engine
 
@@ -195,7 +258,7 @@ class MessageDB:
             value = int(raw)
         except (TypeError, ValueError):
             return 0
-        return value if value >= 0 else 0
+        return max(value, 0)
 
     @classmethod
     def _read_schema_version(cls) -> int:
@@ -229,14 +292,14 @@ class MessageDB:
     @staticmethod
     @lru_cache(maxsize=1)
     def _load_migration_steps() -> tuple[MigrationStep, ...]:
-        steps = db_migrations.MIGRATIONS
+        steps = db_migrations.get_migrations()
         logger.debug(f"Loaded {len(steps)} migration step(s) from registry")
         return steps
 
     @classmethod
     def _run_migrations(cls, engine: Engine) -> None:
         current_version = cls._read_schema_version()
-        target_version = int(cls._SCHEMA_VERSION)
+        target_version = cls._compute_target_version()
         migration_flag = False
         logger.info(
             f"Database schema migration check: current={current_version}, target={target_version}"
@@ -376,38 +439,56 @@ class MessageDB:
         """Verify and consume a binding code, creating a permanent link."""
         now = int(time.time())
         with self._session() as s:
-            row = s.execute(
-                select(BindingCode).where(
-                    BindingCode.code == code,
-                    BindingCode.expires_at > now,
+            # Atomically consume the code (delete + return) so two concurrent
+            # confirmations can't both succeed on the same code.
+            consumed = (
+                s.execute(
+                    delete(BindingCode)
+                    .where(BindingCode.code == code, BindingCode.expires_at > now)
+                    .returning(BindingCode.instance_id, BindingCode.platform_user_id)
                 )
-            ).scalar_one_or_none()
-            if row is None:
+            ).first()
+            if consumed is None:
                 return False
 
-            src_inst = row.instance_id
-            src_uid = row.platform_user_id
+            src_inst = consumed.instance_id
+            src_uid = consumed.platform_user_id
 
-            s.execute(delete(BindingCode).where(BindingCode.code == code))
-
-            existing = (
-                s.execute(
-                    select(UserBinding).where(
-                        (
-                            (UserBinding.instance_id == src_inst)
-                            & (UserBinding.platform_user_id == src_uid)
-                        )
-                        | (
-                            (UserBinding.instance_id == target_instance)
-                            & (UserBinding.platform_user_id == target_user_id)
-                        )
-                    )
+            # Deterministically resolve the target group: prefer the source's
+            # existing group, then the target's, then a fresh id.
+            src_binding = s.execute(
+                select(UserBinding).where(
+                    UserBinding.instance_id == src_inst,
+                    UserBinding.platform_user_id == src_uid,
                 )
-                .scalars()
-                .first()
-            )
+            ).scalar_one_or_none()
+            tgt_binding = s.execute(
+                select(UserBinding).where(
+                    UserBinding.instance_id == target_instance,
+                    UserBinding.platform_user_id == target_user_id,
+                )
+            ).scalar_one_or_none()
 
-            global_id = existing.global_user_id if existing else str(uuid.uuid4())
+            if (
+                src_binding is not None
+                and tgt_binding is not None
+                and src_binding.global_user_id != tgt_binding.global_user_id
+            ):
+                logger.warning(
+                    f"consume_binding_code: merging distinct groups "
+                    f"{src_binding.global_user_id} and {tgt_binding.global_user_id}; "
+                    f"keeping {src_binding.global_user_id}"
+                )
+
+            global_id = (
+                src_binding.global_user_id
+                if src_binding is not None
+                else (
+                    tgt_binding.global_user_id
+                    if tgt_binding is not None
+                    else str(uuid.uuid4())
+                )
+            )
 
             s.merge(
                 UserBinding(
@@ -480,6 +561,45 @@ class MessageDB:
             s.commit()
         return True
 
+    def get_global_user_id(self, instance_id: str, platform_user_id: str) -> str | None:
+        with self._session() as s:
+            return s.execute(
+                select(UserBinding.global_user_id).where(
+                    UserBinding.instance_id == instance_id,
+                    UserBinding.platform_user_id == platform_user_id,
+                )
+            ).scalar_one_or_none()
+
+    def get_mention_notify_pref(
+        self, global_user_id: str
+    ) -> tuple[str, str | None] | None:
+        with self._session() as s:
+            row = s.execute(
+                select(
+                    MentionNotifyPreference.mode,
+                    MentionNotifyPreference.platforms,
+                ).where(MentionNotifyPreference.global_user_id == global_user_id)
+            ).one_or_none()
+            if row is None:
+                return None
+            return (row[0], row[1])
+
+    def set_mention_notify_pref(
+        self,
+        global_user_id: str,
+        mode: str,
+        platforms: str | None = None,
+    ) -> None:
+        with self._session() as s:
+            s.merge(
+                MentionNotifyPreference(
+                    global_user_id=global_user_id,
+                    mode=mode,
+                    platforms=platforms,
+                )
+            )
+            s.commit()
+
     def get_all_bindings(
         self, instance_id: str, platform_user_id: str
     ) -> list[tuple[str, str]]:
@@ -501,24 +621,131 @@ class MessageDB:
             ).all()
             return [(r[0], r[1]) for r in rows]
 
+    def list_binding_groups(
+        self,
+        instance_id: str | None = None,
+        platform_user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return binding groups, optionally filtered to one account."""
+        with self._session() as s:
+            rows = s.execute(
+                select(
+                    UserBinding.global_user_id,
+                    UserBinding.instance_id,
+                    UserBinding.platform_user_id,
+                )
+            ).all()
+
+        groups: dict[str, list[dict[str, str]]] = {}
+        for global_user_id, bound_instance_id, bound_platform_user_id in rows:
+            groups.setdefault(global_user_id, []).append(
+                {
+                    "instance_id": bound_instance_id,
+                    "platform_user_id": bound_platform_user_id,
+                }
+            )
+
+        result: list[dict[str, Any]] = []
+        for global_user_id, members in groups.items():
+            if instance_id is not None and platform_user_id is not None:
+                if not any(
+                    member["instance_id"] == instance_id
+                    and member["platform_user_id"] == platform_user_id
+                    for member in members
+                ):
+                    continue
+
+            result.append(
+                {
+                    "global_user_id": global_user_id,
+                    "members": members,
+                }
+            )
+
+        return result
+
     # ------------------------------------------------------------------
     # User mappings
     # ------------------------------------------------------------------
 
-    def save_user(self, instance_id: str, platform_user_id: str, display_name: str):
-        """Store or update a user's display name for an instance."""
+    def save_user(
+        self,
+        instance_id: str,
+        platform_user_id: str,
+        display_name: str,
+        avatar_url: str | None = None,
+        qid: str | None = None,
+    ):
+        """Store or update a user's display name, avatar, and optional QQ qid."""
         try:
             with self._session() as s:
-                s.merge(
-                    UserMapping(
-                        instance_id=instance_id,
-                        platform_user_id=platform_user_id,
-                        display_name=display_name,
-                    )
+                user = s.get(
+                    UserMapping,
+                    {"instance_id": instance_id, "platform_user_id": platform_user_id},
                 )
+                if user is None:
+                    s.add(
+                        UserMapping(
+                            instance_id=instance_id,
+                            platform_user_id=platform_user_id,
+                            display_name=display_name,
+                            avatar_url=avatar_url,
+                            qid=qid,
+                        )
+                    )
+                else:
+                    values: dict[str, str] = {"display_name": display_name}
+                    if avatar_url is not None:
+                        values["avatar_url"] = avatar_url
+                    if qid is not None:
+                        values["qid"] = qid
+                    s.execute(
+                        update(UserMapping)
+                        .where(
+                            UserMapping.instance_id == instance_id,
+                            UserMapping.platform_user_id == platform_user_id,
+                        )
+                        .values(**values)
+                    )
                 s.commit()
         except Exception as e:
             logger.error(f"Failed to save user mapping: {e}")
+
+    def get_user_avatar(self, instance_id: str, platform_user_id: str) -> str | None:
+        """Find a platform-specific avatar URL by their user ID."""
+        with self._session() as s:
+            return s.execute(
+                select(UserMapping.avatar_url).where(
+                    UserMapping.instance_id == instance_id,
+                    UserMapping.platform_user_id == platform_user_id,
+                )
+            ).scalar_one_or_none()
+
+    def save_user_qid(self, instance_id: str, platform_user_id: str, qid: str) -> None:
+        """Persist a QQ qid without overwriting the current display name."""
+        try:
+            with self._session() as s:
+                s.execute(
+                    update(UserMapping)
+                    .where(
+                        UserMapping.instance_id == instance_id,
+                        UserMapping.platform_user_id == platform_user_id,
+                    )
+                    .values(qid=qid)
+                )
+                s.commit()
+        except Exception as e:
+            logger.error(f"Failed to save user qid: {e}")
+
+    def get_user_qid(self, instance_id: str, platform_user_id: str) -> str | None:
+        """Find a persisted QQ qid by platform user ID."""
+        with self._session() as s:
+            return s.execute(
+                select(UserMapping.qid).where(
+                    UserMapping.instance_id == instance_id,
+                    UserMapping.platform_user_id == platform_user_id,
+                )
+            ).scalar_one_or_none()
 
     def get_user_name(self, instance_id: str, platform_user_id: str) -> str | None:
         """Find a platform-specific display name by their user ID."""
@@ -533,11 +760,27 @@ class MessageDB:
     def get_user_id_by_name(self, instance_id: str, display_name: str) -> str | None:
         """Find a platform-specific user ID by their display name on that instance."""
         with self._session() as s:
-            return (
+            exact = (
                 s.execute(
                     select(UserMapping.platform_user_id).where(
                         UserMapping.instance_id == instance_id,
                         UserMapping.display_name == display_name,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if exact:
+                return exact
+
+            # Fallback to case-insensitive matching for user-entered names such
+            # as `/ping RhenCloud` vs stored `rhencloud`.
+            return (
+                s.execute(
+                    select(UserMapping.platform_user_id).where(
+                        UserMapping.instance_id == instance_id,
+                        func.lower(UserMapping.display_name)
+                        == func.lower(display_name),
                     )
                 )
                 .scalars()
@@ -570,11 +813,37 @@ class MessageDB:
                         instance_id=instance_id,
                         channel_id=normalized_channel,
                         platform_msg_id=platform_msg_id,
+                        created_at=int(time.time()),
                     )
                 )
                 s.commit()
+            self._maybe_purge_expired_mappings()
         except Exception as e:
             logger.error(f"Failed to save message mapping: {e}")
+
+    def _maybe_purge_expired_mappings(self) -> None:
+        now = int(time.time())
+        if now - self._last_mapping_cleanup_at < _MESSAGE_MAPPING_CLEANUP_INTERVAL:
+            return
+        self.purge_expired_mappings(now)
+        self._last_mapping_cleanup_at = now
+
+    def purge_expired_mappings(self, now: int | None = None) -> int:
+        """Delete mappings older than the configured retention period."""
+        retention_days = int(config.get("database.message_mapping_retention_days", 30))
+        if retention_days <= 0:
+            return 0
+        cutoff = int(now or time.time()) - retention_days * 86400
+        try:
+            with self._session() as s:
+                result = s.execute(
+                    delete(MessageMapping).where(MessageMapping.created_at < cutoff)
+                )
+                s.commit()
+                return int(getattr(result, "rowcount", 0) or 0)
+        except Exception as e:
+            logger.error(f"Failed to purge expired message mappings: {e}")
+            return 0
 
     def save_forward_page(
         self,
@@ -685,6 +954,38 @@ class MessageDB:
             s.commit()
             return int(getattr(result, "rowcount", 0) or 0)
 
+    def purge_forward_assets_by_page_ids(self, page_ids: list[str]) -> int:
+        if not page_ids:
+            return 0
+        with self._session() as s:
+            result = s.execute(
+                delete(ForwardAsset).where(ForwardAsset.page_id.in_(page_ids))
+            )
+            s.commit()
+            return int(getattr(result, "rowcount", 0) or 0)
+
+    def purge_expired_forward_pages(self, now: int | None = None) -> tuple[int, int]:
+        cutoff = int(now or time.time())
+        condition = (
+            ForwardPage.expires_at <= cutoff
+        ) | ForwardPage.destroyed_at.is_not(None)
+        with self._session() as s:
+            page_ids = list(
+                s.execute(select(ForwardPage.page_id).where(condition)).scalars()
+            )
+            if not page_ids:
+                return 0, 0
+
+            assets = s.execute(
+                delete(ForwardAsset).where(ForwardAsset.page_id.in_(page_ids))
+            )
+            pages = s.execute(delete(ForwardPage).where(condition))
+            s.commit()
+            return (
+                int(getattr(pages, "rowcount", 0) or 0),
+                int(getattr(assets, "rowcount", 0) or 0),
+            )
+
     def get_bridge_id(self, instance_id: str, platform_msg_id: str) -> str | None:
         """Find the bridge ID for a given platform-specific message ID."""
         with self._session() as s:
@@ -705,7 +1006,7 @@ class MessageDB:
                 MessageMapping.instance_id == instance_id,
             )
 
-            if channel_id:
+            if channel_id is not None:
                 # Try canonical form first.
                 normalized = self._normalize_channel_id(channel_id)
                 strict_stmt = base_stmt.where(MessageMapping.channel_id == normalized)
@@ -724,6 +1025,158 @@ class MessageDB:
             # Final fallback: if there are multiple rows, pick the first deterministically
             # instead of raising MultipleResultsFound.
             return s.execute(base_stmt).scalars().first()
+
+    def get_platform_msg_ids(
+        self, bridge_id: str, instance_id: str, channel_id=None
+    ) -> list[str]:
+        """Return ALL platform message IDs for a bridge ID and target instance.
+
+        A single source message may fan out into several target messages (e.g.
+        a long message split into parts). Recall needs every one of them.
+        """
+        with self._session() as s:
+            base_stmt = select(MessageMapping.platform_msg_id).where(
+                MessageMapping.bridge_id == bridge_id,
+                MessageMapping.instance_id == instance_id,
+            )
+
+            if channel_id is not None:
+                normalized = self._normalize_channel_id(channel_id)
+                strict_hits = list(
+                    s.execute(
+                        base_stmt.where(MessageMapping.channel_id == normalized)
+                    ).scalars()
+                )
+                if strict_hits:
+                    return strict_hits
+
+                legacy = str(channel_id)
+                if legacy != normalized:
+                    legacy_hits = list(
+                        s.execute(
+                            base_stmt.where(MessageMapping.channel_id == legacy)
+                        ).scalars()
+                    )
+                    if legacy_hits:
+                        return legacy_hits
+
+            return list(s.execute(base_stmt).scalars())
+
+    def delete_mapping_by_bridge_id(self, bridge_id: str) -> int:
+        """Delete all message mappings tied to a bridge ID (used after recall)."""
+        try:
+            with self._session() as s:
+                result = s.execute(
+                    delete(MessageMapping).where(MessageMapping.bridge_id == bridge_id)
+                )
+                s.commit()
+                return int(getattr(result, "rowcount", 0) or 0)
+        except Exception as e:
+            logger.error(f"Failed to delete message mapping: {e}")
+            return 0
+
+    # ------------------------------------------------------------------
+    # Aggregate helpers (used by control-plane drivers like Workbench)
+    # ------------------------------------------------------------------
+
+    def session(self):
+        """Return a managed DB session (context manager) for advanced queries."""
+        return self._session()
+
+    def stats(self) -> dict[str, int]:
+        with self._session() as s:
+            return {
+                "message_mappings": int(
+                    s.execute(select(func.count()).select_from(MessageMapping)).scalar()
+                    or 0
+                ),
+                "user_mappings": int(
+                    s.execute(select(func.count()).select_from(UserMapping)).scalar()
+                    or 0
+                ),
+                "user_bindings": int(
+                    s.execute(select(func.count()).select_from(UserBinding)).scalar()
+                    or 0
+                ),
+                "binding_codes": int(
+                    s.execute(select(func.count()).select_from(BindingCode)).scalar()
+                    or 0
+                ),
+            }
+
+    def load_metrics_counters(self) -> list[dict]:
+        with self._session() as s:
+            rows = s.execute(select(MetricsCounter)).scalars().all()
+            return [
+                {
+                    "name": row.name,
+                    "labels": row.labels,
+                    "value": row.value or 0.0,
+                }
+                for row in rows
+            ]
+
+    def save_metrics_counters(self, rows: list[dict]) -> None:
+        with self._session() as s:
+            for row in rows:
+                s.merge(
+                    MetricsCounter(
+                        name=str(row["name"]),
+                        labels=str(row.get("labels") or "{}"),
+                        value=float(row.get("value", 0.0)),
+                        updated_at=int(row.get("updated_at", 0)),
+                    )
+                )
+            s.commit()
+
+    def recent_mappings(self, limit: int = 50) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self._session() as s:
+            rows = s.execute(
+                select(
+                    MessageMapping.bridge_id,
+                    MessageMapping.instance_id,
+                    MessageMapping.channel_id,
+                    MessageMapping.platform_msg_id,
+                )
+                .order_by(MessageMapping.platform_msg_id.desc())
+                .limit(limit)
+            ).all()
+            return [
+                {
+                    "bridge_id": r[0],
+                    "instance_id": r[1],
+                    "channel_id": r[2],
+                    "platform_msg_id": r[3],
+                }
+                for r in rows
+            ]
+
+    def list_user_bindings(self, limit: int = 200) -> list[dict]:
+        limit = max(1, min(int(limit), 1000))
+        with self._session() as s:
+            rows = s.execute(
+                select(
+                    UserBinding.global_user_id,
+                    UserBinding.instance_id,
+                    UserBinding.platform_user_id,
+                )
+                .order_by(
+                    UserBinding.global_user_id.asc(),
+                    UserBinding.instance_id.asc(),
+                )
+                .limit(limit)
+            ).all()
+        result: list[dict] = []
+        by_global: dict[str, dict] = {}
+        for global_id, inst, uid in rows:
+            entry = by_global.get(global_id)
+            if entry is None:
+                entry = {"global_user_id": global_id, "accounts": []}
+                by_global[global_id] = entry
+                result.append(entry)
+            entry["accounts"].append({"instance_id": inst, "platform_user_id": uid})
+        return result
 
 
 # Shared singleton

@@ -23,6 +23,8 @@
 #   verification_token   – Event verification token  (HTTP mode only)
 #   encrypt_key          – Event encryption key  (HTTP mode; leave "" to disable)
 #   listen_path          – HTTP path for events    (HTTP mode; default: "/event")
+#   webhook_secret       – Optional secret appended as an extra path segment
+#                          (host:port/<listen_path>/<webhook_secret>); omitted when unset
 #
 # Rule channel keys:
 #   chat_id – Feishu open chat ID, e.g. "oc_xxxxxxxxxxxxxxxxxx"
@@ -49,12 +51,14 @@ from lark_oapi.api.im.v1 import (
     ReplyMessageRequestBody,
 )
 
-import services.logger as log
 from drivers import BaseDriver
 from drivers.registry import register
+import services.logger as log
 from services import media
 from services.config_schema import _DriverConfig
+from services.message_format import apply_rich_header
 from services.message import Attachment, NormalizedMessage
+from services.util import LRUDict
 
 
 class FeishuConfig(_DriverConfig):
@@ -64,10 +68,9 @@ class FeishuConfig(_DriverConfig):
     verification_token: str = ""
     encrypt_key: str = ""
     listen_path: str = "/event"
+    webhook_secret: str = ""
     max_file_size: int = 50 * 1024 * 1024
 
-
-logger = log.get_logger()
 
 _WSS_URL_RE = re.compile(r"wss://\S+")
 
@@ -77,18 +80,19 @@ class _LarkLogBridge(logging.Handler):
 
     def __init__(self, instance_id: str):
         self.instance_id = instance_id
+        self.logger = log.get_logger(f"[{instance_id}]", instance=True)
         super().__init__()
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = _WSS_URL_RE.sub("wss://***", record.getMessage())
         if record.levelno >= logging.ERROR:
-            logger.error(f"Feishu [{self.instance_id}] [WS] {msg}")
+            self.logger.error(f"[WS] {msg}")
         elif record.levelno >= logging.WARNING:
-            logger.warning(f"Feishu [{self.instance_id}] [WS] {msg}")
+            self.logger.warning(f"[WS] {msg}")
         elif record.levelno >= logging.INFO:
-            logger.info(f"Feishu [{self.instance_id}] [WS] {msg}")
+            self.logger.info(f"[WS] {msg}")
         else:
-            logger.debug(f"Feishu [{self.instance_id}] [WS] {msg}")
+            self.logger.debug(f"[WS] {msg}")
 
 
 class FeishuDriver(BaseDriver[FeishuConfig]):
@@ -97,8 +101,9 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         self._client: lark.Client | None = None
         self._handler = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        # open_id → (display_name, avatar_url)
-        self._user_cache: dict[str, tuple[str, str]] = {}
+        # open_id → (display_name, avatar_url). Bounded LRU to prevent
+        # unbounded growth over long uptimes.
+        self._user_cache: LRUDict[str, tuple[str, str]] = LRUDict(maxsize=1000)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -139,7 +144,11 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         app_id = self.config.app_id
         app_secret = self.config.app_secret
         handler = self._handler
-        assert handler is not None  # Type narrowing - handler is set in start()
+        if handler is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _start_long_connection: handler not started"
+            )
+            return
         instance_id = self.instance_id
 
         def _ws_thread() -> None:
@@ -151,7 +160,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             asyncio.set_event_loop(thread_loop)
             _ws_mod.loop = thread_loop  # patch module-level loop reference
 
-            # Redirect the lark-oapi "Lark" logger to the system logger.
+            # Redirect the lark-oapi "Lark" logger to the system self.logger.
             lark_logger = logging.getLogger("Lark")
             lark_logger.handlers.clear()
             lark_logger.addHandler(_LarkLogBridge(self.instance_id))
@@ -163,11 +172,13 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 event_handler=handler,
                 auto_reconnect=True,
             )
-            logger.info(f"Feishu [{instance_id}] WebSocket long connection starting")
+            self.logger.info(
+                f"Feishu [{instance_id}] WebSocket long connection starting"
+            )
             try:
                 ws_client.start()  # blocks until permanently disconnected
             except Exception as e:
-                logger.error(f"Feishu [{instance_id}] WebSocket error: {e}")
+                self.logger.error(f"Feishu [{instance_id}] WebSocket error: {e}")
 
         t = threading.Thread(
             target=_ws_thread,
@@ -175,9 +186,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             daemon=True,
         )
         t.start()
-        logger.info(
-            f"Feishu [{self.instance_id}] WebSocket long connection thread started"
-        )
+        self.logger.info("WebSocket long connection thread started")
         # Block the coroutine so the driver stays alive (mirrors HTTP mode).
         await asyncio.Event().wait()
 
@@ -187,20 +196,25 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
 
     async def _start_http_server(self) -> None:
         path = self.config.listen_path
+        route_path, log_path = self.webhook_route(path, self.config.webhook_secret)
 
         app = FastAPI()
-        app.add_api_route("/", self._handle_http, methods=["POST"])
+        app.add_api_route(route_path, self._handle_http, methods=["POST"])
         if self.http_server is None:
-            logger.error(f"Feishu [{self.instance_id}] shared HTTP server unavailable")
+            self.logger.error("shared HTTP server unavailable")
             return
 
         self.http_server.mount(self.instance_id, path, app)
-        logger.info(f"Feishu [{self.instance_id}] HTTP webhook mounted at {path}")
+        self.logger.info(f"HTTP webhook mounted at {log_path}")
 
         await asyncio.Event().wait()
 
     async def _handle_http(self, request: Request) -> Response:
-        assert self._handler is not None  # Type narrowing - handler is set in start()
+        if self._handler is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _handle_http: handler not started"
+            )
+            return Response(status_code=503)
         handler = self._handler
         body = await request.body()
         # Create RawRequest with correct parameter names for lark-oapi
@@ -232,9 +246,17 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         if open_id in self._user_cache:
             return self._user_cache[open_id]
 
-        assert self._client is not None  # Type narrowing - client is set in start()
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _fetch_user_info: client not started"
+            )
+            return (open_id, "")
         client = self._client
-        assert client.contact is not None
+        if client.contact is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _fetch_user_info: contact api unavailable"
+            )
+            return (open_id, "")
         name, avatar = open_id, ""
         try:
             req = (
@@ -249,12 +271,12 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 name = u.name or open_id
                 avatar = (u.avatar.avatar_72 if u.avatar else "") or ""
             else:
-                logger.info(
-                    f"Feishu [{self.instance_id}] user info fetch failed for "
+                self.logger.info(
+                    f"user info fetch failed for "
                     f"{open_id}: code={resp.code} msg={resp.msg}"
                 )
         except Exception as e:
-            logger.info(f"Feishu [{self.instance_id}] user info fetch error: {e}")
+            self.logger.info(f"user info fetch error: {e}")
 
         self._user_cache[open_id] = (name, avatar)
         return name, avatar
@@ -290,9 +312,17 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
         self, message_id: str, file_key: str, resource_type: str
     ) -> bytes | None:
         """Download a message resource (image/file) from Feishu."""
-        assert self._client is not None  # Type narrowing - client is set in start()
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _download_resource: client not started"
+            )
+            return None
         client = self._client
-        assert client.im is not None
+        if client.im is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _download_resource: im api unavailable"
+            )
+            return None
         try:
             req = (
                 GetMessageResourceRequest.builder()
@@ -304,12 +334,11 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             resp = client.im.v1.message_resource.get(req)
             if resp.success() and resp.file is not None:
                 return resp.file.read()
-            logger.error(
-                f"Feishu [{self.instance_id}] resource download failed: "
-                f"code={resp.code} msg={resp.msg}"
+            self.logger.error(
+                f"resource download failed: code={resp.code} msg={resp.msg}"
             )
         except Exception as e:
-            logger.error(f"Feishu [{self.instance_id}] resource download error: {e}")
+            self.logger.error(f"resource download error: {e}")
         return None
 
     def _on_message_event(self, data) -> None:
@@ -391,6 +420,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                 message_id=msg.message_id,
                 reply_parent=msg.parent_id,
                 mentions=mentions,
+                is_dm=msg.chat_type == "p2p",
             )
 
             if self._loop:
@@ -398,7 +428,7 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                     self.bridge.on_message(normalized), self._loop
                 )
         except Exception as e:
-            logger.error(f"Feishu [{self.instance_id}] event parse error: {e}")
+            self.logger.error(f"event parse error: {e}")
 
     # ------------------------------------------------------------------
     # Send
@@ -413,22 +443,18 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
     ):
         chat_id = channel.get("chat_id")
         if not chat_id:
-            logger.warning(
-                f"Feishu [{self.instance_id}] send: no chat_id in channel {channel}"
-            )
+            self.logger.warning(f"send: no chat_id in channel {channel}")
             return None
         if self._client is None:
-            logger.warning(f"Feishu [{self.instance_id}] send: driver not started")
+            self.logger.warning("send: driver not started")
             return None
 
         reply_to_id = kwargs.get("reply_to_id")
-        first_msg_id = None
+        msg_ids = []
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         # Handle mentions in outgoing text
         mentions = kwargs.get("mentions", [])
@@ -440,8 +466,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             mid = await self._send_feishu_msg(
                 chat_id, "text", json.dumps({"text": text}), reply_to_id
             )
-            if not first_msg_id:
-                first_msg_id = mid
+            if mid:
+                msg_ids.append(mid)
 
         source_proxy = self._source_proxy_from_kwargs(kwargs)
 
@@ -459,8 +485,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                     json.dumps({"text": f"[{att.type.capitalize()}: {label}]"}),
                     reply_to_id,
                 )
-                if not first_msg_id:
-                    first_msg_id = mid
+                if mid:
+                    msg_ids.append(mid)
                 continue
 
             data_bytes, mime = result
@@ -472,8 +498,8 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                     mid = await self._send_feishu_msg(
                         chat_id, "image", json.dumps({"image_key": key}), reply_to_id
                     )
-                    if not first_msg_id:
-                        first_msg_id = mid
+                    if mid:
+                        msg_ids.append(mid)
                 else:
                     mid = await self._send_feishu_msg(
                         chat_id,
@@ -481,16 +507,16 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                         json.dumps({"text": f"[Image: {fname}]"}),
                         reply_to_id,
                     )
-                    if not first_msg_id:
-                        first_msg_id = mid
+                    if mid:
+                        msg_ids.append(mid)
             else:
                 key = await self._upload_file(data_bytes, fname)
                 if key:
                     mid = await self._send_feishu_msg(
                         chat_id, "file", json.dumps({"file_key": key}), reply_to_id
                     )
-                    if not first_msg_id:
-                        first_msg_id = mid
+                    if mid:
+                        msg_ids.append(mid)
                 else:
                     mid = await self._send_feishu_msg(
                         chat_id,
@@ -498,16 +524,24 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
                         json.dumps({"text": f"[{att.type.capitalize()}: {fname}]"}),
                         reply_to_id,
                     )
-                    if not first_msg_id:
-                        first_msg_id = mid
+                    if mid:
+                        msg_ids.append(mid)
 
-        return first_msg_id
+        return msg_ids if msg_ids else None
 
     async def _send_feishu_msg(
         self, chat_id: str, msg_type: str, content: str, reply_to_id: str | None = None
     ) -> str | None:
-        assert self._client is not None  # Type narrowing - client is set in start()
-        assert self._client.im is not None
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _send_feishu_msg: client not started"
+            )
+            return None
+        if self._client.im is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _send_feishu_msg: im api unavailable"
+            )
+            return None
         im = self._client.im
 
         loop = asyncio.get_running_loop()
@@ -547,17 +581,22 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             if resp.success() and resp.data is not None:
                 return resp.data.message_id
 
-            logger.error(
-                f"Feishu [{self.instance_id}] send failed: "
-                f"code={resp.code} msg={resp.msg}"
-            )
+            self.logger.error(f"send failed: code={resp.code} msg={resp.msg}")
         except Exception as e:
-            logger.error(f"Feishu [{self.instance_id}] send error: {e}")
+            self.logger.error(f"send error: {e}")
         return None
 
     async def _upload_image(self, data: bytes) -> str | None:
-        assert self._client is not None  # Type narrowing - client is set in start()
-        assert self._client.im is not None
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _upload_image: client not started"
+            )
+            return None
+        if self._client.im is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _upload_image: im api unavailable"
+            )
+            return None
         im = self._client.im
         body = (
             CreateImageRequestBody.builder()
@@ -571,17 +610,22 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             resp = await loop.run_in_executor(None, lambda: im.v1.image.create(req))
             if resp.success() and resp.data is not None:
                 return resp.data.image_key
-            logger.error(
-                f"Feishu [{self.instance_id}] image upload failed: "
-                f"code={resp.code} msg={resp.msg}"
-            )
+            self.logger.error(f"image upload failed: code={resp.code} msg={resp.msg}")
         except Exception as e:
-            logger.error(f"Feishu [{self.instance_id}] image upload error: {e}")
+            self.logger.error(f"image upload error: {e}")
         return None
 
     async def _upload_file(self, data: bytes, fname: str) -> str | None:
-        assert self._client is not None  # Type narrowing - client is set in start()
-        assert self._client.im is not None
+        if self._client is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _upload_file: client not started"
+            )
+            return None
+        if self._client.im is None:
+            self.logger.warning(
+                f"Feishu [{self.instance_id}] _upload_file: im api unavailable"
+            )
+            return None
         im = self._client.im
         body = (
             CreateFileRequestBody.builder()
@@ -596,12 +640,9 @@ class FeishuDriver(BaseDriver[FeishuConfig]):
             resp = await loop.run_in_executor(None, lambda: im.v1.file.create(req))
             if resp.success() and resp.data is not None:
                 return resp.data.file_key
-            logger.error(
-                f"Feishu [{self.instance_id}] file upload failed: "
-                f"code={resp.code} msg={resp.msg}"
-            )
+            self.logger.error(f"file upload failed: code={resp.code} msg={resp.msg}")
         except Exception as e:
-            logger.error(f"Feishu [{self.instance_id}] file upload error: {e}")
+            self.logger.error(f"file upload error: {e}")
         return None
 
 

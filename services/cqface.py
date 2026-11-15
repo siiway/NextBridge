@@ -10,7 +10,7 @@ import yaml
 from services.util import get_data_path
 import services.logger as log
 
-logger = log.get_logger()
+logger = log.get_logger("cqface")
 _CQFACE_RE = re.compile(r":cqface(\d+):")
 
 

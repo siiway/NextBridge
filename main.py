@@ -2,6 +2,8 @@ import argparse
 import asyncio
 import importlib
 import importlib.util
+import os
+import subprocess
 import sys
 from pathlib import Path
 from tomllib import load as load_toml
@@ -9,26 +11,30 @@ from tomllib import load as load_toml
 from pydantic import ValidationError
 
 import services.error  # noqa: F401
+import services.audit as audit
 import services.logger as log
 import services.util as u
 from services import config_io
 from services.bridge import bridge
-from services.config_schema import GlobalConfig
-from services.db import db_target_version, init_db
+from services.config_schema import GlobalConfig, RulesFile
+from services.db import db_target_version, init_db, msg_db
+from services.driver_context import DriverContext
+from services.driver_manager import DriverManager
+from services.event_bus import EventBus
 from services.http_server import HttpServerManager
+from services.media import close_all_sessions
+from services.metrics import MetricsCollector, snapshot_loop
+from services.middleware import MiddlewareChain
+from services.plugin_loader import load_all_drivers
+from services.reload import ReloadEngine, install_sighup_handler
+from plugins.context import PluginContext
+from plugins.loader import load_plugins as load_plugin_modules
+from plugins.manager import PluginManager
 
-logger = log.get_logger()
+logger = log.get_logger("__main__")
 
 
 def _load_project_version() -> str:
-    """Load project version from pyproject.toml.
-
-    Returns:
-        The version string from [project].version.
-
-    Raises:
-        RuntimeError: If pyproject.toml cannot be read or version is missing.
-    """
     try:
         with open("pyproject.toml", "rb") as f:
             version = str(load_toml(f).get("project", {}).get("version", "")).strip()
@@ -41,21 +47,144 @@ def _load_project_version() -> str:
     return version
 
 
-def _load_all_drivers(enabled_platforms: list[str]) -> None:
-    """Import every module in the ``drivers/`` package.
+def _load_commit_hash() -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
 
-    Each driver module calls ``drivers.registry.register()`` at import time,
-    so this one pass is enough to populate the registry.  The ``registry``
-    module itself is skipped to avoid a circular bootstrap.
+
+def _parse_build_version(env: str) -> tuple[str, str | None] | None:
+    """Parse ``NEXTBRIDGE_BUILD_VERSION`` (``vX.X-YYYYMMDD-<hash>``).
+
+    Returns ``(version, commit_hash)`` when the env var is set and well-formed,
+    otherwise ``None``.  Container builds inject this so the running process can
+    report its version even without git metadata on disk.
     """
-    for platform in enabled_platforms:
-        module_name = f"drivers.{platform}"
-        if importlib.util.find_spec(module_name) is None:
-            logger.warning(
-                f"Driver module for platform '{platform}' not found, skipping."
-            )
-            continue
+    raw = (env or "").strip()
+    if not raw:
+        return None
+    body = raw[1:] if raw.startswith("v") else raw
+    parts = body.split("-")
+    if not parts or not parts[0]:
+        return None
+    version = parts[0]
+    # <hash> is present only in the full 3-part form.
+    commit = parts[-1] if len(parts) >= 3 else None
+    return version, commit
+
+
+def _is_release_build() -> bool:
+    try:
+        proc = subprocess.run(
+            ["git", "describe", "--tags", "--exact-match"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return False
+    return proc.returncode == 0
+
+
+def _discover_all_driver_modules() -> None:
+    """Import every driver module to discover CLI hooks and registrations.
+
+    Sources: built-in ``drivers/*.py``, pip packages advertising the
+    ``nextbridge.drivers`` entry-point group, and external drivers / plugin
+    paths declared in the config file.  Without the external sources, a
+    pip-installed driver's ``register_cli()`` hooks would never appear in
+    argparse (they are only imported later, inside ``main()``).
+    """
+    drivers_dir = Path(__file__).parent / "drivers"
+    if drivers_dir.is_dir():
+        for py_file in sorted(drivers_dir.glob("*.py")):
+            if py_file.name.startswith("_"):
+                continue
+            module_name = f"drivers.{py_file.stem}"
+            if module_name in sys.modules:
+                continue
+            if importlib.util.find_spec(module_name) is None:
+                continue
+            try:
+                importlib.import_module(module_name)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"Failed to import driver module: {module_name}"
+                )
+
+    _discover_external_driver_modules()
+
+
+def _import_driver_module(module_path: str, source: str) -> None:
+    """Best-effort import of one external driver module."""
+    module_name = module_path.split(":", 1)[0].strip()
+    if not module_name or module_name in sys.modules:
+        return
+    try:
         importlib.import_module(module_name)
+    except Exception:
+        logger.opt(exception=True).warning(
+            f"Failed to import {source} driver module: {module_name}"
+        )
+
+
+def _discover_external_driver_modules() -> None:
+    """Import entry-point and config-declared external driver modules.
+
+    Failures are logged and swallowed — the CLI must still work when a
+    third-party driver is broken or the config file is missing/invalid
+    (``validate`` relies on this).
+    """
+    import importlib.metadata
+
+    from services.plugin_loader import (
+        ENTRYPOINT_GROUP,
+        discover_local_drivers,
+    )
+
+    try:
+        for ep in importlib.metadata.entry_points(group=ENTRYPOINT_GROUP):
+            _import_driver_module(ep.value, "entry-point")
+    except Exception:
+        logger.opt(exception=True).warning("Entry-point driver discovery failed")
+
+    # Config-declared external drivers and plugin paths (best effort).
+    try:
+        config_path = config_io.find_config(Path(u.get_data_path()))
+        if config_path is None:
+            return
+        raw = config_io.load_config(config_path)
+        plugins_cfg = (raw.get("global") or {}).get("plugins") or {}
+        drivers_cfg = plugins_cfg.get("drivers") or {}
+        external = drivers_cfg.get("external") or {}
+        if isinstance(external, dict):
+            for entry in external.values():
+                if isinstance(entry, dict) and entry.get("module"):
+                    _import_driver_module(str(entry["module"]), "external")
+        paths = plugins_cfg.get("paths") or []
+        if isinstance(paths, list) and paths:
+            from services.plugin_loader import _load_module
+
+            for info in discover_local_drivers([str(p) for p in paths]).values():
+                try:
+                    _load_module(info)
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        f"Failed to import local driver module: {info.module_path}"
+                    )
+    except Exception:
+        logger.opt(exception=True).warning(
+            "Config-declared external driver discovery failed"
+        )
 
 
 def cmd_convert(src: str, dst: str) -> None:
@@ -81,12 +210,115 @@ def cmd_convert(src: str, dst: str) -> None:
     print(f"Converted {src_path} → {dst_path}")
 
 
+def cmd_validate(args: argparse.Namespace) -> None:
+    """Validate config / rules files for syntax correctness."""
+    data_path = Path(args.data_path or u.get_data_path())
+    manual_config = args.config is not None
+    manual_rules = args.rules is not None
+    any_manual = manual_config or manual_rules
+
+    if manual_config:
+        config_path = Path(args.config)
+        if not config_path.is_file():
+            print(f"Config file not found: {config_path}", file=sys.stderr)
+            sys.exit(2)
+        validate_config = True
+    elif not any_manual:
+        config_path = config_io.find_config(data_path)
+        validate_config = config_path is not None
+    else:
+        validate_config = False
+
+    if manual_rules:
+        rules_path = Path(args.rules)
+        if not rules_path.is_file():
+            print(f"Rules file not found: {rules_path}", file=sys.stderr)
+            sys.exit(2)
+        validate_rules = True
+    elif not any_manual:
+        rules_path = config_io.find_rules(data_path)
+        validate_rules = rules_path is not None
+    else:
+        validate_rules = False
+
+    has_errors = False
+
+    if validate_config:
+        if config_path is None:
+            print("Bug: config_path is None after conditional check", file=sys.stderr)
+            sys.exit(1)
+        logger.info(f"Validating config: {config_path.name}")
+        try:
+            raw = config_io.load_config(config_path)
+        except Exception as exc:
+            print(f"Failed to parse config file: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        global_raw = raw.get("global", {})
+        try:
+            GlobalConfig.model_validate(global_raw)
+            print("  global: OK")
+        except ValidationError as exc:
+            print(f"  global: FAILED\n{exc}", file=sys.stderr)
+            has_errors = True
+
+        _discover_all_driver_modules()
+        from drivers.registry import all_drivers
+
+        registry = all_drivers()
+        for platform, (config_cls, _) in registry.items():
+            for inst_id, inst_raw in raw.get(platform, {}).items():
+                try:
+                    config_cls.model_validate(inst_raw)
+                    print(f"  {platform}.{inst_id}: OK")
+                except ValidationError as exc:
+                    print(f"  {platform}.{inst_id}: FAILED\n{exc}", file=sys.stderr)
+                    has_errors = True
+
+    if validate_rules:
+        if rules_path is None:
+            print("Bug: rules_path is None after conditional check", file=sys.stderr)
+            sys.exit(1)
+        logger.info(f"Validating rules: {rules_path.name}")
+        try:
+            data = config_io.load_config(rules_path)
+        except Exception as exc:
+            print(f"Failed to parse rules file: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            RulesFile.model_validate(data)
+            print("  rules: OK")
+        except ValidationError as exc:
+            print(f"  rules: FAILED\n{exc}", file=sys.stderr)
+            has_errors = True
+
+    if has_errors:
+        sys.exit(1)
+
+    print("Validation passed.")
+    sys.exit(0)
+
+
 async def main():
-    try:
-        version = _load_project_version()
-    except Exception:
-        logger.opt(exception=True).critical("Startup aborted: failed to load version")
-        return
+    build_version = _parse_build_version(os.environ.get("NEXTBRIDGE_BUILD_VERSION", ""))
+    if build_version:
+        version, commit_hash = build_version
+        # Build env provides commit hash only in the full form; fall back to git
+        # when it is absent (e.g. local builds reusing the var without a hash).
+        if commit_hash is None:
+            commit_hash = _load_commit_hash()
+    else:
+        try:
+            version = _load_project_version()
+        except Exception:
+            logger.opt(exception=True).critical(
+                "Startup aborted: failed to load version"
+            )
+            return
+        commit_hash = _load_commit_hash()
+    is_dev = bool(commit_hash) and not _is_release_build()
+    bridge.set_version_info(version, commit_hash, is_dev)
 
     config_path = config_io.find_config(Path(u.get_data_path()))
     if config_path is None:
@@ -95,24 +327,23 @@ async def main():
         )
         return
 
-    bridge.load_rules()
+    try:
+        bridge.load_rules()
+    except Exception as exc:
+        logger.opt(exception=exc).critical("Rules configuration error")
+        return
 
     logger.info(f"Loading config from: {config_path}")
     raw: dict = config_io.load_config(config_path)
 
     bridge.load_sensitive_values(raw)
 
-    enabled_platforms = [key for key in raw if key != "global"]
-    _load_all_drivers(enabled_platforms)
-    from drivers.registry import all_drivers
-
-    logger.info("NextBridge starting...")
-
     # Load global configuration
     global_config = raw.get("global", {})
     bridge.strict_echo_match = global_config.get("strict_echo_match", False)
-
-    # Validate database configuration
+    bridge.fuzzy_mention_match = global_config.get("fuzzy_mention_match", False)
+    bridge.mention_notify_control = global_config.get("mention_notify_control", True)
+    bridge.sanitize_nickname = global_config.get("sanitize_nickname", True)
 
     try:
         validated_global = GlobalConfig.model_validate(global_config)
@@ -121,6 +352,7 @@ async def main():
         return
 
     # Logging configuration
+    log.set_show_source(validated_global.log.show_source)
     log.set_console_level(validated_global.log.level)
     log.set_stdlib_levels(validated_global.log.level)
     log.set_log_dir(validated_global.log.dir)
@@ -131,6 +363,34 @@ async def main():
         file_level=validated_global.log.file_level,
     )
     bridge.command_prefix = validated_global.command_prefix
+    bridge.send_timeout = validated_global.send_timeout
+    bridge.sanitize_nickname = validated_global.sanitize_nickname
+
+    # ------------------------------------------------------------------
+    # Set up plugin infrastructure (before init_db so migrations register)
+    # ------------------------------------------------------------------
+    event_bus = EventBus()
+    middleware = MiddlewareChain()
+    bridge.set_middleware(middleware)
+    bridge.set_event_bus(event_bus)
+
+    audit.configure(
+        validated_global.log.dir,
+        rotation=validated_global.log.rotation_size,
+        retention=validated_global.log.retention_days,
+        compression=validated_global.log.compression,
+        event_bus=event_bus,
+    )
+
+    plugin_cfg = validated_global.plugins
+    general_cfg = plugin_cfg.general
+    enabled_plugins = list(general_cfg.enabled)
+    external_plugins = general_cfg.external
+    plugin_configs = plugin_cfg.config
+
+    loaded_plugin_infos = load_plugin_modules(
+        enabled_plugins, external_plugins, plugin_cfg.paths or None
+    )
 
     try:
         init_db()
@@ -143,14 +403,25 @@ async def main():
         )
         return
 
-    http_server = HttpServerManager(
-        host=validated_global.http.host,
-        port=validated_global.http.port,
-        root_path=validated_global.http.root_path,
-        log_level=validated_global.http.log_level,
-        start_without_mounts=validated_global.http.enable == "true",
-        version=version,
-    )
+    # ------------------------------------------------------------------
+    # Set up plugin infrastructure
+    # ------------------------------------------------------------------
+    # Discover and import driver modules (built-in, entrypoints, local, external)
+    drivers_cfg = plugin_cfg.drivers
+
+    if drivers_cfg.enabled:
+        enabled_platforms = list(drivers_cfg.enabled)
+    else:
+        enabled_platforms = [key for key in raw if key != "global"]
+
+    for ext_name in drivers_cfg.external:
+        if ext_name not in enabled_platforms:
+            enabled_platforms.append(ext_name)
+
+    load_all_drivers(enabled_platforms, drivers_cfg, plugin_cfg.paths or None)
+    from drivers.registry import all_drivers
+
+    logger.info("NextBridge starting...")
 
     # Validate each driver's per-instance configs via its registered model.
     registry = all_drivers()
@@ -172,37 +443,124 @@ async def main():
     if not config_ok:
         return
 
-    def _on_task_done(task: asyncio.Task) -> None:
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None:
-            logger.opt(exception=exc).error(f"Driver '{task.get_name()}' crashed")
+    http_server = HttpServerManager(
+        host=validated_global.http.host,
+        port=validated_global.http.port,
+        root_path=validated_global.http.root_path,
+        log_level=validated_global.http.log_level,
+        start_without_mounts=validated_global.http.enable == "true",
+        version=version,
+    )
+
+    # ------------------------------------------------------------------
+    # Create driver context and manager
+    # ------------------------------------------------------------------
+    ctx = DriverContext(
+        bridge=bridge,
+        http_server=http_server,
+        event_bus=event_bus,
+        middleware=middleware,
+        version=version,
+        config_path=config_path,
+    )
+
+    driver_manager = DriverManager(
+        event_bus,
+        auto_restart=plugin_cfg.auto_restart,
+        max_restart_attempts=plugin_cfg.max_restart_attempts,
+        health_check_interval=plugin_cfg.health_check_interval,
+    )
+    bridge.set_driver_manager(driver_manager)
+    driver_manager.set_context(ctx)
 
     logger.info(f"========== NextBridge v{version} Starting ==========")
 
-    driver_tasks: list[asyncio.Task] = []
     for platform, (_, driver_cls) in registry.items():
         for inst_id, cfg in validated.get(platform, {}).items():
-            drv = driver_cls(inst_id, cfg, bridge)
+            drv = driver_cls(inst_id, cfg, ctx)
             drv.attach_http_server(http_server)
-            task = asyncio.create_task(drv.start(), name=f"{platform}/{inst_id}")
-            task.add_done_callback(_on_task_done)
-            driver_tasks.append(task)
+
+            def _factory(iid, inst_cfg, _cls=driver_cls):
+                built = _cls(iid, inst_cfg, ctx)
+                built.attach_http_server(http_server)
+                return built
+
+            await driver_manager.register_and_start(
+                platform, inst_id, drv, cfg, _factory
+            )
             logger.info(f"Registered driver: {platform}/{inst_id}")
 
-    if not driver_tasks and validated_global.http.enable != "true":
+    has_drivers = bool(driver_manager.drivers)
+    if not has_drivers and validated_global.http.enable != "true":
         logger.error("No drivers configured — nothing to do, exiting.")
         return
-    if not driver_tasks and validated_global.http.enable == "true":
+    if not has_drivers and validated_global.http.enable == "true":
         logger.warning(
             "No drivers configured — starting HTTP server due to http.enable=true"
         )
 
+    # Start health monitoring
+    await driver_manager.start_health_monitor()
+
     # Let drivers perform startup and register webhook sub-apps.
     await asyncio.sleep(0)
 
-    all_tasks = list(driver_tasks)
+    # ------------------------------------------------------------------
+    # Initialize general plugins
+    # ------------------------------------------------------------------
+    plugin_manager = PluginManager(
+        event_bus,
+        lambda name, cfg: PluginContext(
+            bridge=bridge,
+            http_server=http_server,
+            event_bus=event_bus,
+            middleware=middleware,
+            config=cfg,
+            version=version,
+            config_path=config_path,
+        ),
+    )
+
+    await plugin_manager.discover_and_load(loaded_plugin_infos, plugin_configs)
+    for name in enabled_plugins:
+        await plugin_manager.enable_plugin(name)
+
+    # ------------------------------------------------------------------
+    # Runtime metrics
+    # ------------------------------------------------------------------
+    metrics = MetricsCollector()
+    try:
+        metrics.restore(msg_db().load_metrics_counters())
+    except Exception:
+        logger.opt(exception=True).warning("Failed to restore metrics counters")
+    bridge.set_metrics(metrics)
+    driver_manager.set_metrics(metrics)
+
+    # ------------------------------------------------------------------
+    # Hot-reload engine
+    # ------------------------------------------------------------------
+    reload_engine = ReloadEngine(
+        bridge,
+        config_path=config_path,
+        driver_manager=driver_manager,
+        metrics=metrics,
+    )
+    reload_engine.seed(raw)
+    http_server.set_reload_engine(reload_engine)
+    if install_sighup_handler(reload_engine):
+        logger.info("SIGHUP handler installed for configuration reload")
+
+    all_tasks: list[asyncio.Task] = []
+    if (
+        validated_global.metrics.enabled
+        and validated_global.metrics.snapshot_interval > 0
+    ):
+        all_tasks.append(
+            asyncio.create_task(
+                snapshot_loop(metrics, validated_global.metrics.snapshot_interval),
+                name="metrics/snapshot",
+            )
+        )
     http_enable = validated_global.http.enable
     if http_enable == "false":
         if http_server.has_mounts():
@@ -212,34 +570,49 @@ async def main():
             )
         logger.info("Shared HTTP server disabled by configuration (http.enable=false)")
     elif http_server.should_start():
+        admin_cfg = plugin_cfg.admin
+        http_server.set_bridge(bridge)
+        http_server.set_driver_manager(driver_manager)
+        http_server.set_plugin_manager(plugin_manager)
+        http_server.set_metrics(metrics)
+        if admin_cfg.enable:
+            if not admin_cfg.password:
+                logger.critical(
+                    "Admin API is enabled but no password is set "
+                    "(global.plugins.admin.password). Refusing to start."
+                )
+                return
+            http_server.configure_admin(
+                enabled=True, user=admin_cfg.user, password=admin_cfg.password
+            )
+            logger.info("Admin API enabled at /_nextbridge/*")
+        else:
+            http_server.configure_admin(enabled=False)
+            logger.info("Admin API disabled; only /_nextbridge/health is exposed")
         http_task = asyncio.create_task(http_server.run(), name="http/shared")
-        http_task.add_done_callback(_on_task_done)
         all_tasks.append(http_task)
     else:
         logger.info("No HTTP sub-app mounted; shared HTTP server disabled")
 
     try:
-        results = await asyncio.gather(*all_tasks, return_exceptions=True)
-        for task, result in zip(all_tasks, results):
-            if isinstance(result, Exception):
-                logger.error(f"Driver '{task.get_name()}' exited with error: {result}")
+        await asyncio.Event().wait()
     except asyncio.CancelledError:
         logger.info("NextBridge shutting down...")
+    finally:
+        try:
+            await driver_manager.stop_all()
+            await plugin_manager.unload_all()
 
-        # stop all tasks explicitly
-        for task in all_tasks:
-            if not task.done():
-                task.cancel()
+            for task in all_tasks:
+                if not task.done():
+                    task.cancel()
+            if all_tasks:
+                await asyncio.gather(*all_tasks, return_exceptions=True)
 
-        # wait for all drivers to clean up
-        await asyncio.gather(*all_tasks, return_exceptions=True)
-
-        # close all sessions to avoid connection leaks
-        from services.media import close_all_sessions
-
-        await close_all_sessions()
-
-        logger.info("NextBridge stopped.")
+            logger.info("NextBridge stopped.")
+        finally:
+            # Close all active HTTP client sessions before the event loop exits
+            await close_all_sessions()
 
 
 if __name__ == "__main__":
@@ -254,10 +627,50 @@ if __name__ == "__main__":
     conv.add_argument("src", help="Source config file (e.g. config.json)")
     conv.add_argument("dst", help="Destination config file (e.g. config.yaml)")
 
+    valid = subparsers.add_parser(
+        "validate",
+        help="Validate config and rules files for syntax correctness",
+    )
+    valid.add_argument(
+        "--config", "-c", help="Path to config file (optional, overrides default)"
+    )
+    valid.add_argument(
+        "--rules", "-r", help="Path to rules file (optional, overrides default)"
+    )
+    valid.add_argument(
+        "--data-path",
+        "-d",
+        help="Data directory for default discovery (defaults to NEXTBRIDGE_DATA_PATH or data/)",
+    )
+
+    # Discover CLI hooks from all driver modules (built-in + plugins).
+    # This imports every driver .py but only to pick up register_cli() calls;
+    # the full driver startup happens later in main().
+    _discover_all_driver_modules()
+    from drivers.registry import all_cli_hooks
+
+    for hook in all_cli_hooks():
+        try:
+            hook(subparsers)
+        except Exception:
+            logger.opt(exception=True).warning("CLI hook registration failed")
+
     args = parser.parse_args()
 
     if args.command == "convert":
         cmd_convert(args.src, args.dst)
+        sys.exit(0)
+
+    if args.command == "validate":
+        cmd_validate(args)
+        sys.exit(0)
+
+    # Dispatch plugin CLI subcommands.
+    # Drivers register handlers by attaching a _cli_handler attribute
+    # to the subparser action via set_defaults().
+    handler = getattr(args, "cli_handler", None)
+    if handler is not None:
+        handler(args)
         sys.exit(0)
 
     try:

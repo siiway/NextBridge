@@ -14,6 +14,8 @@
 #   robot_code     – Bot robot code     (required for sending)
 #   signing_secret – Webhook signing secret (optional; skips verify if absent)
 #   listen_path    – HTTP path          (default: "/dingtalk/event")
+#   webhook_secret – Optional secret appended as an extra path segment
+#                    (host:port/<listen_path>/<webhook_secret>); omitted when unset
 #
 # Rule channel keys:
 #   open_conversation_id – DingTalk open conversation ID
@@ -40,11 +42,11 @@ from alibabacloud_dingtalk.robot_1_0 import models as robot_models
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-import services.logger as log
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
 from services.db import msg_db
+from services.message_format import apply_rich_header
 from drivers import BaseDriver
 
 _UPLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/upload"
@@ -56,10 +58,9 @@ class DingTalkConfig(_DriverConfig):
     robot_code: str
     signing_secret: str = ""
     listen_path: str = "/dingtalk/event"
+    webhook_secret: str = ""
     max_file_size: int = 20 * 1024 * 1024
 
-
-logger = log.get_logger()
 
 _DINGTALK_ENDPOINT = "api.dingtalk.com"
 
@@ -85,17 +86,18 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         self._robot_client = RobotClient(cfg)
         self._session = aiohttp.ClientSession()
 
+        route_path, log_path = self.webhook_route(
+            self.config.listen_path, self.config.webhook_secret
+        )
         app = FastAPI()
-        app.add_api_route("/", self._handle_http, methods=["POST"])
+        app.add_api_route(route_path, self._handle_http, methods=["POST"])
         if self.http_server is None:
-            logger.error(
+            self.logger.error(
                 f"DingTalk [{self.instance_id}] shared HTTP server unavailable"
             )
             return
         self.http_server.mount(self.instance_id, self.config.listen_path, app)
-        logger.info(
-            f"DingTalk [{self.instance_id}] webhook mounted at {self.config.listen_path}"
-        )
+        self.logger.info(f"DingTalk [{self.instance_id}] webhook mounted at {log_path}")
 
         try:
             await asyncio.Event().wait()
@@ -120,7 +122,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
             sig = request.headers.get("sign", "")
             match, err = _verify_sign(ts, self.config.signing_secret, sig)
             if not match:
-                logger.warning(
+                self.logger.warning(
                     f"DingTalk [{self.instance_id}] webhook signature mismatch: {err}"
                     if err
                     else ""
@@ -177,7 +179,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         reply_to_id = kwargs.get("reply_to_id")
         open_conv_id = channel.get("open_conversation_id")
         if not open_conv_id:
-            logger.warning(
+            self.logger.warning(
                 f"DingTalk [{self.instance_id}] send: "
                 f"no open_conversation_id in channel {channel}"
             )
@@ -185,9 +187,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"[{t}" + (f" · {c}" if c else "") + "]"
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="plain")
 
         if reply_to_id:
             text = f"> [Reply]\n{text}"
@@ -195,7 +195,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         try:
             token = await self._get_access_token()
         except Exception:
-            logger.exception(f"DingTalk [{self.instance_id}] access token error")
+            self.logger.exception("access token error")
             return
 
         # Handle mentions
@@ -293,7 +293,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                 ),
             )
         except Exception:
-            logger.exception(
+            self.logger.exception(
                 f"DingTalk [{self.instance_id}] send failed (msg {msg_key})"
             )
 
@@ -321,12 +321,12 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
                     js = await resp.json(content_type=None)
                     return js.get("mediaId")
                 body = await resp.text()
-                logger.error(
+                self.logger.error(
                     f"DingTalk [{self.instance_id}] media upload failed "
                     f"HTTP {resp.status}: {body[:200]}"
                 )
         except Exception:
-            logger.exception(f"DingTalk [{self.instance_id}] media upload error")
+            self.logger.exception("media upload error")
         return None
 
     # ------------------------------------------------------------------
@@ -349,7 +349,7 @@ class DingTalkDriver(BaseDriver[DingTalkConfig]):
         )
         self._access_token = resp.body.access_token or ""
         self._token_expires_at = time.monotonic() + (resp.body.expire_in or 7200)
-        logger.debug(f"DingTalk [{self.instance_id}] access token refreshed")
+        self.logger.debug("access token refreshed")
         return self._access_token
 
 

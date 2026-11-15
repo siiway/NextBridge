@@ -4,7 +4,7 @@ import traceback
 import services.logger as log
 
 # Initialize logger
-logger = log.get_logger()
+logger = log.get_logger("error")
 
 
 def _handle_uncaught_exceptions(exc_type, exc_value, exc_traceback):

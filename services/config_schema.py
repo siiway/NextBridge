@@ -3,12 +3,12 @@ from __future__ import annotations
 from os import environ
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 import services.logger as log
 
 UNSET = "unset"
-logger = log.get_logger()
+logger = log.get_logger("config_schema")
 
 # ---------------------------------------------------------------------------
 # Reusable bool coercion: "true" / "1" / "yes" → True
@@ -54,9 +54,32 @@ class DatabaseConfig(BaseModel):
     pool_recycle: int = 3600
     """Recycle connections after this many seconds (default: 1 hour)."""
 
+    sslmode: str | None = None
+    """PostgreSQL SSL mode (e.g. ``require``, ``prefer``, ``disable``).
+    Only applies to PostgreSQL backends."""
+
+    connect_timeout: int | None = None
+    """PostgreSQL connection timeout in seconds.
+    Only applies to PostgreSQL backends."""
+
+    application_name: str | None = None
+    """PostgreSQL application name for connection identification.
+    Only applies to PostgreSQL backends."""
+
+    message_mapping_retention_days: int = 30
+    """Days to retain message mappings. Set to ``0`` to disable automatic cleanup."""
+
 
 class LoggingConfig(BaseModel):
     """Logging configuration for controlling log output and rotation."""
+
+    show_source: Literal["auto", "always", "never"] = "auto"
+    """Controls whether source file locations are shown in logs.
+
+    - ``auto``: show source only for DEBUG/TRACE level messages.
+    - ``always``: always show source.
+    - ``never``: never show source.
+    """
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     """Console log verbosity level.
@@ -147,6 +170,149 @@ class HttpConfig(BaseModel):
         return val
 
 
+class AdminApiConfig(BaseModel):
+    """Admin API configuration (driver status, reload, etc.)."""
+
+    enable: CoercedBool = False
+    """Enable the admin API endpoints (``/_nextbridge/drivers``, etc.).
+
+    Disabled by default.  When enabled, ``password`` must also be set."""
+
+    user: str = "admin"
+    """Username for admin API access (HTTP Basic Auth).
+
+    Checked together with ``password``."""
+
+    password: str = ""
+    """Password for admin API access (HTTP Basic Auth).
+
+    Must be non-empty when ``enable`` is true."""
+
+
+class ExternalDriverConfig(BaseModel):
+    """Configuration for an external driver loaded from a pip package or file.
+
+    The driver module must call ``drivers.registry.register()`` at import
+    time — the same contract as built-in drivers.
+
+    Example::
+
+        global:
+          plugins:
+            drivers:
+              enabled:
+                - qq
+                - mycustom
+              external:
+                mycustom:
+                  module: "nextbridge_mycustom.driver"
+    """
+
+    module: str
+    """Python module path to import, e.g. ``"nextbridge_mycustom.driver"``."""
+
+
+class GeneralPluginEntry(BaseModel):
+    """Configuration for an external general plugin loaded from a pip package or file.
+
+    The plugin module must call ``plugins.registry.register()`` at import
+    time — the same contract as built-in plugins.
+
+    Example::
+
+        global:
+          plugins:
+            general:
+              enabled:
+                - stats
+              external:
+                my_plugin:
+                  module: "nextbridge_myplugin"
+    """
+
+    module: str
+    """Python module path to import, e.g. ``"nextbridge_myplugin"``."""
+
+
+class GeneralPluginConfig(BaseModel):
+    """General (non-driver) plugin selection configuration."""
+
+    enabled: list[str] = []
+    """Plugin names to enable. Empty = no general plugins."""
+
+    external: dict[str, GeneralPluginEntry] = {}
+    """External plugin imports, keyed by plugin name."""
+
+
+class DriversConfig(BaseModel):
+    """Driver selection configuration.
+
+    Controls which built-in and external drivers are loaded at startup.
+
+    When ``enabled`` is **empty** (the default), NextBridge auto-discovers
+    drivers from the config file's top-level keys (backwards-compatible).
+    When ``enabled`` is **populated**, only the listed drivers are loaded.
+
+    External drivers listed under ``external`` are imported and registered
+    before any built-in driver of the same name, allowing third-party
+    packages to override or extend built-in functionality.
+    """
+
+    enabled: list[str] = []
+    """Driver names to load.  Empty = auto-discover from config file keys."""
+
+    external: dict[str, ExternalDriverConfig] = {}
+    """External driver imports, keyed by driver name."""
+
+
+class PluginConfig(BaseModel):
+    """Plugin discovery and driver lifecycle configuration."""
+
+    paths: list[str] = []
+    """Local directories to scan for driver plugin ``.py`` files."""
+
+    drivers: DriversConfig = DriversConfig()
+    """Driver selection and external driver configuration."""
+
+    general: GeneralPluginConfig = GeneralPluginConfig()
+    """General (non-driver) plugin selection configuration."""
+
+    config: dict[str, dict] = {}
+    """Per-plugin configuration, keyed by plugin name."""
+
+    auto_restart: CoercedBool = True
+    """Automatically restart crashed drivers with exponential backoff."""
+
+    max_restart_attempts: int = 5
+    """Maximum restart attempts before a crashed driver is abandoned."""
+
+    health_check_interval: int = 60
+    """Seconds between periodic driver health checks.  Set to 0 to disable."""
+
+    admin: AdminApiConfig = AdminApiConfig()
+    """Admin API configuration (driver status, reload, etc.)."""
+
+
+class MiddlewareConfig(BaseModel):
+    """Message middleware configuration."""
+
+    enabled: list[str] = []
+    """Middleware names to enable (evaluated in list order)."""
+
+
+class MetricsConfig(BaseModel):
+    """Runtime metrics collection configuration."""
+
+    enabled: CoercedBool = True
+    """Whether to collect and expose runtime metrics."""
+
+    snapshot_interval: int = 60
+    """Seconds between periodic counter snapshots to the database.
+
+    Set to ``0`` to disable periodic persistence (counters stay in memory).
+    """
+
+
 class GlobalConfig(BaseModel):
     """Global configuration options that apply to all drivers unless overridden."""
 
@@ -174,6 +340,43 @@ class GlobalConfig(BaseModel):
 
     Default is False to maximize echo prevention."""
 
+    fuzzy_mention_match: CoercedBool = False
+    """Controls whether mentions without exact bind mapping should fall back to fuzzy nickname matching.
+
+    When True: Attempts to match mentioned user's name against known display names in the target platform.
+    When False (default): Only exact ID bounds or native platform mentions work.
+
+    Default is False."""
+
+    mention_notify_control: CoercedBool = True
+    """Controls whether users can customize cross-platform @mention notification preferences.
+
+    When True (default): Users can use ``/nb notify`` commands to choose which bound platforms
+    receive @mention notifications (all / whitelist / blacklist).
+    When False: All bound platforms are always notified. The ``/nb notify`` commands return a
+    disabled hint.
+
+    Default is True."""
+
+    send_timeout: float = 2.0
+    """Maximum time (seconds) a single message send may take before it is offloaded
+    to the slow-send queue so it no longer blocks subsequent messages.
+
+    Messages that exceed this timeout keep sending in the background while the
+    main worker continues with the next message. Default is 2.0 seconds."""
+
+    sanitize_nickname: CoercedBool = True
+    """Strip non-rendering Unicode characters from sender names before bridging.
+
+    When True (default): control characters, zero-width/format characters
+    (including U+200B-U+200F and bidi overrides), line/paragraph separators and
+    other non-rendering code points are removed from ``nickname`` and
+    ``username`` (plus rich-header titles and forward-node names) before they
+    are formatted into outgoing messages or persisted as display names.
+
+    When False: names are bridged verbatim. Only disable this if a platform
+    legitimately needs invisible characters in display names."""
+
     log: LoggingConfig = LoggingConfig()
     """Logging configuration for controlling log output and rotation."""
 
@@ -182,6 +385,15 @@ class GlobalConfig(BaseModel):
 
     http: HttpConfig = HttpConfig()
     """Shared HTTP server configuration for mounted driver webhooks."""
+
+    plugins: PluginConfig = PluginConfig()
+    """Plugin discovery and driver lifecycle configuration."""
+
+    middleware: MiddlewareConfig = MiddlewareConfig()
+    """Message middleware configuration."""
+
+    metrics: MetricsConfig = MetricsConfig()
+    """Runtime metrics collection configuration."""
 
     @field_validator("command_prefix", mode="before")
     def normalize_command_prefix(cls, v):
@@ -196,7 +408,7 @@ class GlobalConfig(BaseModel):
 
     @field_validator("proxy", mode="after")
     def get_proxy_from_env(cls, v: str):
-        if v.lower() in ["disabled", "disable", "unset"]:
+        if v is None or v.lower() in ["disabled", "disable", "unset"]:
             logger.debug("Global proxy disabled manually")
             return None
 
@@ -251,3 +463,53 @@ class _DriverConfig(BaseModel):
 
     Defaults to following ``proxy`` when unset.
     """
+
+
+# ---------------------------------------------------------------------------
+# Rule validation models
+# ---------------------------------------------------------------------------
+
+
+class MatchUsers(BaseModel):
+    """User allow/deny lists for a rule ``match`` block."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include: list[str] = []
+    """Only route messages from these users (platform user id or global user id)."""
+
+    exclude: list[str] = []
+    """Never route messages from these users (takes precedence over include)."""
+
+
+class MatchCondition(BaseModel):
+    """Optional per-rule conditions evaluated against the source message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    keywords: list[str] = []
+    """Route only if the message text contains at least one of these (case-insensitive)."""
+
+    users: MatchUsers = MatchUsers()
+
+
+class Rule(BaseModel):
+    """Pydantic model for a single routing rule."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str | None = None
+    type: Literal["connect", "forward"] | None = None
+    channels: dict[str, object] | None = None
+    from_: dict[str, object] | None = Field(None, alias="from")
+    to: dict[str, object] | None = None
+    match: MatchCondition | None = None
+    msg: dict[str, object] | None = None
+
+
+class RulesFile(BaseModel):
+    """Pydantic model for the rules file (top-level container)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    rules: list[Rule] = []

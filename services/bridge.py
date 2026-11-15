@@ -1,16 +1,26 @@
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
-import re
-from collections.abc import Callable
-from typing import Any
+import time
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 import services.logger as log
 from services import config, cqface
 from services.db import msg_db
 from services.message import NormalizedMessage
+from services.message_format import parse_richheader_tag
+from services.util import strip_invisible_chars
 
-logger = log.get_logger()
+CommandHandler = Callable[..., Awaitable[None]]
+
+if TYPE_CHECKING:
+    from services.event_bus import EventBus
+    from services.middleware import MiddlewareChain
+
+logger = log.get_logger("bridge")
 
 # Config keys whose values are treated as credentials and must never appear in
 # outgoing messages.  Matched as substrings against lower-cased key names.
@@ -21,26 +31,6 @@ _SENSITIVE_KEY_PATTERNS = (
     "webhook_url",
     "access_token",
 )
-
-# Rich-header tag: <richheader title="..." content="..."/>
-_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
-_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
-
-
-def _parse_richheader(text: str) -> tuple[str, dict | None]:
-    """
-    Extract a ``<richheader title="..." content="..."/>`` tag from *text*.
-
-    Returns ``(clean_text, attrs_dict)`` where *clean_text* has the tag
-    (and any directly adjacent whitespace) stripped.  *attrs_dict* is
-    ``None`` when no tag is found.
-    """
-    m = _RICHHEADER_RE.search(text)
-    if not m:
-        return text, None
-    attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[: m.start()] + text[m.end() :]).strip()
-    return clean, attrs or None
 
 
 def _collect_sensitive(obj, found: set[str]) -> None:
@@ -72,17 +62,69 @@ class Bridge:
     def __init__(self):
         self._rules: list[dict] = []
         self._senders: dict[str, tuple[str | None, Callable]] = {}
+        self._editors: dict[str, Callable] = {}
+        self._deleters: dict[str, Callable] = {}
+        self._pinners: dict[str, Callable] = {}
+        self._unpinners: dict[str, Callable] = {}
+        self._commands: dict[str, CommandHandler] = {}
         self._sensitive: frozenset[str] = frozenset()
+        self._middleware: MiddlewareChain | None = None
+        self._event_bus: EventBus | None = None
         self.strict_echo_match: bool = False
+        self.fuzzy_mention_match: bool = False
+        self.mention_notify_control: bool = True
         self.command_prefix: str = "nb"
+        self.send_timeout: float = 2.0
+        self.sanitize_nickname: bool = True
+        self.slow_queue_maxsize: int = 1000
+        self._slow_queue: asyncio.Queue = asyncio.Queue(maxsize=self.slow_queue_maxsize)
+        self._slow_worker_task: asyncio.Task | None = None
+        self._slow_worker_tasks: list[asyncio.Task] = []
+        self.slow_worker_count: int = 4
+        self.version: str = ""
+        self.commit_hash: str | None = None
+        self.is_dev: bool = False
+        self.started_at: float = time.monotonic()
+        self._driver_manager = None
+        self._metrics = None
+
+    def set_metrics(self, metrics) -> None:
+        self._metrics = metrics
+
+    def _sender_platform(self, instance_id: str) -> str:
+        sender_info = self._senders.get(instance_id)
+        if sender_info and sender_info[0]:
+            return str(sender_info[0])
+        return instance_id
+
+    def set_driver_manager(self, manager) -> None:
+        self._driver_manager = manager
+
+    def set_version_info(
+        self, version: str, commit_hash: str | None, is_dev: bool
+    ) -> None:
+        self.version = version
+        self.commit_hash = commit_hash
+        self.is_dev = is_dev
+
+    def set_middleware(self, chain: MiddlewareChain) -> None:
+        self._middleware = chain
+
+    def set_event_bus(self, bus: EventBus) -> None:
+        self._event_bus = bus
 
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
 
+    def apply_rules(self, rules: list[dict]) -> None:
+        """Replace the active rule set with *rules* (already normalized)."""
+        self._rules = rules
+        logger.info(f"Applied {len(self._rules)} bridge rule(s)")
+
     def load_rules(self):
-        # Load rules and normalize each rule with a stable id
-        rules, rules_path = config.load_rules_with_ids()
+        # Load and validate rules, normalize each rule with a stable id
+        rules, rules_path = config.load_rules_with_ids(validate=True)
         if rules_path is None:
             logger.warning("No rules file found")
             self._rules = []
@@ -128,6 +170,19 @@ class Bridge:
             # Default mode: skip if either instance_id or channel matches
             return target_id == msg.instance_id or target_channel == msg.channel
 
+    def sanitize_names(self, msg: NormalizedMessage) -> None:
+        """Strip non-rendering Unicode characters from sender names in place.
+
+        Controlled by ``global.sanitize_nickname`` (default on). Removing zero
+        width/format/control characters keeps names from corrupting the bridge
+        output (e.g. ``&\u200bkilljsj``) and from breaking display-name based
+        lookups.
+        """
+        if not self.sanitize_nickname:
+            return
+        msg.nickname = strip_invisible_chars(msg.nickname)
+        msg.username = strip_invisible_chars(msg.username)
+
     def load_sensitive_values(self, config: dict):
         found: set[str] = set()
         _collect_sensitive(config, found)
@@ -149,6 +204,87 @@ class Bridge:
 
         self._senders[instance_id] = (platform, send_func)
         logger.debug(f"Registered sender for instance: {instance_id}")
+        if self._event_bus:
+            self._event_bus.emit(
+                "driver.status",
+                instance_id=instance_id,
+                platform=platform,
+                connected=True,
+            )
+
+    def register_editor(self, instance_id: str, edit_func: Callable):
+        self._editors[instance_id] = edit_func
+        logger.debug(f"Registered editor for instance: {instance_id}")
+
+    def register_deleter(self, instance_id: str, delete_func: Callable):
+        self._deleters[instance_id] = delete_func
+        logger.debug(f"Registered deleter for instance: {instance_id}")
+
+    def register_pinner(self, instance_id: str, pin_func: Callable):
+        self._pinners[instance_id] = pin_func
+        logger.debug(f"Registered pinner for instance: {instance_id}")
+
+    def register_unpinner(self, instance_id: str, unpin_func: Callable):
+        self._unpinners[instance_id] = unpin_func
+        logger.debug(f"Registered unpinner for instance: {instance_id}")
+
+    def register_command(self, name: str, handler: CommandHandler) -> None:
+        self._commands[name] = handler
+        logger.debug(f"Registered command: {name}")
+
+    def unregister_command(self, name: str) -> None:
+        self._commands.pop(name, None)
+        logger.debug(f"Unregistered command: {name}")
+
+    def unregister_sender(self, instance_id: str) -> None:
+        self._senders.pop(instance_id, None)
+        logger.debug(f"Unregistered sender for instance: {instance_id}")
+
+    def unregister_editor(self, instance_id: str) -> None:
+        self._editors.pop(instance_id, None)
+
+    def unregister_deleter(self, instance_id: str) -> None:
+        self._deleters.pop(instance_id, None)
+
+    def unregister_pinner(self, instance_id: str) -> None:
+        self._pinners.pop(instance_id, None)
+
+    def unregister_unpinner(self, instance_id: str) -> None:
+        self._unpinners.pop(instance_id, None)
+
+    def clear_instance(self, instance_id: str) -> None:
+        """Remove every callback registered by *instance_id*.
+
+        Used before rebuilding/replacing a driver instance so stale callbacks
+        never point at a dead object.
+        """
+        self._senders.pop(instance_id, None)
+        self._editors.pop(instance_id, None)
+        self._deleters.pop(instance_id, None)
+        self._pinners.pop(instance_id, None)
+        self._unpinners.pop(instance_id, None)
+        logger.debug(f"Cleared registrations for instance: {instance_id}")
+
+    async def send_message(
+        self, instance_id: str, channel: dict, text: str, **kwargs
+    ) -> str | list[str] | None:
+        sender_info = self._senders.get(instance_id)
+        if sender_info is None:
+            logger.warning(f"No sender for instance '{instance_id}'")
+            return None
+        _, sender = sender_info
+        return await sender(channel, text, **kwargs)
+
+    def senders_snapshot(self) -> list[dict]:
+        """Return a serialisable snapshot of registered senders."""
+        return [
+            {"instance_id": iid, "platform": platform}
+            for iid, (platform, _) in self._senders.items()
+        ]
+
+    def rules_snapshot(self) -> list[dict]:
+        """Return a shallow copy of the current rules list."""
+        return [dict(r) for r in self._rules]
 
     def _get_command_prefix(self) -> str:
         prefix = (self.command_prefix or "nb").strip().lstrip("/")
@@ -156,10 +292,57 @@ class Bridge:
 
     def _get_command_help(self) -> str:
         prefix = self._get_command_prefix()
-        return (
+        lines = [
             f"Usage: `/{prefix} bind setup`, `/{prefix} bind confirm <code>`, "
-            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <target>`"
-        )
+            f"`/{prefix} bind rm [instance_id]`, `/{prefix} bind list`, `/ping <target>`",
+            f"`/{prefix} notify mode all|whitelist|blacklist`, "
+            f"`/{prefix} notify add <instance_id>`, `/{prefix} notify rm <instance_id>`, "
+            f"`/{prefix} notify list`, `/{prefix} status`",
+        ]
+        for name in self._commands:
+            lines.append(f"`/{prefix} {name}`")
+        return "\n".join(lines)
+
+    def _version_display(self) -> str:
+        if self.is_dev and self.commit_hash:
+            return f"{self.version}+{self.commit_hash}"
+        return self.version or "unknown"
+
+    def _format_uptime(self) -> str:
+        seconds = int(time.monotonic() - self.started_at)
+        days, rem = divmod(seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, secs = divmod(rem, 60)
+        parts: list[str] = []
+        if days:
+            parts.append(f"{days}d")
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes:
+            parts.append(f"{minutes}m")
+        parts.append(f"{secs}s")
+        return "".join(parts)
+
+    async def _handle_status_command(
+        self, msg: NormalizedMessage, args: list[str]
+    ) -> None:
+        lines = [
+            f"NextBridge {self._version_display()}",
+            f"Uptime: {self._format_uptime()}",
+        ]
+        if self._driver_manager is not None:
+            drivers = self._driver_manager.drivers
+            lines.append(f"Drivers: {len(drivers)}")
+            for iid, managed in sorted(drivers.items()):
+                health = managed.driver.health.value
+                state = managed.state.name.lower()
+                lines.append(
+                    f"- {managed.platform}/{iid}: {health} ({state}, "
+                    f"restarts={managed.restart_count})"
+                )
+        lines.append(f"Rules: {len(self._rules)}")
+        lines.append(f"Senders: {len(self._senders)}")
+        await self.send_message(msg.instance_id, msg.channel, "\n".join(lines))
 
     def _parse_ping_command(self, text: str) -> str | None:
         parts = text.strip().split(maxsplit=1)
@@ -192,11 +375,26 @@ class Bridge:
         args = parts[2:] if len(parts) > 2 else []
         return action, args
 
+    def _is_allowed_command_source(self, msg: NormalizedMessage) -> bool:
+        """Return True when message source exists in any configured rule source."""
+        for rule in self._rules:
+            if rule.get("type") == "connect":
+                channels = rule.get("channels", {})
+                if isinstance(channels, dict) and self._matches_channel(msg, channels):
+                    return True
+                continue
+
+            from_cfg = rule.get("from", {})
+            if isinstance(from_cfg, dict) and self._matches_from(msg, from_cfg):
+                return True
+
+        return False
+
     async def _handle_bind_setup_command(self, msg: NormalizedMessage):
         """Generate a 6-digit binding code for the user."""
-        import random
+        import secrets
 
-        code = f"{random.randint(100000, 999999)}"
+        code = f"{secrets.randbelow(900000) + 100000}"
         msg_db().create_binding_code(code, msg.instance_id, msg.user_id)
 
         sender_info = self._senders.get(msg.instance_id)
@@ -291,12 +489,220 @@ class Bridge:
 
             await sender(msg.channel, "\n".join(lines))
 
+    async def _handle_notify_mode(self, msg: NormalizedMessage, args: list[str]):
+        if not self.mention_notify_control:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "Cross-platform mention notification control is disabled in the config.",
+                )
+            return
+        valid = {"all", "whitelist", "blacklist"}
+        mode = args[0].lower() if args else ""
+        if mode not in valid:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                prefix = self._get_command_prefix()
+                await s(
+                    msg.channel,
+                    f"Usage: `/{prefix} notify mode all|whitelist|blacklist`",
+                )
+            return
+        global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+        if global_id is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "You need to bind accounts first. Use `/nb bind setup`.",
+                )
+            return
+        pref = msg_db().get_mention_notify_pref(global_id)
+        existing_platforms = pref[1] if pref else None
+        msg_db().set_mention_notify_pref(global_id, mode, existing_platforms)
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, s = sender_info
+            await s(msg.channel, f"Notification mode set to: **{mode}**")
+
+    async def _handle_notify_add(self, msg: NormalizedMessage, args: list[str]):
+        if not self.mention_notify_control:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "Cross-platform mention notification control is disabled in the config.",
+                )
+            return
+        target = args[0].strip() if args else ""
+        if not target:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                prefix = self._get_command_prefix()
+                await s(msg.channel, f"Usage: `/{prefix} notify add <instance_id>`")
+            return
+        global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+        if global_id is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "You need to bind accounts first. Use `/nb bind setup`.",
+                )
+            return
+        pref = msg_db().get_mention_notify_pref(global_id)
+        mode = pref[0] if pref else "whitelist"
+        if mode == "all":
+            mode = "whitelist"
+        platforms: list[str] = json.loads(pref[1] or "[]") if pref else []
+        if target in platforms:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(msg.channel, f"`{target}` is already in the list.")
+            return
+        platforms.append(target)
+        msg_db().set_mention_notify_pref(global_id, mode, json.dumps(platforms))
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, s = sender_info
+            await s(msg.channel, f"Added `{target}` to notification list. Mode: {mode}")
+
+    async def _handle_notify_rm(self, msg: NormalizedMessage, args: list[str]):
+        if not self.mention_notify_control:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "Cross-platform mention notification control is disabled in the config.",
+                )
+            return
+        target = args[0].strip() if args else ""
+        if not target:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                prefix = self._get_command_prefix()
+                await s(msg.channel, f"Usage: `/{prefix} notify rm <instance_id>`")
+            return
+        global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+        if global_id is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "You need to bind accounts first. Use `/nb bind setup`.",
+                )
+            return
+        pref = msg_db().get_mention_notify_pref(global_id)
+        if pref is None or pref[0] == "all":
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "No notification preference set or mode is already 'all'.",
+                )
+            return
+        platforms: list[str] = json.loads(pref[1] or "[]")
+        if target not in platforms:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(msg.channel, f"`{target}` is not in the list.")
+            return
+        platforms.remove(target)
+        if not platforms:
+            msg_db().set_mention_notify_pref(global_id, "all", None)
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    f"Removed `{target}`. List is now empty, mode reset to **all**.",
+                )
+            return
+        msg_db().set_mention_notify_pref(global_id, pref[0], json.dumps(platforms))
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, s = sender_info
+            await s(msg.channel, f"Removed `{target}` from notification list.")
+
+    async def _handle_notify_list(self, msg: NormalizedMessage):
+        if not self.mention_notify_control:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "Cross-platform mention notification control is disabled in the config.",
+                )
+            return
+        global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+        if global_id is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(
+                    msg.channel,
+                    "You need to bind accounts first. Use `/nb bind setup`.",
+                )
+            return
+        pref = msg_db().get_mention_notify_pref(global_id)
+        if pref is None:
+            sender_info = self._senders.get(msg.instance_id)
+            if sender_info:
+                _, s = sender_info
+                await s(msg.channel, "Notification mode: **all** (default)")
+            return
+        mode, platforms_str = pref
+        platforms: list[str] = json.loads(platforms_str or "[]")
+        lines = [f"Notification mode: **{mode}**"]
+        if platforms:
+            lines.append("Platforms: " + ", ".join(f"`{p}`" for p in platforms))
+        if mode == "all":
+            lines.append("(All bound platforms will receive @mention notifications)")
+        sender_info = self._senders.get(msg.instance_id)
+        if sender_info:
+            _, s = sender_info
+            await s(msg.channel, "\n".join(lines))
+
     # ------------------------------------------------------------------
     # Message routing
     # ------------------------------------------------------------------
 
     async def on_message(self, msg: NormalizedMessage):
+        self.sanitize_names(msg)
         logger.info(f"on_message: {msg!s}")
+
+        if self._metrics and not (
+            msg.is_edit or msg.is_recall or msg.is_pin or msg.is_unpin
+        ):
+            self._metrics.inc_message(msg.platform, msg.instance_id, "recv")
+
+        if self._event_bus:
+            self._event_bus.emit(
+                "bridge.message",
+                instance_id=msg.instance_id,
+                platform=msg.platform,
+                channel=msg.channel,
+                user=msg.user,
+                user_id=msg.user_id,
+                text=msg.text,
+                message_id=msg.message_id,
+                time=msg.time,
+                attachments=msg.attachments,
+            )
+
         ping_nickname = self._parse_ping_command(msg.text)
         if ping_nickname is not None:
             if not ping_nickname:
@@ -307,12 +713,35 @@ class Bridge:
                 return
 
             msg.text = f"@{ping_nickname}"
-            msg.mentions = [{"id": "", "name": ping_nickname}]
+            msg.mentions = [{"id": "", "name": ping_nickname, "from_ping": True}]
 
         # Handle internal commands
         command = self._parse_internal_command(msg.text)
         if command is not None:
             action, args = command
+            if action in self._commands:
+                if not self._is_allowed_command_source(msg) and not msg.is_dm:
+                    logger.debug(
+                        f"Ignored command from non-configured channel: "
+                        f"instance={msg.instance_id} channel={msg.channel}"
+                    )
+                    return
+                handler = self._commands[action]
+                try:
+                    await handler(msg, args)
+                except Exception:
+                    logger.opt(exception=True).error(
+                        f"Error executing registered command '{action}'"
+                    )
+                return
+
+            if not self._is_allowed_command_source(msg):
+                if action not in ("bind", "notify", "status") or not msg.is_dm:
+                    logger.debug(
+                        f"Ignored command from non-configured channel: "
+                        f"instance={msg.instance_id} channel={msg.channel}"
+                    )
+                    return
             sender_info = self._senders.get(msg.instance_id)
             if action in ("", "help"):
                 if sender_info:
@@ -320,35 +749,74 @@ class Bridge:
                     await sender(msg.channel, self._get_command_help())
                 return
 
-            if action != "bind":
+            if action not in ("bind", "notify", "status"):
                 if sender_info:
                     _, sender = sender_info
                     await sender(msg.channel, self._get_command_help())
                 return
 
-            subcommand = args[0].lower() if args else ""
-            match subcommand:
-                case "setup":
-                    await self._handle_bind_setup_command(msg)
-                    return
-                case "confirm":
-                    await self._handle_bind_confirm_command(
-                        msg, args[1] if len(args) > 1 else None
-                    )
-                    return
-                case "rm":
-                    await self._handle_bind_rm_command(
-                        msg, args[1] if len(args) > 1 else None
-                    )
-                    return
-                case "list":
-                    await self._handle_bind_list_command(msg)
-                    return
+            if action == "bind":
+                subcommand = args[0].lower() if args else ""
+                match subcommand:
+                    case "setup":
+                        await self._handle_bind_setup_command(msg)
+                        return
+                    case "confirm":
+                        await self._handle_bind_confirm_command(
+                            msg, args[1] if len(args) > 1 else None
+                        )
+                        return
+                    case "rm":
+                        await self._handle_bind_rm_command(
+                            msg, args[1] if len(args) > 1 else None
+                        )
+                        return
+                    case "list":
+                        await self._handle_bind_list_command(msg)
+                        return
+
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, self._get_command_help())
+                return
+
+            if action == "notify":
+                subcommand = args[0].lower() if args else ""
+                match subcommand:
+                    case "mode":
+                        await self._handle_notify_mode(msg, args[1:])
+                        return
+                    case "add":
+                        await self._handle_notify_add(msg, args[1:])
+                        return
+                    case "rm":
+                        await self._handle_notify_rm(msg, args[1:])
+                        return
+                    case "list":
+                        await self._handle_notify_list(msg)
+                        return
+
+                if sender_info:
+                    _, sender = sender_info
+                    await sender(msg.channel, self._get_command_help())
+                return
+
+            if action == "status":
+                await self._handle_status_command(msg, args)
+                return
 
             if sender_info:
                 _, sender = sender_info
                 await sender(msg.channel, self._get_command_help())
             return
+
+        # Run receive middleware (after commands, before routing)
+        if self._middleware and self._middleware.has_receive:
+            result = await self._middleware.run_receive(msg)
+            if result is None:
+                return
+            msg = result
+            self.sanitize_names(msg)
 
         # Save sender's user mapping
         if msg.user_id:
@@ -370,6 +838,9 @@ class Bridge:
                 )
 
         for rule in self._rules:
+            if not self._matches_conditions(msg, rule.get("match")):
+                continue
+
             rule_id = str(rule.get("id", ""))
             if not rule_id:
                 rule_id = config.stable_rule_hash(rule)
@@ -379,6 +850,8 @@ class Bridge:
                 matched = self._matches_channel(msg, rule.get("channels", {}))
                 # logger.debug(f"Rule connect match for {msg.instance_id}: {matched}")
                 if matched:
+                    if self._metrics:
+                        self._metrics.inc_rule_match(rule_id)
                     if msg.message_id:
                         msg_db().save_mapping(
                             bridge_id, msg.instance_id, msg.channel, msg.message_id
@@ -386,6 +859,8 @@ class Bridge:
                     await self._dispatch_connect(msg, rule, bridge_id, reply_bridge_id)
             else:
                 if self._matches_from(msg, rule.get("from", {})):
+                    if self._metrics:
+                        self._metrics.inc_rule_match(rule_id)
                     if msg.message_id:
                         msg_db().save_mapping(
                             bridge_id, msg.instance_id, msg.channel, msg.message_id
@@ -397,11 +872,14 @@ class Bridge:
 
         Only keys that are present in msg.channel are compared — other keys in
         the channel config block (e.g. webhook_url, msg_format) are skipped so
-        they do not interfere with address matching.
+        they do not interfere with address matching. At least one channel
+        address field must match; otherwise a direct message could match a
+        group-only rule because their address fields do not overlap.
         """
         if msg.instance_id not in channels:
             return False
         rule_ch = channels[msg.instance_id]
+        matched: list[str] = []
         for key, expected in rule_ch.items():
             if key in ("msg",):  # reserved — not a channel address field
                 continue
@@ -409,18 +887,61 @@ class Bridge:
                 continue  # config-only field (webhook_url, msg_format, ...) — skip
             if str(msg.channel[key]) != str(expected):
                 return False
-        logger.debug(f"Channel match success for {msg.instance_id}: {key}={expected!r}")
-        return True
+            matched.append(f"{key}={expected!r}")
+        logger.debug(
+            f"Channel match success for {msg.instance_id}: {', '.join(matched)}"
+        )
+        return bool(matched)
 
     def _matches_from(self, msg: NormalizedMessage, from_cfg: dict) -> bool:
         """Return True if *msg* matches the ``from`` block of a forward rule."""
         if msg.instance_id not in from_cfg:
             return False
+        matched = False
         for key, expected in from_cfg[msg.instance_id].items():
             if key not in msg.channel:
                 continue
             if str(msg.channel[key]) != str(expected):
                 return False
+            matched = True
+        return matched
+
+    def _matches_conditions(
+        self, msg: NormalizedMessage, match_cfg: dict | None
+    ) -> bool:
+        """Return True if *msg* satisfies a rule's optional ``match`` block.
+
+        Missing/empty blocks impose no constraint. ``keywords`` match any
+        (case-insensitive) substring of the message text. ``users.include``
+        and ``users.exclude`` compare against the platform user id and the
+        bound global user id; exclude always wins.
+        """
+        if not match_cfg:
+            return True
+
+        keywords = match_cfg.get("keywords") or []
+        if keywords:
+            text = (msg.text or "").lower()
+            if not any(str(k).lower() in text for k in keywords):
+                return False
+
+        users = match_cfg.get("users") or {}
+        include = {str(x) for x in (users.get("include") or [])}
+        exclude = {str(x) for x in (users.get("exclude") or [])}
+        if not include and not exclude:
+            return True
+
+        identity: set[str] = set()
+        if msg.user_id:
+            identity.add(str(msg.user_id))
+            global_id = msg_db().get_global_user_id(msg.instance_id, msg.user_id)
+            if global_id:
+                identity.add(str(global_id))
+
+        if exclude and identity & exclude:
+            return False
+        if include and not (identity & include):
+            return False
         return True
 
     def _build_formatted(
@@ -439,23 +960,31 @@ class Bridge:
             )
         # Format username with @ prefix if it exists
         username_value = getattr(msg, "username", "")
+        if self.sanitize_nickname:
+            username_value = strip_invisible_chars(username_value)
         if username_value and not username_value.startswith("@"):
             username_value = f"@{username_value}"
         # If username is empty, fallback to user_id
         if not username_value:
             username_value = msg.user_id
 
+        display_nickname = msg.nickname
+        display_user = msg.user
+        if self.sanitize_nickname:
+            display_nickname = strip_invisible_chars(display_nickname)
+            display_user = display_nickname
+
         ctx = {
             "platform": msg.platform,
             "instance_id": msg.instance_id,
             "from": msg.instance_id,
-            "user": msg.user,
+            "user": display_user,
             "user_id": msg.user_id,
             "user_avatar": msg.user_avatar,
             "msg": msg.text,
             "time": msg.time,
             "username": username_value,
-            "nickname": getattr(msg, "nickname", ""),
+            "nickname": display_nickname,
             "source_mentioned_self": getattr(msg, "source_mentioned_self", None),
         }
         try:
@@ -464,7 +993,7 @@ class Bridge:
             logger.warning(f"msg_format missing key {e}; using raw text")
             formatted = msg.text
 
-        formatted, rich_header = _parse_richheader(formatted)
+        formatted, rich_header = parse_richheader_tag(formatted)
 
         extra: dict = {}
         # Always pass the original message context to extra for drivers to use
@@ -500,33 +1029,180 @@ class Bridge:
             extra
         )
 
+    def _mention_notify_allowed(
+        self, mention_id: str, source_instance: str, target_instance: str
+    ) -> bool:
+        if not self.mention_notify_control:
+            return True
+        global_id = msg_db().get_global_user_id(source_instance, mention_id)
+        if global_id is None:
+            return True
+        pref = msg_db().get_mention_notify_pref(global_id)
+        if pref is None:
+            return True
+        mode, platforms_str = pref
+        if mode == "all":
+            return True
+        platforms: list[str] = json.loads(platforms_str or "[]")
+        if mode == "whitelist":
+            return target_instance in platforms
+        if mode == "blacklist":
+            return target_instance not in platforms
+        return True
+
     def _resolve_target_mention_user_id(
         self, msg: NormalizedMessage, mention: dict[str, Any], target_instance: str
     ) -> str | None:
         mention_id = str(mention.get("id", "") or "")
         mention_name = str(mention.get("name", "") or "").strip()
+        from_ping = bool(mention.get("from_ping"))
+
+        result: str | None = None
 
         if mention_id:
             target_uid = msg_db().get_bound_user_id(
                 msg.instance_id, mention_id, target_instance
             )
             if target_uid:
-                return target_uid
+                result = target_uid
 
-        if target_instance == "qq":
-            # QQ target addressing uses numeric QQ id or qid alias.
-            if mention_id.isdigit():
-                return mention_id
-            if mention_name.isdigit():
-                return mention_name
-            if mention_name:
-                return msg_db().get_user_id_by_name(target_instance, mention_name)
+        if result is None and self.fuzzy_mention_match and mention_name:
+            result = msg_db().get_user_id_by_name(target_instance, mention_name)
+
+        if result is None and from_ping and mention_name:
+            result = msg_db().get_user_id_by_name(target_instance, mention_name)
+
+        if result is None:
+            target_platform = target_instance
+            if target_instance in self._senders:
+                target_platform = self._senders[target_instance][0]
+
+            if target_platform == "qq":
+                if msg.platform == "qq" and mention_id.isdigit():
+                    result = mention_id
+                elif msg.platform == "qq" and mention_name.isdigit():
+                    result = mention_name
+
+        if (
+            result is not None
+            and mention_id
+            and not self._mention_notify_allowed(
+                mention_id, msg.instance_id, target_instance
+            )
+        ):
             return None
 
-        if mention_name:
-            return msg_db().get_user_id_by_name(target_instance, mention_name)
+        return result
 
-        return None
+    def _ensure_slow_worker(self):
+        self._slow_worker_tasks = [
+            task for task in self._slow_worker_tasks if not task.done()
+        ]
+        while len(self._slow_worker_tasks) < self.slow_worker_count:
+            task = asyncio.create_task(self._slow_worker())
+            self._slow_worker_tasks.append(task)
+        self._slow_worker_task = self._slow_worker_tasks[0]
+
+    async def _slow_worker(self):
+        while True:
+            try:
+                task = await self._slow_queue.get()
+            except asyncio.CancelledError:
+                break
+
+            try:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling() > 0:
+                        raise
+                    logger.debug(
+                        "Bridge slow send task was cancelled, continuing worker"
+                    )
+                except Exception as exc:
+                    logger.opt(exception=exc).warning("Error in bridge slow send task")
+            finally:
+                self._slow_queue.task_done()
+
+    async def _send_to_target(
+        self,
+        target_id: str,
+        target_channel: dict,
+        formatted_out: str,
+        extra_out: dict,
+        msg: NormalizedMessage,
+        bridge_id: str,
+    ):
+        sender_info = self._senders.get(target_id)
+        if sender_info is None:
+            return
+        _, sender = sender_info
+        try:
+            new_msg_id = await sender(
+                target_channel,
+                formatted_out,
+                attachments=msg.attachments,
+                **extra_out,
+            )
+            if new_msg_id:
+                if isinstance(new_msg_id, list):
+                    for m_id in new_msg_id:
+                        if m_id:
+                            msg_db().save_mapping(
+                                bridge_id, target_id, target_channel, str(m_id)
+                            )
+                else:
+                    msg_db().save_mapping(
+                        bridge_id, target_id, target_channel, str(new_msg_id)
+                    )
+            if self._metrics:
+                self._metrics.inc_message(
+                    self._sender_platform(target_id), target_id, "send"
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if self._metrics:
+                self._metrics.inc_send_failure(
+                    self._sender_platform(target_id), type(exc).__name__
+                )
+            logger.exception(f"Failed to send to '{target_id}'")
+
+    async def _dispatch_guarded(
+        self,
+        target_id: str,
+        target_channel: dict,
+        formatted_out: str,
+        extra_out: dict,
+        msg: NormalizedMessage,
+        bridge_id: str,
+    ):
+        send_task = asyncio.create_task(
+            self._send_to_target(
+                target_id, target_channel, formatted_out, extra_out, msg, bridge_id
+            )
+        )
+        try:
+            await asyncio.wait_for(asyncio.shield(send_task), timeout=self.send_timeout)
+        except asyncio.TimeoutError:
+            if self._metrics:
+                self._metrics.inc_send_timeout(self._sender_platform(target_id))
+            self._ensure_slow_worker()
+            try:
+                self._slow_queue.put_nowait(send_task)
+            except asyncio.QueueFull:
+                logger.warning(
+                    f"Slow send queue is full (maxsize={self.slow_queue_maxsize}), "
+                    f"dropping slow task for '{target_id}'"
+                )
+                send_task.cancel()
+        except asyncio.CancelledError:
+            if send_task.done() and send_task.cancelled():
+                logger.info(f"Send task for '{target_id}' was cancelled")
+                return
+            send_task.cancel()
+            raise
 
     async def _dispatch(
         self,
@@ -541,6 +1217,7 @@ class Bridge:
             msg, rule.get("msg", {}), is_webhook=is_webhook
         )
 
+        send_tasks = []
         for target_id, target_channel in rule.get("to", {}).items():
             # Skip echo based on strict_echo_match configuration
             if self._should_skip_echo(target_id, target_channel, msg):
@@ -557,7 +1234,7 @@ class Bridge:
             if sender_info is None:
                 logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
-            target_platform, sender = sender_info
+            target_platform, _ = sender_info
 
             formatted_out, extra_out = self._normalize_target_cqface(
                 target_platform, formatted, extra
@@ -604,19 +1281,28 @@ class Bridge:
                     dict.fromkeys(source_self_mention_names)
                 )
 
-            try:
-                new_msg_id = await sender(
+            # Run send middleware
+            if self._middleware and self._middleware.has_send:
+                mw_result = await self._middleware.run_send(
+                    target_id, target_channel, formatted_out, extra_out
+                )
+                if mw_result is None:
+                    continue
+                formatted_out, extra_out = mw_result
+
+            send_tasks.append(
+                self._dispatch_guarded(
+                    target_id,
                     target_channel,
                     formatted_out,
-                    attachments=msg.attachments,
-                    **extra_out,
+                    extra_out,
+                    msg,
+                    bridge_id,
                 )
-                if new_msg_id:
-                    msg_db().save_mapping(
-                        bridge_id, target_id, target_channel, str(new_msg_id)
-                    )
-            except Exception as e:
-                logger.error(f"Failed to send to '{target_id}': {e}")
+            )
+
+        if send_tasks:
+            await asyncio.gather(*send_tasks)
 
     async def _dispatch_connect(
         self,
@@ -627,6 +1313,7 @@ class Bridge:
     ):
         """Fan-out to every channel in the connect rule except the source."""
         global_msg_cfg = rule.get("msg", {})
+        send_tasks = []
 
         for target_id, target_cfg in rule.get("channels", {}).items():
             # Strip the reserved "msg" key to get the bare channel address dict
@@ -662,7 +1349,7 @@ class Bridge:
             if sender_info is None:
                 logger.warning(f"No sender registered for instance '{target_id}'")
                 continue
-            target_platform, sender = sender_info
+            target_platform, _ = sender_info
 
             formatted_out, extra_out = self._normalize_target_cqface(
                 target_platform, formatted, extra
@@ -709,24 +1396,409 @@ class Bridge:
                     dict.fromkeys(source_self_mention_names)
                 )
 
-            try:
-                new_msg_id = await sender(
+            # Run send middleware
+            if self._middleware and self._middleware.has_send:
+                mw_result = await self._middleware.run_send(
+                    target_id, target_channel, formatted_out, extra_out
+                )
+                if mw_result is None:
+                    continue
+                formatted_out, extra_out = mw_result
+
+            send_tasks.append(
+                self._dispatch_guarded(
+                    target_id,
                     target_channel,
                     formatted_out,
-                    attachments=msg.attachments,
-                    **extra_out,
+                    extra_out,
+                    msg,
+                    bridge_id,
                 )
-                if new_msg_id:
-                    msg_db().save_mapping(
-                        bridge_id, target_id, target_channel, str(new_msg_id)
-                    )
-            except asyncio.CancelledError:
-                logger.info(f"Message dispatch cancelled during send to {target_id}")
-                # Don't return - continue to process other targets
+            )
+
+        if send_tasks:
+            await asyncio.gather(*send_tasks)
+
+    async def on_edit_message(self, msg: NormalizedMessage):
+        """Called by drivers when a message is edited on their platform."""
+        self.sanitize_names(msg)
+        logger.info(f"on_edit_message: {msg!s}")
+        source_msg_id = msg.edit_target_id or msg.message_id
+        if not source_msg_id:
+            logger.debug("on_edit_message: no message id, skipping")
+            return
+
+        bridge_id = msg_db().get_bridge_id(msg.instance_id, source_msg_id)
+        if bridge_id is None:
+            logger.debug(
+                f"on_edit_message: no bridge mapping for {msg.instance_id}/{source_msg_id}"
+            )
+            return
+
+        rule_id = bridge_id.split(":")[0] if ":" in bridge_id else ""
+        rule = next(
+            (r for r in self._rules if str(r.get("id", "")) == rule_id),
+            None,
+        )
+        if rule is None:
+            rule = next(
+                (r for r in self._rules if config.stable_rule_hash(r) == rule_id),
+                None,
+            )
+        if rule is None:
+            logger.debug(f"on_edit_message: no rule found for bridge_id {bridge_id}")
+            return
+
+        if rule.get("type") == "connect":
+            if self._matches_channel(msg, rule.get("channels", {})):
+                await self._dispatch_edit(msg, rule, bridge_id)
+        else:
+            if self._matches_from(msg, rule.get("from", {})):
+                await self._dispatch_edit(msg, rule, bridge_id)
+
+    async def _dispatch_edit(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+    ):
+        """Fan-out an edit to all target instances that have a mapped message."""
+        is_webhook = any("webhook_url" in ch for ch in rule.get("to", {}).values())
+        if rule.get("type") == "connect":
+            targets: dict = {
+                k: v
+                for k, v in rule.get("channels", {}).items()
+                if not self._should_skip_echo(
+                    k, {kk: vv for kk, vv in v.items() if kk != "msg"}, msg
+                )
+            }
+        else:
+            targets = {
+                k: v
+                for k, v in rule.get("to", {}).items()
+                if not self._should_skip_echo(k, v, msg)
+            }
+
+        for target_id, target_cfg in targets.items():
+            if rule.get("type") == "connect":
+                target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
+                merged_msg_cfg = {**rule.get("msg", {}), **target_cfg.get("msg", {})}
+                is_webhook = "webhook_url" in target_cfg
+                if is_webhook:
+                    merged_msg_cfg["webhook_url"] = target_cfg["webhook_url"]
+            else:
+                target_channel = target_cfg
+                merged_msg_cfg = rule.get("msg", {})
+                is_webhook = "webhook_url" in target_cfg
+
+            target_msg_id = msg_db().get_platform_msg_id(
+                bridge_id, target_id, target_channel
+            )
+            if not target_msg_id:
+                logger.debug(
+                    f"_dispatch_edit: no target msg id for {target_id}, skipping"
+                )
                 continue
+
+            editor = self._editors.get(target_id)
+            if editor is None:
+                logger.debug(
+                    f"_dispatch_edit: no editor registered for {target_id}, skipping"
+                )
+                continue
+
+            target_platform = self._senders.get(target_id, (None, None))[0]
+            formatted, extra = self._build_formatted(
+                msg, merged_msg_cfg, is_webhook=is_webhook
+            )
+            formatted_out, extra_out = self._normalize_target_cqface(
+                target_platform, formatted, extra
+            )
+
+            if self._is_sensitive(formatted_out):
+                logger.warning(
+                    f"Edit to '{target_id}' blocked: text contains sensitive value."
+                )
+                continue
+
+            try:
+                edit_msg_id = await editor(
+                    target_channel, target_msg_id, formatted_out, **extra_out
+                )
+                if edit_msg_id:
+                    edit_msg_ids = (
+                        edit_msg_id if isinstance(edit_msg_id, list) else [edit_msg_id]
+                    )
+                    for mapped_msg_id in edit_msg_ids:
+                        if mapped_msg_id:
+                            msg_db().save_mapping(
+                                bridge_id,
+                                target_id,
+                                target_channel,
+                                str(mapped_msg_id),
+                            )
             except Exception:
-                logger.exception(f"Failed to send to '{target_id}")
-                return
+                logger.exception(f"Failed to edit message on '{target_id}'")
+
+    async def on_recall_message(self, msg: NormalizedMessage):
+        """Called by drivers when a message is recalled/deleted on their platform."""
+        logger.info(f"on_recall_message: {msg!s}")
+        source_msg_id = msg.recall_target_id or msg.message_id
+        if not source_msg_id:
+            logger.debug("on_recall_message: no message id, skipping")
+            return
+
+        bridge_id = msg_db().get_bridge_id(msg.instance_id, source_msg_id)
+        if bridge_id is None:
+            logger.debug(
+                f"on_recall_message: no bridge mapping for {msg.instance_id}/{source_msg_id}"
+            )
+            return
+
+        rule_id = bridge_id.split(":")[0] if ":" in bridge_id else ""
+        rule = next(
+            (r for r in self._rules if str(r.get("id", "")) == rule_id),
+            None,
+        )
+        if rule is None:
+            rule = next(
+                (r for r in self._rules if config.stable_rule_hash(r) == rule_id),
+                None,
+            )
+        if rule is None:
+            logger.debug(f"on_recall_message: no rule found for bridge_id {bridge_id}")
+            return
+
+        if rule.get("type") == "connect":
+            if self._matches_channel(msg, rule.get("channels", {})):
+                await self._dispatch_recall(msg, rule, bridge_id)
+                msg_db().delete_mapping_by_bridge_id(bridge_id)
+        else:
+            if self._matches_from(msg, rule.get("from", {})):
+                await self._dispatch_recall(msg, rule, bridge_id)
+                msg_db().delete_mapping_by_bridge_id(bridge_id)
+
+    async def _dispatch_recall(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+    ):
+        """Fan-out a recall to all target instances that have a mapped message."""
+        if rule.get("type") == "connect":
+            targets: dict = {
+                k: v
+                for k, v in rule.get("channels", {}).items()
+                if not self._should_skip_echo(
+                    k, {kk: vv for kk, vv in v.items() if kk != "msg"}, msg
+                )
+            }
+        else:
+            targets = {
+                k: v
+                for k, v in rule.get("to", {}).items()
+                if not self._should_skip_echo(k, v, msg)
+            }
+
+        for target_id, target_cfg in targets.items():
+            if rule.get("type") == "connect":
+                target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
+            else:
+                target_channel = target_cfg
+
+            target_msg_ids = msg_db().get_platform_msg_ids(
+                bridge_id, target_id, target_channel
+            )
+            if not target_msg_ids:
+                logger.debug(
+                    f"_dispatch_recall: no target msg id for {target_id}, skipping"
+                )
+                continue
+
+            deleter = self._deleters.get(target_id)
+            if deleter is None:
+                logger.debug(
+                    f"_dispatch_recall: no deleter registered for {target_id}, skipping"
+                )
+                continue
+
+            for target_msg_id in target_msg_ids:
+                try:
+                    await deleter(target_channel, target_msg_id)
+                except Exception:
+                    logger.exception(f"Failed to recall message on '{target_id}'")
+
+    async def on_pin_message(self, msg: NormalizedMessage):
+        """Called by drivers when a message is pinned on their platform."""
+        logger.info(f"on_pin_message: {msg!s}")
+        source_msg_id = msg.pin_target_id or msg.message_id
+        if not source_msg_id:
+            logger.debug("on_pin_message: no message id, skipping")
+            return
+
+        bridge_id = msg_db().get_bridge_id(msg.instance_id, source_msg_id)
+        if bridge_id is None:
+            logger.debug(
+                f"on_pin_message: no bridge mapping for "
+                f"{msg.instance_id}/{source_msg_id}"
+            )
+            return
+
+        rule_id = bridge_id.split(":")[0] if ":" in bridge_id else ""
+        rule = next(
+            (r for r in self._rules if str(r.get("id", "")) == rule_id),
+            None,
+        )
+        if rule is None:
+            rule = next(
+                (r for r in self._rules if config.stable_rule_hash(r) == rule_id),
+                None,
+            )
+        if rule is None:
+            logger.debug(f"on_pin_message: no rule found for bridge_id {bridge_id}")
+            return
+
+        if rule.get("type") == "connect":
+            if self._matches_channel(msg, rule.get("channels", {})):
+                await self._dispatch_pin(msg, rule, bridge_id)
+        else:
+            if self._matches_from(msg, rule.get("from", {})):
+                await self._dispatch_pin(msg, rule, bridge_id)
+
+    async def _dispatch_pin(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+    ):
+        """Fan-out a pin to all target instances that have a mapped message."""
+        if rule.get("type") == "connect":
+            targets: dict = {
+                k: v
+                for k, v in rule.get("channels", {}).items()
+                if not self._should_skip_echo(
+                    k, {kk: vv for kk, vv in v.items() if kk != "msg"}, msg
+                )
+            }
+        else:
+            targets = {
+                k: v
+                for k, v in rule.get("to", {}).items()
+                if not self._should_skip_echo(k, v, msg)
+            }
+
+        for target_id, target_cfg in targets.items():
+            if rule.get("type") == "connect":
+                target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
+            else:
+                target_channel = target_cfg
+
+            target_msg_id = msg_db().get_platform_msg_id(
+                bridge_id, target_id, target_channel
+            )
+            if not target_msg_id:
+                logger.debug(
+                    f"_dispatch_pin: no target msg id for {target_id}, skipping"
+                )
+                continue
+
+            pinner = self._pinners.get(target_id)
+            if pinner is None:
+                logger.debug(
+                    f"_dispatch_pin: no pinner registered for {target_id}, skipping"
+                )
+                continue
+
+            try:
+                await pinner(target_channel, target_msg_id)
+            except Exception:
+                logger.exception(f"Failed to pin message on '{target_id}'")
+
+    async def on_unpin_message(self, msg: NormalizedMessage):
+        """Called by drivers when a message is unpinned on their platform."""
+        logger.info(f"on_unpin_message: {msg!s}")
+        source_msg_id = msg.unpin_target_id or msg.message_id
+        if not source_msg_id:
+            logger.debug("on_unpin_message: no message id, skipping")
+            return
+
+        bridge_id = msg_db().get_bridge_id(msg.instance_id, source_msg_id)
+        if bridge_id is None:
+            logger.debug(
+                f"on_unpin_message: no bridge mapping for "
+                f"{msg.instance_id}/{source_msg_id}"
+            )
+            return
+
+        rule_id = bridge_id.split(":")[0] if ":" in bridge_id else ""
+        rule = next(
+            (r for r in self._rules if str(r.get("id", "")) == rule_id),
+            None,
+        )
+        if rule is None:
+            rule = next(
+                (r for r in self._rules if config.stable_rule_hash(r) == rule_id),
+                None,
+            )
+        if rule is None:
+            logger.debug(f"on_unpin_message: no rule found for bridge_id {bridge_id}")
+            return
+
+        if rule.get("type") == "connect":
+            if self._matches_channel(msg, rule.get("channels", {})):
+                await self._dispatch_unpin(msg, rule, bridge_id)
+        else:
+            if self._matches_from(msg, rule.get("from", {})):
+                await self._dispatch_unpin(msg, rule, bridge_id)
+
+    async def _dispatch_unpin(
+        self,
+        msg: NormalizedMessage,
+        rule: dict,
+        bridge_id: str,
+    ):
+        """Fan-out an unpin to all target instances that have a mapped message."""
+        if rule.get("type") == "connect":
+            targets: dict = {
+                k: v
+                for k, v in rule.get("channels", {}).items()
+                if not self._should_skip_echo(
+                    k, {kk: vv for kk, vv in v.items() if kk != "msg"}, msg
+                )
+            }
+        else:
+            targets = {
+                k: v
+                for k, v in rule.get("to", {}).items()
+                if not self._should_skip_echo(k, v, msg)
+            }
+
+        for target_id, target_cfg in targets.items():
+            if rule.get("type") == "connect":
+                target_channel = {k: v for k, v in target_cfg.items() if k != "msg"}
+            else:
+                target_channel = target_cfg
+
+            target_msg_id = msg_db().get_platform_msg_id(
+                bridge_id, target_id, target_channel
+            )
+            if not target_msg_id:
+                logger.debug(
+                    f"_dispatch_unpin: no target msg id for {target_id}, skipping"
+                )
+                continue
+
+            unpinner = self._unpinners.get(target_id)
+            if unpinner is None:
+                logger.debug(
+                    f"_dispatch_unpin: no unpinner registered for {target_id}, skipping"
+                )
+                continue
+
+            try:
+                await unpinner(target_channel, target_msg_id)
+            except Exception:
+                logger.exception(f"Failed to unpin message on '{target_id}'")
 
 
 # Shared singleton used by all drivers

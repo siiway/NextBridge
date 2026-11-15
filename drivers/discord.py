@@ -20,10 +20,13 @@
 # Note: webhook_url should be configured per channel in rules, not at instance level.
 
 from drivers.registry import register
+import asyncio
 import io
 import json
 from pathlib import Path
 import re
+import time
+import traceback
 from html import unescape
 from urllib.parse import urlparse
 
@@ -34,13 +37,13 @@ from typing import Literal
 
 from pydantic import field_validator
 
-import services.logger as log
 import services.cqface as cqface
 import services.media as media
 from services.message import Attachment, NormalizedMessage
-from services.util import get_data_path
+from services.message_format import apply_rich_header, parse_richheader_tag
+from services.util import LRUDict, get_data_path, mask_url_credentials
 from services.config_schema import _DriverConfig, CoercedBool
-from services.config import get_proxy, UNSET
+from services.config import get_proxy, get as get_config, UNSET
 from drivers import BaseDriver
 
 
@@ -54,9 +57,11 @@ class DiscordConfig(_DriverConfig):
     allow_mentions_users: CoercedBool = True
     allow_mentions_roles: CoercedBool = False
     sanitize_mass_mentions: CoercedBool = True
+    enable_recall: CoercedBool = True
     auto_link_image_hosts: list[str] = ["discordmedia.com", "tenor.com"]
     auto_link_image_show_original_url: CoercedBool = True
     proxy: str | None = UNSET
+    enable_native_commands: CoercedBool = True
 
     @field_validator("cqface_webhook_fallback", mode="before")
     def _normalize_cqface_webhook_fallback(cls, value):
@@ -79,11 +84,8 @@ class DiscordConfig(_DriverConfig):
         return value
 
 
-logger = log.get_logger()
-
 _CQFACE_RE = re.compile(r":cqface(\d+):")
-_RICHHEADER_RE = re.compile(r"<richheader\b([^/]*)/>", re.IGNORECASE)
-_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+_DISCORD_EMOJI_RE = re.compile(r"<a?:(\w+):(\d+)>")
 _MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 _SINGLE_URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 _META_IMAGE_RE = re.compile(
@@ -96,19 +98,25 @@ _META_IMAGE_REVERSE = re.compile(
 )
 
 
-def _parse_richheader(text: str) -> tuple[str, dict | None]:
-    m = _RICHHEADER_RE.search(text)
-    if not m:
-        return text, None
-    attrs = dict(_ATTR_RE.findall(m.group(1)))
-    clean = (text[: m.start()] + text[m.end() :]).strip()
-    return clean, attrs or None
-
-
 def _sanitize_mass_mentions(text: str) -> tuple[str, bool]:
     """Neutralize @everyone/@here so they cannot trigger mass pings."""
     sanitized, count = _MASS_MENTION_RE.subn(lambda m: f"@ {m.group(1)}", text)
     return sanitized, count > 0
+
+
+def _extract_custom_emojis(text: str) -> tuple[str, list[Attachment]]:
+    attachments = []
+
+    def _replace_emoji(m: re.Match) -> str:
+        name = m.group(1)
+        eid = m.group(2)
+        ext = "gif" if m.group(0).startswith("<a") else "png"
+        url = f"https://cdn.discordapp.com/emojis/{eid}.{ext}"
+        attachments.append(Attachment(type="image", url=url, name=f"{name}.{ext}"))
+        return ""
+
+    cleaned = _DISCORD_EMOJI_RE.sub(_replace_emoji, text)
+    return cleaned, attachments
 
 
 def _host_matches(host: str, allowed_hosts: list[str]) -> bool:
@@ -120,19 +128,64 @@ def _host_matches(host: str, allowed_hosts: list[str]) -> bool:
     return False
 
 
+_DISCORD_COMMAND_NAME_RE = re.compile(r"[a-z0-9_-]{1,32}")
+
+
+def build_native_command_text(prefix: str, *parts: str | None) -> str:
+    """Build the internal command text for a native slash command.
+
+    Empty/``None`` parts are skipped so optional arguments simply disappear.
+    """
+    tokens = [f"/{prefix}"]
+    tokens.extend(part for part in parts if part)
+    return " ".join(tokens)
+
+
+def resolve_native_command_name(prefix: str) -> str:
+    """Return a Discord-valid root command name derived from *prefix*.
+
+    Discord only accepts 1-32 lowercase letters, digits, ``-`` or ``_``.
+    Falls back to ``nb`` when the prefix cannot be used as a command name.
+    """
+    name = (prefix or "nb").strip().lstrip("/").lower()
+    if _DISCORD_COMMAND_NAME_RE.fullmatch(name):
+        return name
+    return "nb"
+
+
 class DiscordDriver(BaseDriver[DiscordConfig]):
     def __init__(self, instance_id: str, config: DiscordConfig, bridge):
         super().__init__(instance_id, config, bridge)
         self.config = config
         self._client: discord.Client | None = None
+        self._tree: discord.app_commands.CommandTree | None = None
         self._session: aiohttp.ClientSession | None = None
         self._send_method: str = config.send_method
         self._bot_token: str | None = config.bot_token or None
         self._proxy = get_proxy(config.proxy)
         # face_id (str) → "<:name:id>" resolved Discord emoji string
-        self._emoji_cache: dict[str, str] = {}
+        self._emoji_cache: LRUDict[str, str] = LRUDict(maxsize=1000)
+        # Message IDs we deleted ourselves (bridged recalls). Used to ignore the
+        # raw delete event Discord dispatches back so we don't loop.
+        self._recall_suppress: set[str] = set()
+        # Message IDs we pinned ourselves (bridged pins). Used to ignore the
+        # MESSAGE_UPDATE event Discord dispatches back so we don't loop.
+        self._pin_suppress: set[str] = set()
         # name → emoji_id index built lazily from discord_emojis.json
         self._emoji_db: dict[str, str] | None = None
+        self._stopping = False
+        # Ordered FIFO queue + single worker: Discord dispatches each event in a
+        # detached task, so without serialization bridged messages can be
+        # reordered on the target platform.
+        self._message_queue: asyncio.Queue = asyncio.Queue()
+        self._message_worker_task: asyncio.Task | None = None
+
+    @staticmethod
+    def _bounded_add(s: set[str], item: str, maxlen: int = 10000) -> None:
+        """Add *item* to a suppression set, clearing it when it grows too large."""
+        if len(s) >= maxlen:
+            s.clear()
+        s.add(item)
 
     def _allowed_mentions_parse(self) -> list[str]:
         parse: list[str] = []
@@ -150,57 +203,356 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
     async def start(self):
         self.bridge.register_sender(self.instance_id, self.send)
+        self.bridge.register_editor(self.instance_id, self.edit)
+        if self.config.enable_recall:
+            self.bridge.register_deleter(self.instance_id, self.delete)
+        self.bridge.register_pinner(self.instance_id, self.pin)
+        self.bridge.register_unpinner(self.instance_id, self.unpin)
+
+        ssl_verify = get_config("global.ssl_verify", True)
+        if ssl_verify is None:
+            ssl_verify = True
+        connector = None
+        if not ssl_verify or self._proxy:
+            connector = aiohttp.TCPConnector(ssl=False)
+
         if self._proxy:
-            logger.debug(f"Discord [{self.instance_id}] using proxy {self._proxy}")
+            self.logger.debug(f"using proxy {mask_url_credentials(self._proxy)}")
             self._session = aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(ssl=False), proxy=self._proxy
+                connector=connector, proxy=self._proxy
             )
         else:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(connector=connector)
 
         if not self._bot_token:
-            logger.warning(
-                f"Discord [{self.instance_id}] no bot_token configured — "
-                "receive disabled, send-only via webhook"
+            self.logger.warning(
+                "no bot_token configured — receive disabled, send-only via webhook"
             )
             return  # Webhook-only: session stays open, send() will be called by bridge
 
         intents = discord.Intents.default()
         intents.message_content = True
-        if self._proxy:
-            self._client = discord.Client(intents=intents, proxy=self._proxy)
-        else:
-            self._client = discord.Client(intents=intents)
+        self._client = discord.Client(
+            intents=intents, connector=connector, proxy=self._proxy
+        )
+
+        if self.config.enable_native_commands:
+            self._tree = discord.app_commands.CommandTree(self._client)
+            self._register_native_commands()
 
         @self._client.event
         async def on_ready():
-            assert self._client is not None  # Type narrowing
-            logger.info(
-                f"Discord [{self.instance_id}] logged in as {self._client.user}"
-            )
+            if self._client is None:
+                self.logger.warning(
+                    f"Discord [{self.instance_id}] on_ready: client not started"
+                )
+                return
+            self.logger.debug(f"logged in as {self._client.user}")
+            if self._tree and self.config.enable_native_commands:
+                self.logger.info(
+                    f"Discord [{self.instance_id}] registering {len(self._tree.get_commands())} native command(s)"
+                )
+                try:
+                    synced = await self._tree.sync()
+                    self.logger.info(
+                        f"Discord [{self.instance_id}] synced {len(synced)} native command(s): "
+                        f"{[cmd.name for cmd in synced]}"
+                    )
+                except discord.Forbidden as e:
+                    self.logger.error(
+                        f"Discord [{self.instance_id}] failed to sync native commands: "
+                        f"missing 'applications.commands' scope or insufficient permissions. "
+                        f"Error: {e}"
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"Discord [{self.instance_id}] failed to sync native commands: {e}"
+                    )
 
         @self._client.event
         async def on_message(message: discord.Message):
             if message.author.bot:
-                # logger.debug(
-                #     f"Discord [{self.instance_id}] ignoring bot message from {message.author}"
-                # )
                 return
-            await self._on_message(message)
+            self._message_queue.put_nowait(message)
 
-        # Blocks until the bot disconnects
-        await self._client.start(self._bot_token)
+        @self._client.event
+        async def on_message_edit(before: discord.Message, after: discord.Message):
+            # Detect pin/unpin events. `before` is None when the message is
+            # not in the internal cache; `after` may be partial but still
+            # carries the `pinned` field for pin/unpin updates.
+            try:
+                is_pin_change = (
+                    before is not None and before.pinned != after.pinned
+                ) or (before is None and after.pinned is not None)
+            except (AttributeError, ValueError):
+                is_pin_change = False
+            if is_pin_change:
+                await self._on_message_pin(after, after.pinned)
+                return
+            # Skip bot messages for edit detection
+            try:
+                if after.author.bot:
+                    return
+            except (AttributeError, ValueError):
+                return
+            # Discord fires MESSAGE_UPDATE for reasons other than a real content
+            # edit, e.g. a message being pinned/unpinned or an embed/preview
+            # being auto-generated for a link. In those cases the actual text is
+            # unchanged, so treating them as edits would spuriously mark the
+            # bridged message as "edited" on other platforms. Only bridge the
+            # edit when the visible content actually changed.
+            if before is not None and not self._is_content_edit(before, after):
+                return
+            await self._on_message_edit(after)
+
+        @self._client.event
+        async def on_raw_message_delete(
+            payload: discord.RawMessageDeleteEvent,
+        ):
+            await self._on_raw_message_delete(payload)
+
+        if self._message_worker_task is None or self._message_worker_task.done():
+            self._message_worker_task = asyncio.create_task(self._message_worker())
+
+        # Blocks until the bot disconnects. Reconnect on unexpected disconnect
+        # (token failure, kick, network drop) with exponential backoff.
+        attempt = 0
+        while not self._stopping:
+            try:
+                await self._client.start(self._bot_token)
+            except Exception:
+                if self._stopping:
+                    break
+                self.logger.exception(
+                    f"Discord [{self.instance_id}] client disconnected unexpectedly"
+                )
+            if self._stopping:
+                break
+            attempt += 1
+            delay = min(30.0, 2.0 * (2 ** (attempt - 1)))
+            self.logger.warning(
+                f"Discord [{self.instance_id}] reconnecting in {delay:.0f}s"
+            )
+            await asyncio.sleep(delay)
+
+    def _register_native_commands(self) -> None:
+        if self._tree is None:
+            return
+
+        tree = self._tree
+        prefix = (self.bridge.command_prefix or "nb").strip().lstrip("/") or "nb"
+        root_name = resolve_native_command_name(prefix)
+        if root_name != prefix.lower():
+            self.logger.warning(
+                f"command_prefix '{prefix}' is not a valid Discord command name; "
+                f"native commands will use '/{root_name}' "
+                f"(text commands still use '/{prefix}')"
+            )
+
+        @tree.command(name="ping", description="Ping the bot")
+        async def ping_command(interaction: discord.Interaction):
+            await interaction.response.send_message("Pong!", ephemeral=True)
+
+        nb = discord.app_commands.Group(
+            name=root_name, description="NextBridge commands"
+        )
+
+        # --- /<prefix> bind ---
+        bind = discord.app_commands.Group(
+            name="bind", description="Link your accounts across platforms"
+        )
+
+        @bind.command(name="setup", description="Generate a code to link an account")
+        async def bind_setup(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "bind", "setup")
+            )
+
+        @bind.command(name="confirm", description="Confirm a linking code")
+        @discord.app_commands.describe(
+            code="The linking code generated on the other platform"
+        )
+        async def bind_confirm(interaction: discord.Interaction, code: str):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "bind", "confirm", code),
+            )
+
+        @bind.command(name="rm", description="Remove an account link")
+        @discord.app_commands.describe(
+            instance_id="Platform instance to unlink (omit to remove all)"
+        )
+        async def bind_rm(interaction: discord.Interaction, instance_id: str = ""):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "bind", "rm", instance_id or None),
+            )
+
+        @bind.command(name="list", description="List your linked accounts")
+        async def bind_list(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "bind", "list")
+            )
+
+        nb.add_command(bind)
+
+        # --- /<prefix> notify ---
+        notify = discord.app_commands.Group(
+            name="notify", description="Manage cross-platform mention notifications"
+        )
+
+        @notify.command(name="mode", description="Set the mention notification mode")
+        @discord.app_commands.describe(mode="Notification mode")
+        @discord.app_commands.choices(
+            mode=[
+                discord.app_commands.Choice(name="all", value="all"),
+                discord.app_commands.Choice(name="whitelist", value="whitelist"),
+                discord.app_commands.Choice(name="blacklist", value="blacklist"),
+            ]
+        )
+        async def notify_mode(
+            interaction: discord.Interaction,
+            mode: discord.app_commands.Choice[str],
+        ):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "notify", "mode", mode.value),
+            )
+
+        @notify.command(name="add", description="Add a platform to notify from")
+        @discord.app_commands.describe(instance_id="Platform instance to add")
+        async def notify_add(interaction: discord.Interaction, instance_id: str):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "notify", "add", instance_id),
+            )
+
+        @notify.command(name="rm", description="Remove a platform from notifications")
+        @discord.app_commands.describe(instance_id="Platform instance to remove")
+        async def notify_rm(interaction: discord.Interaction, instance_id: str):
+            await self._dispatch_native_command(
+                interaction,
+                build_native_command_text(prefix, "notify", "rm", instance_id),
+            )
+
+        @notify.command(name="list", description="List notification settings")
+        async def notify_list(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "notify", "list")
+            )
+
+        nb.add_command(notify)
+
+        # --- direct subcommands ---
+        @nb.command(name="status", description="Show bridge status")
+        async def nb_status(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "status")
+            )
+
+        @nb.command(name="help", description="Show NextBridge command help")
+        async def nb_help(interaction: discord.Interaction):
+            await self._dispatch_native_command(
+                interaction, build_native_command_text(prefix, "help")
+            )
+
+        tree.add_command(nb)
+
+    async def _dispatch_native_command(
+        self, interaction: discord.Interaction, text: str
+    ) -> None:
+        """Forward a native slash command to the bridge as a text command."""
+        age = (
+            discord.utils.utcnow() - discord.utils.snowflake_time(interaction.id)
+        ).total_seconds()
+        acknowledged = False
+        started = time.monotonic()
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            acknowledged = True
+        except discord.errors.InteractionResponded:
+            self.logger.debug("interaction already acknowledged, continuing")
+            acknowledged = True
+        except Exception as e:
+            elapsed = time.monotonic() - started
+            self.logger.warning(
+                f"failed to defer interaction (received {age:.2f}s ago, "
+                f"defer took {elapsed:.2f}s): {e}; "
+                f"continuing so the command can still reply in the channel"
+            )
+
+        self.logger.debug(
+            f"native command {text!r} from {interaction.user} "
+            f"in {interaction.guild_id or 'DM'}"
+        )
+
+        msg = NormalizedMessage(
+            platform="discord",
+            instance_id=self.instance_id,
+            channel={
+                "server_id": str(interaction.guild_id) if interaction.guild_id else "",
+                "channel_id": str(interaction.channel_id),
+            },
+            nickname=interaction.user.display_name,
+            user_id=str(interaction.user.id),
+            user_avatar=str(interaction.user.display_avatar.url)
+            if interaction.user.display_avatar
+            else "",
+            text=text,
+            message_id=str(interaction.id),
+            username=interaction.user.name,
+            is_dm=interaction.guild_id is None,
+        )
+
+        error: Exception | None = None
+        try:
+            self.logger.debug("calling bridge.on_message...")
+            await self.bridge.on_message(msg)
+            self.logger.debug("bridge.on_message completed")
+        except Exception as e:
+            error = e
+            tb = traceback.format_exc()
+            self.logger.error(f"native command error: {e}\n{tb}")
+
+        if not acknowledged:
+            return
+        try:
+            if error is None:
+                await interaction.followup.send("Command executed.", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Error: {error}", ephemeral=True)
+        except Exception as e:
+            self.logger.error(f"failed to send interaction response: {e}")
+
+    async def stop(self):
+        self._stopping = True
+        if self._client and not self._client.is_closed():
+            await self._client.close()
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     # ------------------------------------------------------------------
     # Receive
     # ------------------------------------------------------------------
 
+    async def _message_worker(self) -> None:
+        while True:
+            message = await self._message_queue.get()
+            try:
+                await self._on_message(message)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.error(f"message handler error: {e}")
+            finally:
+                self._message_queue.task_done()
+
     async def _on_message(self, message: discord.Message):
         server_id = str(message.guild.id) if message.guild else ""
         channel_id = str(message.channel.id)
-        logger.debug(
-            f"Discord [{self.instance_id}] message from {message.author} "
-            f"server={server_id} channel={channel_id}"
+        self.logger.debug(
+            f"message from {message.author} server={server_id} channel={channel_id}"
         )
         # Use clean_content to get mentions as @Name instead of <@id>
         text = message.clean_content
@@ -220,13 +572,124 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 Attachment(type=att_type, url=att.url, name=att.filename, size=att.size)
             )
 
+        is_forward = False
+        if (
+            message.reference
+            and message.reference.type == discord.MessageReferenceType.forward
+        ):
+            is_forward = True
+            resolved = message.reference.resolved
+            if resolved is None and message.reference.message_id is not None:
+                try:
+                    ref_channel_id = message.reference.channel_id
+                    if ref_channel_id and message.guild:
+                        ch = message.guild.get_channel(ref_channel_id)
+                        if ch is None:
+                            ch = await message.guild.fetch_channel(ref_channel_id)
+                        if isinstance(
+                            ch,
+                            (discord.TextChannel, discord.Thread, discord.VoiceChannel),
+                        ):
+                            resolved = await ch.fetch_message(
+                                message.reference.message_id
+                            )
+                except Exception as e:
+                    self.logger.debug(f"failed to fetch forwarded message: {e}")
+            if resolved is not None and not isinstance(
+                resolved, discord.DeletedReferencedMessage
+            ):
+                fwd_text = resolved.clean_content
+                fwd_author = resolved.author.display_name
+
+                forward_block = (
+                    f"转发消息 | From @{fwd_author}:\n{fwd_text}"
+                    if fwd_text
+                    else f"转发消息 | From @{fwd_author}"
+                )
+                text = (text + "\n" + forward_block) if text.strip() else forward_block
+
+                for att in resolved.attachments:
+                    ct = att.content_type or ""
+                    if ct.startswith("image/"):
+                        att_type = "image"
+                    elif ct.startswith("video/"):
+                        att_type = "video"
+                    elif ct.startswith("audio/"):
+                        att_type = "voice"
+                    else:
+                        att_type = "file"
+                    attachments.append(
+                        Attachment(
+                            type=att_type,
+                            url=att.url,
+                            name=att.filename,
+                            size=att.size,
+                        )
+                    )
+
+                for sticker in resolved.stickers:
+                    if sticker.format in (
+                        discord.StickerFormatType.png,
+                        discord.StickerFormatType.apng,
+                        discord.StickerFormatType.gif,
+                    ):
+                        ext = (
+                            "gif"
+                            if sticker.format == discord.StickerFormatType.gif
+                            else "png"
+                        )
+                        attachments.append(
+                            Attachment(
+                                type="image",
+                                url=sticker.url,
+                                name=f"{sticker.name}.{ext}",
+                            )
+                        )
+                    elif sticker.format == discord.StickerFormatType.lottie:
+                        label = sticker.name
+                        if text.strip():
+                            text += f"\n[Forwarded Sticker: {label}]"
+                        else:
+                            text = f"[Forwarded Sticker: {label}]"
+            else:
+                forward_block = "转发消息 | (原消息已被删除)"
+                text = (text + "\n" + forward_block) if text.strip() else forward_block
+
+        for sticker in message.stickers:
+            if sticker.format in (
+                discord.StickerFormatType.png,
+                discord.StickerFormatType.apng,
+            ):
+                attachments.append(
+                    Attachment(
+                        type="image", url=sticker.url, name=f"{sticker.name}.png"
+                    )
+                )
+            elif sticker.format == discord.StickerFormatType.gif:
+                attachments.append(
+                    Attachment(
+                        type="image", url=sticker.url, name=f"{sticker.name}.gif"
+                    )
+                )
+            elif sticker.format == discord.StickerFormatType.lottie:
+                label = sticker.name
+                if text.strip():
+                    text += f"\n[Sticker: {label}]"
+                else:
+                    text = f"[Sticker: {label}]"
+                self.logger.debug(
+                    f"sticker '{label}' is Lottie format, cannot bridge as image"
+                )
+
+        if text:
+            text, emoji_attachments = _extract_custom_emojis(text)
+            attachments.extend(emoji_attachments)
+
         if not attachments:
             text, attachments = await self._extract_auto_link_image(text)
 
         if not text.strip() and not attachments:
-            logger.debug(
-                f"Discord [{self.instance_id}] ignoring empty message from {message.author}"
-            )
+            self.logger.debug(f"ignoring empty message from {message.author}")
             return
 
         avatar = (
@@ -250,13 +713,123 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             attachments=attachments,
             message_id=str(message.id),
             reply_parent=str(message.reference.message_id)
-            if message.reference
+            if message.reference and not is_forward
             else None,
             mentions=mentions,
             source_proxy=self._media_proxy,
             username=message.author.name,
+            is_dm=server_id == "",
         )
         await self.bridge.on_message(msg)
+
+    @staticmethod
+    def _is_content_edit(before: discord.Message, after: discord.Message) -> bool:
+        """Return whether a MESSAGE_UPDATE reflects a real content edit.
+
+        Discord dispatches ``on_message_edit`` for events that are not user
+        edits, most notably pinning/unpinning a message (标注) and the
+        auto-generated link embeds/previews. Those updates leave the message
+        text and attachments untouched, so we compare the meaningful fields and
+        ignore updates that only change ``pinned``/``embeds``.
+        """
+        if before.content != after.content:
+            return True
+        # Attachments can change on a genuine edit (e.g. removing an image).
+        before_atts = {a.id for a in before.attachments}
+        after_atts = {a.id for a in after.attachments}
+        if before_atts != after_atts:
+            return True
+        return False
+
+    async def _on_message_edit(self, message: discord.Message):
+        server_id = str(message.guild.id) if message.guild else ""
+        channel_id = str(message.channel.id)
+        text = message.clean_content
+        if not text.strip():
+            return
+        from services.message import NormalizedMessage as NM
+
+        avatar = (
+            str(message.author.display_avatar.url)
+            if message.author.display_avatar
+            else ""
+        )
+        msg = NM(
+            platform="discord",
+            instance_id=self.instance_id,
+            channel={"server_id": server_id, "channel_id": channel_id},
+            nickname=message.author.display_name,
+            user_id=str(message.author.id),
+            user_avatar=avatar,
+            text=text,
+            message_id=str(message.id),
+            edit_target_id=str(message.id),
+            is_edit=True,
+            username=message.author.name,
+            is_dm=server_id == "",
+        )
+        await self.bridge.on_edit_message(msg)
+
+    async def _on_message_pin(self, message: discord.Message, pinned: bool):
+        msg_id = str(message.id)
+        if pinned and msg_id in self._pin_suppress:
+            self._pin_suppress.discard(msg_id)
+            return
+        server_id = str(message.guild.id) if message.guild else ""
+        channel_id = str(message.channel.id)
+        from services.message import NormalizedMessage as NM
+
+        if pinned:
+            msg = NM(
+                platform="discord",
+                instance_id=self.instance_id,
+                channel={"server_id": server_id, "channel_id": channel_id},
+                message_id=msg_id,
+                pin_target_id=msg_id,
+                is_pin=True,
+            )
+            await self.bridge.on_pin_message(msg)
+        else:
+            msg = NM(
+                platform="discord",
+                instance_id=self.instance_id,
+                channel={"server_id": server_id, "channel_id": channel_id},
+                message_id=msg_id,
+                unpin_target_id=msg_id,
+                is_unpin=True,
+            )
+            await self.bridge.on_unpin_message(msg)
+
+    async def _on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        """Bridge a Discord message deletion as a recall.
+
+        Uses the *raw* event so deletions of messages not in the client cache
+        are still detected.
+        """
+        if not self.config.enable_recall:
+            return
+
+        message_id = str(payload.message_id)
+        # Ignore deletions we performed ourselves (bridged recalls) to avoid a
+        # loop where our own delete triggers another recall dispatch.
+        if message_id in self._recall_suppress:
+            self._recall_suppress.discard(message_id)
+            return
+
+        server_id = str(payload.guild_id) if payload.guild_id else ""
+        channel_id = str(payload.channel_id)
+        from services.message import NormalizedMessage as NM
+
+        msg = NM(
+            platform="discord",
+            instance_id=self.instance_id,
+            channel={"server_id": server_id, "channel_id": channel_id},
+            message_id=message_id,
+            recall_target_id=message_id,
+            is_recall=True,
+            is_dm=server_id == "",
+        )
+        await self.bridge.on_recall_message(msg)
 
     async def _extract_auto_link_image(self, text: str) -> tuple[str, list[Attachment]]:
         link = text.strip()
@@ -280,7 +853,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         return bridged_text, [Attachment(type="image", url=image_url, name=name)]
 
     async def _resolve_link_image_url(self, url: str) -> str | None:
-        assert self._session is not None
+        if self._session is None:
+            return None
         try:
             async with self._session.get(
                 url,
@@ -298,7 +872,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     return None
                 body = await resp.text(errors="ignore")
         except Exception as exc:
-            logger.debug(
+            self.logger.debug(
                 f"Discord [{self.instance_id}] auto link image resolve failed for {url}: {exc}"
             )
             return None
@@ -353,9 +927,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         except FileNotFoundError:
             pass
         except Exception as exc:
-            logger.opt(exception=exc).warning(
-                f"Discord [{self.instance_id}] failed to read emoji DB"
-            )
+            self.logger.opt(exception=exc).warning("failed to read emoji DB")
 
         return self._emoji_db
 
@@ -415,10 +987,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         # If bot client is available, prefer bot send for reply messages.
         if reply_to_id and self._client is not None and self.config.send_replies_as_bot:
             force_bot = True
-            logger.debug(
-                f"Discord [{self.instance_id}] forcing bot send for reply "
-                f"reference={reply_to_id}"
-            )
+            self.logger.debug(f"forcing bot send for reply reference={reply_to_id}")
 
         # If webhook fallback is set to bot, prefer bot send when cqface is present.
         if has_cqface and self._send_method == "webhook":
@@ -426,8 +995,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 if self._client is not None:
                     force_bot = True
                 else:
-                    logger.warning(
-                        f"Discord [{self.instance_id}] cqface webhook fallback set to bot, "
+                    self.logger.warning(
+                        "cqface webhook fallback set to bot, "
                         "but bot_token is unavailable; using unicode fallback"
                     )
 
@@ -466,11 +1035,11 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 try:
                     text = fmt.format(**ctx)
                 except KeyError as e:
-                    logger.warning(
-                        f"Discord [{self.instance_id}] bot format missing key {e}; using incoming text"
+                    self.logger.warning(
+                        f"bot format missing key {e}; using incoming text"
                     )
                 else:
-                    text, parsed_rich_header = _parse_richheader(text)
+                    text, parsed_rich_header = parse_richheader_tag(text)
                     if parsed_rich_header is not None:
                         parsed_rich_header["avatar"] = kwargs.get("user_avatar") or ""
                         kwargs["rich_header"] = parsed_rich_header
@@ -487,9 +1056,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
         rich_header = kwargs.get("rich_header")
         if rich_header:
-            t, c = rich_header.get("title", ""), rich_header.get("content", "")
-            prefix = f"**{t}**" + (f" · *{c}*" if c else "")
-            text = f"{prefix}\n{text}" if text else prefix
+            text = apply_rich_header(text, rich_header, style="markdown")
 
         # Handle mentions: replace @Name with <@id>
         mentions = list(kwargs.get("mentions", []))
@@ -516,16 +1083,16 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         if self.config.sanitize_mass_mentions:
             text, had_mass_mentions = _sanitize_mass_mentions(text)
             if had_mass_mentions:
-                logger.warning(
-                    f"Discord [{self.instance_id}] blocked @everyone/@here mention in outgoing message"
+                self.logger.warning(
+                    "blocked @everyone/@here mention in outgoing message"
                 )
 
         if is_webhook_send:
             assert webhook_url is not None  # Type narrowing for type checker
             if reply_to_id:
-                logger.debug(
-                    f"Discord [{self.instance_id}] webhook send does not support "
-                    f"reply reference; sending as normal message. "
+                self.logger.debug(
+                    "webhook send does not support "
+                    "reply reference; sending as normal message. "
                     "Set send_replies_as_bot=true with bot_token for reply bridging."
                 )
             # Remove webhook_url from kwargs to avoid duplicate argument
@@ -536,7 +1103,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         elif self._client is not None:
             return await self._send_bot(channel, text, attachments, **kwargs)
         else:
-            logger.warning(f"Discord [{self.instance_id}] no send method available")
+            self.logger.warning("no send method available")
             return None
 
     async def _send_webhook(
@@ -572,7 +1139,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 try:
                     payload["username"] = title.format(**ctx)
                 except KeyError as e:
-                    logger.warning(f"webhook_title missing key {e}; using raw title")
+                    self.logger.warning(
+                        f"webhook_title missing key {e}; using raw title"
+                    )
                     payload["username"] = title
             else:
                 payload["username"] = title
@@ -582,35 +1151,45 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 try:
                     payload["avatar_url"] = avatar.format(**ctx)
                 except KeyError as e:
-                    logger.warning(f"webhook_avatar missing key {e}; using raw avatar")
+                    self.logger.warning(
+                        f"webhook_avatar missing key {e}; using raw avatar"
+                    )
                     payload["avatar_url"] = avatar
             else:
                 payload["avatar_url"] = avatar
 
-        # Download each attachment; collect as (bytes, mime, filename) triples
+        # Download attachments concurrently; collect as (bytes, mime, filename)
         files: list[tuple[bytes, str, str]] = []
         source_proxy = self._source_proxy_from_kwargs(kwargs)
-        for att in attachments or []:
-            if not att.url and att.data is None:
-                continue
-            result = await media.fetch_attachment(
+        valid_atts = [
+            att
+            for att in attachments or []
+            if att.url or att.name or att.data is not None
+        ]
+
+        async def _fetch(att: Attachment):
+            return await media.fetch_attachment(
                 att, self.config.max_file_size, source_proxy
             )
+
+        results = await asyncio.gather(*(_fetch(att) for att in valid_atts))
+        for att, result in zip(valid_atts, results):
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
                 files.append((data_bytes, mime, fname))
             else:
                 # Size exceeded or download failed — append URL or name as text
-                label = att.name or att.url
-                ref = f"({att.url})" if att.url else ""
+                safe_url = mask_url_credentials(att.url) if att.url else ""
+                label = mask_url_credentials(att.name) if att.name else safe_url
+                ref = f"({safe_url})" if safe_url else ""
                 payload["content"] += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
         url = webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true"
 
         try:
-            logger.debug(
-                f"Discord [{self.instance_id}] webhook payload overrides: "
+            self.logger.debug(
+                f"webhook payload overrides: "
                 f"username={payload.get('username')!r}, "
                 f"avatar_url is {'set' if payload.get('avatar_url') else 'unset'}"
             )
@@ -627,31 +1206,27 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
                         author = data.get("author") or {}
-                        logger.debug(
-                            f"Discord [{self.instance_id}] webhook sent message "
+                        self.logger.debug(
+                            f"webhook sent message "
                             f"id={data.get('id')} author={author.get('username')!r}"
                         )
                         return str(data.get("id", ""))
                     body = await resp.text()
-                    logger.error(
-                        f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
-                    )
+                    self.logger.error(f"webhook error {resp.status}: {body}")
             else:
                 async with self._session.post(url, json=payload) as resp:
                     if resp.status in (200, 204, 201):
                         data = await resp.json()
                         author = data.get("author") or {}
-                        logger.debug(
-                            f"Discord [{self.instance_id}] webhook sent message "
+                        self.logger.debug(
+                            f"webhook sent message "
                             f"id={data.get('id')} author={author.get('username')!r}"
                         )
                         return str(data.get("id", ""))
                     body = await resp.text()
-                    logger.error(
-                        f"Discord [{self.instance_id}] webhook error {resp.status}: {body}"
-                    )
+                    self.logger.error(f"webhook error {resp.status}: {body}")
         except Exception:
-            logger.exception(f"Discord [{self.instance_id}] webhook exception")
+            self.logger.exception("webhook exception")
         return None
 
     async def _send_bot(
@@ -665,33 +1240,36 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             return None
         channel_id = channel.get("channel_id")
         if not channel_id:
-            logger.warning(f"Discord [{self.instance_id}] send_bot: no channel_id")
+            self.logger.warning("send_bot: no channel_id")
             return None
         ch = self._client.get_channel(int(channel_id))
         if ch is None:
             try:
                 ch = await self._client.fetch_channel(int(channel_id))
             except Exception as e:
-                logger.warning(
-                    f"Discord [{self.instance_id}] could not fetch channel {channel_id}: {e}"
-                )
+                self.logger.warning(f"could not fetch channel {channel_id}: {e}")
                 return None
 
         # Ensure the channel is messageable (has a send method)
         if not isinstance(ch, discord.abc.Messageable):
-            logger.warning(
-                f"Discord [{self.instance_id}] channel {channel_id} is not messageable"
-            )
+            self.logger.warning(f"channel {channel_id} is not messageable")
             return None
 
         discord_files: list[discord.File] = []
         source_proxy = self._source_proxy_from_kwargs(kwargs)
-        for att in attachments or []:
-            if not att.url and att.data is None:
-                continue
-            result = await media.fetch_attachment(
+        valid_atts = [
+            att
+            for att in attachments or []
+            if att.url or att.name or att.data is not None
+        ]
+
+        async def _fetch(att: Attachment):
+            return await media.fetch_attachment(
                 att, self.config.max_file_size, source_proxy
             )
+
+        results = await asyncio.gather(*(_fetch(att) for att in valid_atts))
+        for att, result in zip(valid_atts, results):
             if result:
                 data_bytes, mime = result
                 fname = media.filename_for(att.name, mime)
@@ -699,8 +1277,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     discord.File(io.BytesIO(data_bytes), filename=fname)
                 )
             else:
-                label = att.name or att.url
-                ref = f"({att.url})" if att.url else ""
+                safe_url = mask_url_credentials(att.url) if att.url else ""
+                label = mask_url_credentials(att.name) if att.name else safe_url
+                ref = f"({safe_url})" if safe_url else ""
                 text += f"\n[{att.type.capitalize()}: {label}]{ref}"
 
         reply_to_id = kwargs.get("reply_to_id")
@@ -715,32 +1294,223 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                 pass
 
         try:
-            # Build kwargs to only include non-None/non-empty values
-            send_kwargs = {}
-            if text:
-                send_kwargs["content"] = text
-            if discord_files:
-                send_kwargs["files"] = discord_files
-            if reference is not None:
-                send_kwargs["reference"] = reference
-
             replied_user = True
             source_mentioned_self = kwargs.get("source_mentioned_self")
             if source_mentioned_self is not None:
                 replied_user = bool(source_mentioned_self)
 
-            send_kwargs["allowed_mentions"] = discord.AllowedMentions(
+            allowed = discord.AllowedMentions(
                 everyone=self.config.allow_mentions_everyone,
                 users=self.config.allow_mentions_users,
                 roles=self.config.allow_mentions_roles,
                 replied_user=replied_user,
             )
 
-            sent = await ch.send(**send_kwargs)
+            send_kwargs: dict = {"allowed_mentions": allowed}
+            if text:
+                send_kwargs["content"] = text
+            if discord_files:
+                send_kwargs["files"] = discord_files
+            if reference is not None:
+                send_kwargs["reference"] = reference
+            sent = await ch.send(**send_kwargs)  # type: ignore[no-matching-overload]
             return str(sent.id)
         except Exception:
-            logger.exception(f"Discord [{self.instance_id}] send error")
+            self.logger.exception("send error")
         return None
+
+    # ------------------------------------------------------------------
+    # Edit
+    # ------------------------------------------------------------------
+
+    async def edit(self, channel: dict, message_id: str, text: str, **kwargs):
+        """Edit a previously sent message by ID."""
+        webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
+
+        has_cqface = bool(re.search(r":cqface\d+:", text))
+        rich_header = kwargs.get("rich_header")
+
+        if webhook_url and self._session is not None:
+            if has_cqface:
+                text = cqface.replace_cqface_tokens(text)
+            if rich_header:
+                text = apply_rich_header(text, rich_header, style="markdown")
+            if self.config.sanitize_mass_mentions:
+                text, _ = _sanitize_mass_mentions(text)
+            base = webhook_url.split("?")[0].rstrip("/")
+            edit_url = f"{base}/messages/{message_id}"
+            payload = {"content": text}
+            try:
+                async with self._session.patch(edit_url, json=payload) as resp:
+                    if resp.status not in (200, 204):
+                        body = await resp.text()
+                        self.logger.error(f"webhook edit error {resp.status}: {body}")
+            except Exception:
+                self.logger.exception(f"edit: webhook PATCH failed for {message_id}")
+            return
+
+        if self._client is None:
+            self.logger.debug("edit: no webhook_url and no bot client, skipping")
+            return
+
+        channel_id = channel.get("channel_id")
+        if not channel_id:
+            self.logger.warning("edit: no channel_id")
+            return
+
+        ch = self._client.get_channel(int(channel_id))
+        if ch is None:
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                self.logger.warning(f"edit: could not fetch channel {channel_id}: {e}")
+                return
+
+        if not isinstance(ch, discord.abc.Messageable):
+            return
+
+        try:
+            msg_obj = await ch.fetch_message(int(message_id))  # type: ignore[attr-defined]
+        except Exception as e:
+            self.logger.warning(f"edit: could not fetch message {message_id}: {e}")
+            return
+
+        if has_cqface:
+            text = self._expand_cqface_emojis(text)
+        if rich_header:
+            text = apply_rich_header(text, rich_header, style="markdown")
+        if self.config.sanitize_mass_mentions:
+            text, _ = _sanitize_mass_mentions(text)
+
+        try:
+            await msg_obj.edit(content=text)
+        except Exception:
+            self.logger.exception(f"edit: failed to edit message {message_id}")
+
+    # ------------------------------------------------------------------
+    # Delete / recall
+    # ------------------------------------------------------------------
+
+    async def pin(self, channel: dict, target_msg_id: str):
+        if self._client is None:
+            self.logger.debug("pin: no bot client, skipping")
+            return
+
+        channel_id = channel.get("channel_id")
+        if not channel_id:
+            self.logger.warning("pin: no channel_id")
+            return
+
+        ch = self._client.get_channel(int(channel_id))
+        if ch is None:
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                self.logger.warning(f"pin: could not fetch channel {channel_id}: {e}")
+                return
+
+        if not isinstance(ch, discord.abc.Messageable):
+            return
+
+        try:
+            msg_obj = await ch.fetch_message(int(target_msg_id))
+            self._bounded_add(self._pin_suppress, target_msg_id)
+            await msg_obj.pin()
+        except discord.Forbidden:
+            self.logger.warning(f"pin: no permission to pin in {channel_id}")
+        except Exception as e:
+            self.logger.warning(f"pin: failed to pin message {target_msg_id}: {e}")
+
+    async def unpin(self, channel: dict, target_msg_id: str):
+        if self._client is None:
+            self.logger.debug("unpin: no bot client, skipping")
+            return
+
+        channel_id = channel.get("channel_id")
+        if not channel_id:
+            self.logger.warning("unpin: no channel_id")
+            return
+
+        ch = self._client.get_channel(int(channel_id))
+        if ch is None:
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                self.logger.warning(f"unpin: could not fetch channel {channel_id}: {e}")
+                return
+
+        if not isinstance(ch, discord.abc.Messageable):
+            return
+
+        try:
+            msg_obj = await ch.fetch_message(int(target_msg_id))
+            await msg_obj.unpin()
+        except discord.Forbidden:
+            self.logger.warning(f"unpin: no permission to unpin in {channel_id}")
+        except Exception as e:
+            self.logger.warning(f"unpin: failed to unpin message {target_msg_id}: {e}")
+
+    async def delete(self, channel: dict, message_id: str, **kwargs):
+        """Delete (recall) a previously sent message by ID."""
+        if not self.config.enable_recall or not message_id:
+            return
+
+        # Suppress the raw delete event Discord dispatches back for this action.
+        self._bounded_add(self._recall_suppress, str(message_id))
+
+        webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
+
+        if webhook_url and self._session is not None:
+            base = webhook_url.split("?")[0].rstrip("/")
+            delete_url = f"{base}/messages/{message_id}"
+            try:
+                async with self._session.delete(delete_url) as resp:
+                    if resp.status not in (200, 204, 404):
+                        body = await resp.text()
+                        self.logger.error(f"webhook delete error {resp.status}: {body}")
+            except Exception:
+                self._recall_suppress.discard(str(message_id))
+                self.logger.exception(f"delete: webhook DELETE failed for {message_id}")
+            return
+
+        if self._client is None:
+            self._recall_suppress.discard(str(message_id))
+            self.logger.debug("delete: no webhook_url and no bot client, skipping")
+            return
+
+        channel_id = channel.get("channel_id")
+        if not channel_id:
+            self._recall_suppress.discard(str(message_id))
+            self.logger.warning("delete: no channel_id")
+            return
+
+        ch = self._client.get_channel(int(channel_id))
+        if ch is None:
+            try:
+                ch = await self._client.fetch_channel(int(channel_id))
+            except Exception as e:
+                self._recall_suppress.discard(str(message_id))
+                self.logger.warning(
+                    f"delete: could not fetch channel {channel_id}: {e}"
+                )
+                return
+
+        if not isinstance(ch, discord.abc.Messageable):
+            self._recall_suppress.discard(str(message_id))
+            return
+
+        try:
+            msg_obj = await ch.fetch_message(int(message_id))  # type: ignore[attr-defined]
+        except Exception as e:
+            self._recall_suppress.discard(str(message_id))
+            self.logger.warning(f"delete: could not fetch message {message_id}: {e}")
+            return
+
+        try:
+            await msg_obj.delete()
+        except Exception:
+            self._recall_suppress.discard(str(message_id))
+            self.logger.exception(f"delete: failed to delete message {message_id}")
 
 
 register("discord", DiscordConfig, DiscordDriver)

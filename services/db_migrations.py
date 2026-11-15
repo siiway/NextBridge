@@ -22,6 +22,9 @@ class MigrationStep:
 _MIGRATION_FILE_RE = re.compile(r"^(\d+)-(\d+)\.py$")
 
 
+_PLUGIN_MIGRATIONS: list[MigrationStep] = []
+
+
 def _discover_migrations() -> tuple[MigrationStep, ...]:
     migrations_dir = Path(__file__).resolve().parent / "migrations"
     steps: list[MigrationStep] = []
@@ -47,6 +50,22 @@ def _discover_migrations() -> tuple[MigrationStep, ...]:
 
     steps.sort(key=lambda s: (s.from_version, s.to_version, s.file_path.name))
     return tuple(steps)
+
+
+def get_migrations() -> tuple[MigrationStep, ...]:
+    return _discover_migrations() + tuple(_PLUGIN_MIGRATIONS)
+
+
+def register_plugin_migration(
+    from_version: int, to_version: int, file_path: Path
+) -> None:
+    _PLUGIN_MIGRATIONS.append(
+        MigrationStep(
+            from_version=from_version,
+            to_version=to_version,
+            file_path=file_path,
+        )
+    )
 
 
 MIGRATIONS: tuple[MigrationStep, ...] = _discover_migrations()
