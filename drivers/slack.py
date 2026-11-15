@@ -384,7 +384,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
         avatar: str = kwargs.get("webhook_avatar", "") or "{user_avatar}"
         has_identity = bool(title or avatar)
         reply_to_id = kwargs.get("reply_to_id")
-        first_msg_id = None
+        first_msg_id: str | None = None
 
         def _post_kwargs(msg_text: str) -> dict:
             """Build chat_postMessage kwargs with optional custom identity."""
@@ -401,9 +401,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             try:
                 resp = await self._web.chat_postMessage(**_post_kwargs(text))
                 if resp.get("ok"):
-                    mid = resp.get("ts")
-                    if not first_msg_id:
-                        first_msg_id = str(mid)
+                    first_msg_id = first_msg_id or str(resp.get("ts"))
             except Exception as e:
                 self.logger.error(f"chat_postMessage failed: {e}")
 
@@ -423,8 +421,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
                     )
                     if resp.get("ok"):
                         mid = resp.get("ts")
-                        if not first_msg_id:
-                            first_msg_id = str(mid)
+                        first_msg_id = first_msg_id or str(mid)
                 except Exception as e:
                     self.logger.warning(f"failed to send attachment label: {e}")
                 continue
@@ -447,8 +444,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
                         )
                         if resp.get("ok"):
                             mid = resp.get("ts")
-                            if not first_msg_id:
-                                first_msg_id = str(mid)
+                            first_msg_id = first_msg_id or str(mid)
                     else:
                         # Fallback: post to channel directly (no custom identity)
                         resp = await self._web.files_upload_v2(

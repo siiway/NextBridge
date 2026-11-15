@@ -174,7 +174,7 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
 
         try:
             result = await self._client.send_message(jid, body)
-            return result.ID if result else None
+            return result.ID or None
         except Exception as e:
             self.logger.error(f"send failed: {e}")
             return None
