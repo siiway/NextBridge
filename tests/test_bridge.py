@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from services.bridge import Bridge, _collect_sensitive
+import services.logger as log
 from services.message import NormalizedMessage
 
 
@@ -121,15 +122,24 @@ class TestCollectSensitive:
 class TestIsSensitive:
     def test_no_sensitive_values(self, bridge):
         bridge._sensitive = frozenset()
+        log.register_sensitive(frozenset())
         assert not bridge._is_sensitive("hello world")
 
     def test_contains_sensitive(self, bridge):
         bridge._sensitive = frozenset(["secret123"])
-        assert bridge._is_sensitive("my token is secret123")
+        log.register_sensitive(frozenset(["secret123"]))
+        try:
+            assert bridge._is_sensitive("my token is secret123")
+        finally:
+            log.register_sensitive(frozenset())
 
     def test_not_contains_sensitive(self, bridge):
         bridge._sensitive = frozenset(["secret123"])
-        assert not bridge._is_sensitive("hello world")
+        log.register_sensitive(frozenset(["secret123"]))
+        try:
+            assert not bridge._is_sensitive("hello world")
+        finally:
+            log.register_sensitive(frozenset())
 
 
 class TestParsePingCommand:
@@ -466,6 +476,8 @@ class TestLoadSensitiveValues:
     def test_empty_config(self, bridge):
         bridge.load_sensitive_values({})
         assert bridge._sensitive == frozenset()
+        # Restore global logger state so other tests are unaffected.
+        log.register_sensitive(frozenset(["secret123"]))
 
 
 class TestRegisterSender:
@@ -706,6 +718,7 @@ class TestDispatchContinueOnError:
             "target2": ("p2", mock_sender),
         }
         bridge._sensitive = frozenset(["abc123"])
+        log.register_sensitive(frozenset(["abc123"]))
         bridge._middleware = None
 
         rule = {
@@ -723,6 +736,7 @@ class TestDispatchContinueOnError:
 
             await bridge._dispatch(msg, rule, "bridge1")
 
+        log.register_sensitive(frozenset())
         mock_sender.assert_not_awaited()
 
     @pytest.mark.asyncio

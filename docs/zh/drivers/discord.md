@@ -96,7 +96,7 @@ Discord 驱动器通过 Discord 网关（Bot Token）接收消息，并支持通
 
 | 键 | 说明 |
 |---|---|
-| `webhook_msg_format` | 通过 Webhook 发送时覆盖 `msg_format`，支持相同模板变量。 |
+| `webhook_msg_format` | 通过 Webhook 发送时覆盖 `msg_format`，支持相同模板变量，并在发送前应用于最终文本（包括 `nickname` 和 `source_mentioned_self` 变量）。若模板引入 `:cqface<ID>:` 表情且 `cqface_webhook_fallback` 为 `bot`，消息会改用 `bot_msg_format` 重新格式化并通过 Bot 发送。 |
 | `bot_msg_format` | 通过 Bot 发送时覆盖 `msg_format`（包括 `cqface_webhook_fallback` 或 `send_replies_as_bot` 触发的情形），支持相同模板变量。 |
 | `webhook_title` | Webhook 消息上显示的用户名（仅 `send_method: "webhook"` 时生效） |
 | `webhook_avatar` | Webhook 消息上显示的头像 URL（仅 `send_method: "webhook"` 时生效） |

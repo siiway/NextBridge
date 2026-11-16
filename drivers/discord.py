@@ -40,6 +40,7 @@ import services.cqface as cqface
 import services.media as media
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header, parse_richheader_tag
+import services.logger as log
 from services.util import LRUDict, get_data_path, mask_url_credentials
 from services.config_schema import _DriverConfig, CoercedBool
 from services.config import get_proxy, get as get_config, UNSET
@@ -1052,6 +1053,13 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     text = fmt.format(**ctx)
                 except KeyError as e:
                     self.logger.warning(f"format missing key {e}; using incoming text")
+                except (ValueError, IndexError) as e:
+                    # Malformed template (unmatched brace / positional field):
+                    # keep the bridge-formatted text rather than dropping the
+                    # message.
+                    self.logger.warning(
+                        f"malformed format template ({e}); using incoming text"
+                    )
                 else:
                     text, parsed_rich_header = parse_richheader_tag(text)
                     if parsed_rich_header is not None:
@@ -1063,12 +1071,49 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                         # the template itself provided one.
                         kwargs.pop("rich_header", None)
 
-                # Recompute cqface presence: the template may introduce tokens
-                # that were absent from the incoming text.
-                has_cqface = bool(re.search(r":cqface\d+:", text))
+                    # Recompute cqface presence and the cqface bot fallback: the
+                    # template may introduce or remove tokens, which changes the
+                    # desired send path.
+                    has_cqface = bool(re.search(r":cqface\d+:", text))
+                    if (
+                        has_cqface
+                        and not force_bot
+                        and self._send_method == "webhook"
+                        and self.config.cqface_webhook_fallback == "bot"
+                        and self._client is not None
+                    ):
+                        force_bot = True
+                        self.logger.debug(
+                            "forcing bot send: cqface token introduced by format"
+                        )
+                        is_webhook_send = False
+                        # Re-format with the bot format now that the send path
+                        # changed; fall back to the webhook-formatted text when
+                        # no bot format is configured.
+                        bot_fmt = kwargs.get("bot_msg_format") or kwargs.get(
+                            "msg_format"
+                        )
+                        if isinstance(bot_fmt, str) and bot_fmt:
+                            try:
+                                text = bot_fmt.format(**ctx)
+                            except (KeyError, ValueError, IndexError) as e:
+                                self.logger.warning(
+                                    f"format error {e}; keeping prior text"
+                                )
+                            else:
+                                text, parsed_rich_header = parse_richheader_tag(text)
+                                if parsed_rich_header is not None:
+                                    parsed_rich_header["avatar"] = (
+                                        kwargs.get("user_avatar") or ""
+                                    )
+                                    kwargs["rich_header"] = parsed_rich_header
+                                else:
+                                    kwargs.pop("rich_header", None)
 
         # Note: webhook_msg_format and bot_msg_format are handled by bridge.py
-        # The 'text' parameter passed here is already formatted
+        # The 'text' parameter passed here is already formatted. The driver-side
+        # re-format below may reintroduce sensitive values the bridge check
+        # never saw, so re-scan the final text before sending.
 
         # Expand :cqface<id>: tokens into proper Discord custom emoji strings
         # when sending via bot; webhook fallback can stay Unicode.
@@ -1080,6 +1125,13 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         rich_header = kwargs.get("rich_header")
         if rich_header:
             text = apply_rich_header(text, rich_header, style="markdown")
+
+        if log.contains_sensitive(text):
+            self.logger.warning(
+                "blocked outgoing message: final text contains a sensitive "
+                "value from config (token/secret/webhook). Possible credential leak."
+            )
+            return None
 
         # Handle mentions: replace @Name with <@id>
         mentions = list(kwargs.get("mentions", []))
@@ -1350,6 +1402,9 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
 
     async def edit(self, channel: dict, message_id: str, text: str, **kwargs):
         """Edit a previously sent message by ID."""
+        # Note: text here comes straight from the bridge (already sensitive-
+        # checked and formatted); unlike send() there is no driver-side
+        # re-formatting that could reintroduce sensitive values.
         webhook_url = kwargs.get("webhook_url") or channel.get("webhook_url")
 
         has_cqface = bool(re.search(r":cqface\d+:", text))

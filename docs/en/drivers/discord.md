@@ -96,7 +96,7 @@ These can be placed in the rule's `msg` block and are picked up by the Discord d
 
 | Key | Description |
 |---|---|
-| `webhook_msg_format` | Overrides `msg_format` when the message is sent via webhook. Supports the same template variables. |
+| `webhook_msg_format` | Overrides `msg_format` when the message is sent via webhook. Supports the same template variables, and is applied to the final text right before the webhook send (including the `nickname` and `source_mentioned_self` variables). If the template introduces a `:cqface<ID>:` token and `cqface_webhook_fallback` is `bot`, the message is re-formatted with `bot_msg_format` and sent via the bot. |
 | `bot_msg_format` | Overrides `msg_format` when the message is sent via the bot (including when `cqface_webhook_fallback` or `send_replies_as_bot` triggers). Supports the same template variables. |
 | `webhook_title` | Display name shown on the webhook message (`send_method: "webhook"` only) |
 | `webhook_avatar` | Avatar URL shown on the webhook message (`send_method: "webhook"` only) |

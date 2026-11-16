@@ -72,6 +72,10 @@ def replace_sensitive(msg: str) -> str:
     return msg
 
 
+def contains_sensitive(msg: str) -> bool:
+    return bool(_sensitive) and any(secret in msg for secret in _sensitive)
+
+
 # ── Format callables ──
 
 

@@ -1017,7 +1017,7 @@ class Bridge:
         return formatted, extra
 
     def _is_sensitive(self, text: str) -> bool:
-        return bool(self._sensitive) and any(s in text for s in self._sensitive)
+        return log.contains_sensitive(text)
 
     def _normalize_target_cqface(
         self, target_platform: str | None, text: str, extra: dict[str, Any]

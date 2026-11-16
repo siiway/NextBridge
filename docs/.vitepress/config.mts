@@ -6,6 +6,11 @@ import { defineConfig } from 'vitepress'
 // version-aware beyond the label below.
 const VERSION = 'v0.4'
 
+// Legacy releases, newest first. Each entry links to the frozen Pages alias of
+// its branch. Only the latest legacy release is shown in the nav to keep it
+// compact; extend the list when a new release line is frozen.
+const LEGACY = [{ text: 'v0.3', link: 'https://v0-3-legacy.nextbridge.pages.dev' }]
+
 function enSidebar() {
   const prefix = '/en'
   return [
@@ -131,6 +136,7 @@ export default defineConfig({
           // Version badge only. Historical releases link *here*, so this site
           // never has to enumerate them (which would need editing every release).
           { text: `${VERSION} (latest)`, link: '/en/getting-started' },
+          { text: 'Legacy', items: LEGACY },
         ],
         sidebar: enSidebar(),
         editLink: {
@@ -152,6 +158,7 @@ export default defineConfig({
           { text: '驱动器', link: '/zh/drivers/' },
           // Keep the label parallel to the English one.
           { text: `${VERSION} (latest)`, link: '/zh/getting-started' },
+          { text: '旧版本', items: LEGACY },
         ],
         sidebar: zhSidebar(),
         editLink: {

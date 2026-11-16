@@ -14,6 +14,7 @@
     - 跑 `uv lock` 后确认 `uv.lock` 的 sqlalchemy 仍在 `>=2.1,<2.2`
     - 用真实 PostgreSQL 跑一遍启动迁移，确认 8 个 migration 全部通过（见 `RELEASING.md`）
     - 在没有 `libmagic` 的干净容器里 import 所有 driver，确认无一失败（见 `RELEASING.md`）
+12. 文档（Markdown）中不要为了控制行宽手动换行：VitePress 会把源文件中的换行渲染为空格，影响观感。一个段落/列表项/表格单元格写成一整行
 
 # 可用的 driver api 文档
 
