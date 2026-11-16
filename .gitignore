@@ -34,3 +34,6 @@ result
 # Documentation site (VitePress)
 docs/node_modules/
 docs/.vitepress/cache/
+
+# Wrangler local cache (contains account id)
+.wrangler/
