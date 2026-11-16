@@ -7,8 +7,7 @@ The Google Chat driver bridges Google Chat spaces with the rest of your platform
 ## Prerequisites
 
 ::: tip
-**Google Workspace** account needed, or you will hit this:
-![Google Chat API is only available to Google Workspace users](https://images.krnl64.win/api/get/6efb709e-7dd7-4183-9e25-225004f5695e.png)
+**Google Workspace** account needed, or you will hit this: ![Google Chat API is only available to Google Workspace users](https://images.krnl64.win/api/get/6efb709e-7dd7-4183-9e25-225004f5695e.png)
 :::
 
 1. **Create a Google Cloud project** at [console.cloud.google.com](https://console.cloud.google.com/) (or use an existing one).

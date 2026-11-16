@@ -5,9 +5,7 @@ title: Migrating to v0.4
 # Migrating to v0.4
 
 ::: tip Coming from an older version?
-This page covers **v0.3 → v0.4** only. If you are still on v0.3 or earlier, work
-through the [v0.3 migration page](https://v0-3-legacy.nextbridge.pages.dev/en/migrate)
-first — migration steps are meant to be applied one release at a time.
+This page covers **v0.3 → v0.4** only. If you are still on v0.3 or earlier, work through the [v0.3 migration page](https://v0-3-legacy.nextbridge.pages.dev/en/migrate) first — migration steps are meant to be applied one release at a time.
 
 中文版见 [迁移到 v0.4](/zh/migrate)。
 :::

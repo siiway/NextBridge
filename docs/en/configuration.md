@@ -235,11 +235,7 @@ NextBridge uses SQLAlchemy for database operations, which supports multiple data
 :::
 
 ::: tip PostgreSQL driver
-  NextBridge ships `psycopg2-binary`, so a bare `postgresql://` URL is rewritten to
-  `postgresql+psycopg2://` automatically (SQLAlchemy 2.1 would otherwise pick the
-  psycopg 3 driver, which is not installed). Writing the driver explicitly is
-  still fine, and any other driver you install yourself — for example
-  `postgresql+psycopg://` — is used as given.
+  NextBridge ships `psycopg2-binary`, so a bare `postgresql://` URL is rewritten to `postgresql+psycopg2://` automatically (SQLAlchemy 2.1 would otherwise pick the psycopg 3 driver, which is not installed). Writing the driver explicitly is still fine, and any other driver you install yourself — for example `postgresql+psycopg://` — is used as given.
 :::
 
 ::: warning Connection Pooling

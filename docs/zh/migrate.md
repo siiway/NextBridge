@@ -5,9 +5,7 @@ title: 迁移到 v0.4
 # 迁移到 v0.4
 
 ::: tip 从更老的版本升级？
-本页只覆盖 **v0.3 → v0.4**。如果你还在 v0.3 或更早，请先完成
-[v0.3 迁移页](https://v0-3-legacy.nextbridge.pages.dev/zh/migrate) —— 迁移步骤需要
-逐级应用。
+本页只覆盖 **v0.3 → v0.4**。如果你还在 v0.3 或更早，请先完成 [v0.3 迁移页](https://v0-3-legacy.nextbridge.pages.dev/zh/migrate) —— 迁移步骤需要逐级应用。
 
 English version: [Migrating to v0.4](/en/migrate)。
 :::

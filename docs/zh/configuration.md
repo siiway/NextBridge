@@ -235,9 +235,7 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
 :::
 
 ::: tip PostgreSQL 驱动
-  NextBridge 只内置了 `psycopg2-binary`，因此裸写 `postgresql://` 会被自动改写为
-  `postgresql+psycopg2://`（SQLAlchemy 2.1 默认会选 psycopg 3 驱动，而它并未安装）。
-  显式写出驱动同样可用；你自己安装的其它驱动（例如 `postgresql+psycopg://`）会按原样使用。
+  NextBridge 只内置了 `psycopg2-binary`，因此裸写 `postgresql://` 会被自动改写为`postgresql+psycopg2://`（SQLAlchemy 2.1 默认会选 psycopg 3 驱动，而它并未安装）。显式写出驱动同样可用；你自己安装的其它驱动（例如 `postgresql+psycopg://`）会按原样使用。
 :::
 
 ::: warning 连接池

@@ -10,8 +10,7 @@
 | `dev` | 开发集成分支 | 无文档部署；Docker 镜像 tag `unstable` |
 | `vX.Y-legacy` | 已冻结的历史版本文档 | 文档站分支别名 `vX-Y-legacy.<project>.pages.dev` |
 
-历史版本文档**不跟随代码 tag**，而是各自维护一条 `vX.Y-legacy` 分支。原因是
-Cloudflare Pages 的 Git 集成只响应分支推送，无法从 tag 触发构建。
+历史版本文档**不跟随代码 tag**，而是各自维护一条 `vX.Y-legacy` 分支。原因是 Cloudflare Pages 的 Git 集成只响应分支推送，无法从 tag 触发构建。
 
 现有历史分支：
 
@@ -28,8 +27,7 @@ Cloudflare Pages 的 Git 集成只响应分支推送，无法从 tag 触发构�
 
 ### 1. 写迁移页
 
-每个版本都要有一页 `/{en,zh}/migrate`，路径固定（不带版本号）。新版本的迁移页在
-`main` 上写，冻结时随文档一起进入 legacy 分支。
+每个版本都要有一页 `/{en,zh}/migrate`，路径固定（不带版本号）。新版本的迁移页在 `main` 上写，冻结时随文档一起进入 legacy 分支。
 
 内容要求：
 
@@ -64,8 +62,7 @@ Docker CI 从这个字段推导镜像内的构建版本（取 `major.minor`）�
 awk '/^## 0\.5\.0/{f=1} f&&/^## 0\.4\.0/{exit} f' CHANGELOG.md > /tmp/release-notes.md
 ```
 
-遵循 [Keep a Changelog](https://keepachangelog.com/)。1.0 之前不做旧版本兼容，
-破坏性变更必须写清楚 —— release notes 是用户唯一的迁移依据。
+遵循 [Keep a Changelog](https://keepachangelog.com/)。1.0 之前不做旧版本兼容，破坏性变更必须写清楚 —— release notes 是用户唯一的迁移依据。
 
 ### 4. 合并、打 tag、发 Release
 
@@ -93,8 +90,7 @@ gh release create v0.5 --title "v0.5" --notes-file /tmp/release-notes.md
 
 ### 6. 冻结文档（发版后做）
 
-发版后把**该版本 tag 上的文档**冻结成历史分支（从 tag 开分支，代码与文档都停在
-发布那一刻）：
+发版后把**该版本 tag 上的文档**冻结成历史分支（从 tag 开分支，代码与文档都停在发布那一刻）：
 
 ```sh
 git checkout -b v0.4-legacy v0.4
@@ -136,8 +132,7 @@ git checkout -b v0.4-legacy v0.4
 
 ## 手动测试 Docker 构建
 
-`pull_request` 触发是**故意关闭**的，避免任何人通过开 PR 消耗构建额度。需要测试镜像
-时用下面任一方式，都只消耗自己的额度。
+`pull_request` 触发是**故意关闭**的，避免任何人通过开 PR 消耗构建额度。需要测试镜像时用下面任一方式，都只消耗自己的额度。
 
 ### 方式 A：`workflow_dispatch`（推荐，零改动）
 
@@ -183,8 +178,7 @@ pull_request:
   branches: [main, dev]
 ```
 
-代价是任何外部 PR 都会触发一次 amd64 + arm64 构建。若采用，建议再配合
-`paths-ignore` 与 `concurrency` 限制并发。
+代价是任何外部 PR 都会触发一次 amd64 + arm64 构建。若采用，建议再配合 `paths-ignore` 与 `concurrency` 限制并发。
 
 ## 文档站部署配置（Cloudflare Pages）
 
@@ -197,13 +191,11 @@ pull_request:
 | 输出目录 | `.vitepress/dist` |
 | 预览分支 | `v*-legacy`（其余可设为 None 或排除 `dependabot/*`） |
 
-`docs/public/_headers` 已给 `*.pages.dev` 加了 `X-Robots-Tag: noindex`，避免预览与
-历史版本被搜索引擎收录；生产域不受影响。
+`docs/public/_headers` 已给 `*.pages.dev` 加了 `X-Robots-Tag: noindex`，避免预览与历史版本被搜索引擎收录；生产域不受影响。
 
 ## 发布前的额外验证
 
-`pytest` 只跑 SQLite，覆盖不到 PostgreSQL 和可选依赖缺失这两条路径。改动依赖版本、
-或改动 `services/db.py` 等 PostgreSQL 相关代码后，发版前必须手动跑完下面两项。
+`pytest` 只跑 SQLite，覆盖不到 PostgreSQL 和可选依赖缺失这两条路径。改动依赖版本、或改动 `services/db.py` 等 PostgreSQL 相关代码后，发版前必须手动跑完下面两项。
 
 ### 1. 真实 PostgreSQL 迁移
 
@@ -229,8 +221,7 @@ init_db(); print('OK target=', db_target_version())
 docker rm -f nb-pg-test
 ```
 
-期望：日志里 `Applying migration 0 -> 1` 到 `7 -> 8` 全部出现，
-最后打印 `OK target= 8`，且引擎行显示 `postgresql+psycopg2`。
+期望：日志里 `Applying migration 0 -> 1` 到 `7 -> 8` 全部出现，最后打印 `OK target= 8`，且引擎行显示 `postgresql+psycopg2`。
 
 > 裸 `postgresql://` 会被自动改写为 `postgresql+psycopg2://`（SQLAlchemy 2.1 默认
 > 驱动是 psycopg 3，本项目只装 psycopg2）。如果你改动了这段归一化逻辑，务必用裸
@@ -238,8 +229,7 @@ docker rm -f nb-pg-test
 
 ### 2. 无 libmagic 环境下的 driver import
 
-CLI 启动时会 import 全部 driver 收集 `register_cli()` 钩子。任何顶层第三方导入都会
-让缺少该依赖的环境在启动时报错（WhatsApp 的 `neonize` 需要系统库 `libmagic`）。
+CLI 启动时会 import 全部 driver 收集 `register_cli()` 钩子。任何顶层第三方导入都会让缺少该依赖的环境在启动时报错（WhatsApp 的 `neonize` 需要系统库 `libmagic`）。
 
 ```sh
 docker run --rm -v "$PWD":/src:ro python:3.13-slim sh -c '
@@ -266,5 +256,4 @@ print(\"failed:\", bad)
 ## 已知限制
 
 **历史版本无法自动跟随 tag。** 若将来需要「tag 即文档快照」，只能改用 Direct
-Upload 项目 + CI 构建后 `wrangler pages deploy`，因为 Git 集成的项目不能切换成
-Direct Upload。
+Upload 项目 + CI 构建后 `wrangler pages deploy`，因为 Git 集成的项目不能切换成 Direct Upload。

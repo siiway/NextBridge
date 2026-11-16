@@ -7,8 +7,7 @@ Google Chat 驱动器通过**服务账号**和 **Google Chat REST API** 将 Goog
 ## 前置条件
 
 ::: tip
-你需要一个 **Google Workspace** 账号来进行配置，否则你会遇到
-![Google Chat API is only available to Google Workspace users](https://images.krnl64.win/api/get/6efb709e-7dd7-4183-9e25-225004f5695e.png)
+你需要一个 **Google Workspace** 账号来进行配置，否则你会遇到 ![Google Chat API is only available to Google Workspace users](https://images.krnl64.win/api/get/6efb709e-7dd7-4183-9e25-225004f5695e.png)
 :::
 
 1. 在 [console.cloud.google.com](https://console.cloud.google.com/) **创建 Google Cloud 项目**（或使用已有项目）。
