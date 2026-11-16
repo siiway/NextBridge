@@ -15,6 +15,7 @@
     - 用真实 PostgreSQL 跑一遍启动迁移，确认 8 个 migration 全部通过（见 `RELEASING.md`）
     - 在没有 `libmagic` 的干净容器里 import 所有 driver，确认无一失败（见 `RELEASING.md`）
 12. 文档（Markdown）中不要为了控制行宽手动换行：VitePress 会把源文件中的换行渲染为空格，影响观感。一个段落/列表项/表格单元格写成一整行
+13. Docker 镜像默认**不会**随 push 自动构建：只有当 push 到 `main`/`dev` 的 commit message 中包含 `<docker-build>`（或打 `v*` tag）时才会触发 Docker Image CI。用户要求"构建/发布镜像"时，默认即指在 commit message 中加上 `<docker-build>` 标记；CI 的 `paths-ignore` 也已排除纯文档/CI 改动
 
 # 可用的 driver api 文档
 

@@ -8,6 +8,8 @@ on:
     tags:
       # Release tags drive the versioned image tags below (type=semver).
       - "v*"
+    # Only build when explicitly requested: the head commit message must
+    # contain "<docker-build>". Avoids burning build minutes on every push.
     paths-ignore:
       - ".github/**"
       - "docs/**"
@@ -18,6 +20,7 @@ on:
   #     - 0.*-dev
   workflow_dispatch:
 
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -26,6 +29,11 @@ env:
 
 jobs:
   build:
+    # Gate: skip unless the head commit message contains "<docker-build>"
+    # (or the run was started manually via workflow_dispatch).
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          contains(github.event.head_commit.message, '<docker-build>') }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
