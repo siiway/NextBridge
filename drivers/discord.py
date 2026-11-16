@@ -19,6 +19,8 @@
 #
 # Note: webhook_url should be configured per channel in rules, not at instance level.
 
+from __future__ import annotations
+
 from drivers.registry import register
 import asyncio
 import io
@@ -30,10 +32,7 @@ import traceback
 from html import unescape
 from urllib.parse import urlparse
 
-import discord
-import aiohttp
-
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import field_validator
 
@@ -45,6 +44,11 @@ from services.util import LRUDict, get_data_path, mask_url_credentials
 from services.config_schema import _DriverConfig, CoercedBool
 from services.config import get_proxy, get as get_config, UNSET
 from drivers import BaseDriver
+
+# Third-party libraries are imported inside DiscordDriver.__init__ so this module
+# can be imported (e.g. for CLI hook discovery) without them.
+discord: Any = None
+aiohttp: Any = None
 
 
 class DiscordConfig(_DriverConfig):
@@ -156,6 +160,10 @@ def resolve_native_command_name(prefix: str) -> str:
 class DiscordDriver(BaseDriver[DiscordConfig]):
     def __init__(self, instance_id: str, config: DiscordConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global discord, aiohttp
+        import discord
+        import aiohttp
+
         self.config = config
         self._client: discord.Client | None = None
         self._tree: discord.app_commands.CommandTree | None = None
@@ -1037,18 +1045,24 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     "user_avatar": kwargs.get("user_avatar"),
                     "msg": kwargs.get("msg"),
                     "time": kwargs.get("time"),
+                    "nickname": kwargs.get("nickname"),
+                    "source_mentioned_self": kwargs.get("source_mentioned_self"),
                 }
                 try:
                     text = fmt.format(**ctx)
                 except KeyError as e:
-                    self.logger.warning(
-                        f"bot format missing key {e}; using incoming text"
-                    )
+                    self.logger.warning(f"format missing key {e}; using incoming text")
                 else:
                     text, parsed_rich_header = parse_richheader_tag(text)
                     if parsed_rich_header is not None:
                         parsed_rich_header["avatar"] = kwargs.get("user_avatar") or ""
                         kwargs["rich_header"] = parsed_rich_header
+                    elif not is_webhook_send:
+                        kwargs.pop("rich_header", None)
+
+                # Recompute cqface presence: the template may introduce tokens
+                # that were absent from the incoming text.
+                has_cqface = bool(re.search(r":cqface\d+:", text))
 
         # Note: webhook_msg_format and bot_msg_format are handled by bridge.py
         # The 'text' parameter passed here is already formatted
