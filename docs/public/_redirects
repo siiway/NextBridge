@@ -1,0 +1,35 @@
+# NextBridge docs redirects.
+#
+# This deployment serves the latest release line at /en/* and /zh/*. Older
+# releases live at their own Pages branch alias, and the QQ face GIFs moved to
+# cqface.p.wyf9.top. Everything below keeps previously published URLs working.
+#
+# Static rules come first, then splat rules (Cloudflare applies the top-most
+# matching rule, and recommends static before dynamic).
+
+# ── Bare language roots ──────────────────────────────────────────────────
+/en  /en/  301
+/zh  /zh/  301
+
+# ── Bare page paths (no language) go to the English site ─────────────────
+/getting-started   /en/getting-started   301
+/configuration     /en/configuration     301
+/rules             /en/rules             301
+/user-commands     /en/user-commands     301
+/platform-support  /en/platform-support  301
+/plugins           /en/plugins           301
+/admin-api         /en/admin-api         301
+
+# ── Current release: drop the /vX.Y segment ──────────────────────────────
+/en/v0.4/*  /en/:splat  301
+/zh/v0.4/*  /zh/:splat  301
+
+# ── Previous release: hand off to its own deployment ─────────────────────
+/en/v0.3/*  https://v0-3-legacy.nextbridge.pages.dev/en/:splat  301
+/zh/v0.3/*  https://v0-3-legacy.nextbridge.pages.dev/zh/:splat  301
+
+# ── QQ face GIFs moved to the dedicated cqface repo ──────────────────────
+/db/cqface-gif/*  https://cqface.p.wyf9.top/dist/:splat  301
+
+# ── Legacy bare driver paths ─────────────────────────────────────────────
+/drivers/*  /en/drivers/:splat  301

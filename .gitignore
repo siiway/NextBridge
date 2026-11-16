@@ -15,20 +15,22 @@ logs/
 # Configs
 data/
 
-# Document related
-docs/
-
-# claude
+# Claude
 .claude/
 
 # ruff
 .ruff_cache/
 
+# UV
 .uv-cache/
 
 # nix and direnv
 .direnv/
 result
 
-# 本地 PostgreSQL 数据目录
+# Local PostgreSQL Data
 .pgdata/
+
+# Documentation site (VitePress)
+docs/node_modules/
+docs/.vitepress/cache/
