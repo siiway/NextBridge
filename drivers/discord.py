@@ -1019,8 +1019,14 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         # Bridge formats by expected send path. If we switch from webhook to bot
         # (e.g. reply bridging), re-apply bot formatting here so bot_msg_format/
         # msg_format and richheader still work.
-        if force_bot and self._send_method == "webhook" and webhook_url is not None:
-            fmt = kwargs.get("bot_msg_format") or kwargs.get("msg_format")
+        if is_webhook_send or (
+            force_bot and self._send_method == "webhook" and webhook_url is not None
+        ):
+            fmt = (
+                kwargs.get("webhook_msg_format")
+                if is_webhook_send
+                else (kwargs.get("bot_msg_format") or kwargs.get("msg_format"))
+            )
             if isinstance(fmt, str) and fmt:
                 username_value = kwargs.get("username", "")
                 if isinstance(username_value, str):
@@ -1039,18 +1045,27 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     "user_avatar": kwargs.get("user_avatar"),
                     "msg": kwargs.get("msg"),
                     "time": kwargs.get("time"),
+                    "nickname": kwargs.get("nickname"),
+                    "source_mentioned_self": kwargs.get("source_mentioned_self"),
                 }
                 try:
                     text = fmt.format(**ctx)
                 except KeyError as e:
-                    self.logger.warning(
-                        f"bot format missing key {e}; using incoming text"
-                    )
+                    self.logger.warning(f"format missing key {e}; using incoming text")
                 else:
                     text, parsed_rich_header = parse_richheader_tag(text)
                     if parsed_rich_header is not None:
                         parsed_rich_header["avatar"] = kwargs.get("user_avatar") or ""
                         kwargs["rich_header"] = parsed_rich_header
+                    else:
+                        # The template replaced the bridge-formatted text: drop
+                        # any stale rich_header parsed from the old text, unless
+                        # the template itself provided one.
+                        kwargs.pop("rich_header", None)
+
+                # Recompute cqface presence: the template may introduce tokens
+                # that were absent from the incoming text.
+                has_cqface = bool(re.search(r":cqface\d+:", text))
 
         # Note: webhook_msg_format and bot_msg_format are handled by bridge.py
         # The 'text' parameter passed here is already formatted
@@ -1140,6 +1155,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             "user_avatar": kwargs.get("user_avatar"),
             "msg": kwargs.get("msg"),
             "time": kwargs.get("time"),
+            "nickname": kwargs.get("nickname"),
+            "source_mentioned_self": kwargs.get("source_mentioned_self"),
         }
 
         if title := kwargs.get("webhook_title"):
