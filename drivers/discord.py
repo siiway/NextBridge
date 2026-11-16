@@ -1057,7 +1057,10 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
                     if parsed_rich_header is not None:
                         parsed_rich_header["avatar"] = kwargs.get("user_avatar") or ""
                         kwargs["rich_header"] = parsed_rich_header
-                    elif not is_webhook_send:
+                    else:
+                        # The template replaced the bridge-formatted text: drop
+                        # any stale rich_header parsed from the old text, unless
+                        # the template itself provided one.
                         kwargs.pop("rich_header", None)
 
                 # Recompute cqface presence: the template may introduce tokens
@@ -1152,6 +1155,8 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             "user_avatar": kwargs.get("user_avatar"),
             "msg": kwargs.get("msg"),
             "time": kwargs.get("time"),
+            "nickname": kwargs.get("nickname"),
+            "source_mentioned_self": kwargs.get("source_mentioned_self"),
         }
 
         if title := kwargs.get("webhook_title"):
