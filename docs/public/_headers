@@ -1,0 +1,7 @@
+# Preview and historical builds are published on *.pages.dev. Keep them out of
+# search results; the production domain (nextbridge.siiway.org) stays indexable.
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
+
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex

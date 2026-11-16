@@ -16,7 +16,6 @@ logs/
 data/
 
 # Docs
-docs/
 node_modules/
 
 # claude
