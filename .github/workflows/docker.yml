@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - dev
+    tags:
+      # Release tags drive the versioned image tags below (type=semver).
+      - "v*"
     paths-ignore:
       - ".github/**"
       - "docs/**"
@@ -75,8 +78,12 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
+            # `{{major}}` would emit a bare `0` for every 0.x release, which
+            # is meaningless pre-1.0 — only publish it from v1 onwards.
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+            # `{{branch}}` is empty on tag pushes, which would produce an
+            # invalid tag like `-abc1234`; only emit sha tags for branches.
+            type=sha,prefix={{branch}}-,enable=${{ github.ref_type == 'branch' }}
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=unstable,enable=${{ github.ref_name == 'dev' }}
 
@@ -136,8 +143,12 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
+            # `{{major}}` would emit a bare `0` for every 0.x release, which
+            # is meaningless pre-1.0 — only publish it from v1 onwards.
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+            # `{{branch}}` is empty on tag pushes, which would produce an
+            # invalid tag like `-abc1234`; only emit sha tags for branches.
+            type=sha,prefix={{branch}}-,enable=${{ github.ref_type == 'branch' }}
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=unstable,enable=${{ github.ref_name == 'dev' }}
 
