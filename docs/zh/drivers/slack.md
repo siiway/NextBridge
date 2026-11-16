@@ -38,16 +38,8 @@ Slack 驱动器支持两种独立的接收模式和两种独立的发送模式�
 
 1. 前往 [api.slack.com/apps](https://api.slack.com/apps) 创建一个新应用（从头创建）。
 2. 在 **Socket Mode** 下启用 Socket Mode，并生成一个带有 `connections:write` 权限的**应用级令牌（App-level token）**，该令牌以 `xapp-` 开头。
-3. 在 **OAuth & Permissions** 下，为 Bot Token 添加以下权限范围：
-   - `channels:history`、`groups:history` — 读取消息
-   - `chat:write` — 发送消息
-   - `chat:write.customize` — 逐条消息自定义用户名和头像（可选）
-   - `files:read` — 下载接收到的文件
-   - `files:write` — 上传文件
-   - `users:read` — 解析显示名称
-4. 在 **Event Subscriptions** 下启用事件，并订阅：
-   - `message.channels` — 公开频道消息
-   - `message.groups` — 私有频道消息
+3. 在 **OAuth & Permissions** 下，为 Bot Token 添加以下权限范围： - `channels:history`、`groups:history` — 读取消息 - `chat:write` — 发送消息 - `chat:write.customize` — 逐条消息自定义用户名和头像（可选） - `files:read` — 下载接收到的文件 - `files:write` — 上传文件 - `users:read` — 解析显示名称
+4. 在 **Event Subscriptions** 下启用事件，并订阅： - `message.channels` — 公开频道消息 - `message.groups` — 私有频道消息
 5. 将应用安装到你的工作区，复制 **Bot User OAuth Token**（`xoxb-...`）。
 6. 在每个需要桥接的频道中邀请机器人（`/invite @YourBot`）。
 

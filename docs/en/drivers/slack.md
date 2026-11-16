@@ -38,16 +38,8 @@ To enable per-message identity, add `chat:write.customize` to your bot's OAuth s
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new app (from scratch).
 2. Under **Socket Mode**, enable Socket Mode and generate an **App-level token** with the `connections:write` scope. This token starts with `xapp-`.
-3. Under **OAuth & Permissions**, add these bot token scopes:
-   - `channels:history`, `groups:history` — read messages
-   - `chat:write` — send messages
-   - `chat:write.customize` — per-message username and avatar override (optional)
-   - `files:read` — download received files
-   - `files:write` — upload files
-   - `users:read` — resolve display names
-4. Under **Event Subscriptions**, enable events and subscribe to:
-   - `message.channels` — public channel messages
-   - `message.groups` — private channel messages
+3. Under **OAuth & Permissions**, add these bot token scopes: - `channels:history`, `groups:history` — read messages - `chat:write` — send messages - `chat:write.customize` — per-message username and avatar override (optional) - `files:read` — download received files - `files:write` — upload files - `users:read` — resolve display names
+4. Under **Event Subscriptions**, enable events and subscribe to: - `message.channels` — public channel messages - `message.groups` — private channel messages
 5. Install the app to your workspace. Copy the **Bot User OAuth Token** (`xoxb-...`).
 6. Invite the bot to each channel it should bridge (`/invite @YourBot`).
 

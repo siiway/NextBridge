@@ -198,21 +198,14 @@ plugins:
 
 ## Driver Plugins
 
-Drivers are distributed separately from general plugins. A pip-installed
-driver is auto-discovered if it advertises the `nextbridge.drivers` entry
-point group:
+Drivers are distributed separately from general plugins. A pip-installed driver is auto-discovered if it advertises the `nextbridge.drivers` entry point group:
 
 ```toml
 [project.entry-points."nextbridge.drivers"]
 myplatform = "nextbridge_myplatform.driver"
 ```
 
-The module must call `drivers.registry.register()` (and optionally
-`drivers.registry.register_cli()`) at import time. Alternatively, declare it
-in `global.plugins.drivers.external`, or drop a `.py` file into a directory
-listed in `global.plugins.paths` — see
-[Configuration → External drivers](./configuration#external-drivers) for the
-full priority table and examples.
+The module must call `drivers.registry.register()` (and optionally `drivers.registry.register_cli()`) at import time. Alternatively, declare it in `global.plugins.drivers.external`, or drop a `.py` file into a directory listed in `global.plugins.paths` — see [Configuration → External drivers](./configuration#external-drivers) for the full priority table and examples.
 
 ## Built-in Plugins
 

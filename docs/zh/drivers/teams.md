@@ -9,8 +9,7 @@ Teams 驱动器通过 **Azure Bot Framework** 将 Microsoft Teams 与其他平�
 1. 在 [Azure 门户](https://portal.azure.com/) 创建一个 **Azure Bot** 资源。
 2. 在机器人资源中，记录 **应用程序（客户端）ID**，并在 *证书和密钥* 下创建一个 **客户端密钥**。
 3. 在 *通道* 中，添加 **Microsoft Teams** 通道。
-4. 将机器人的 **消息传递终结点** 设置为 `https://<your-host>:<listen_port><listen_path>`。
-   终结点必须通过 HTTPS 公开可访问（开发阶段可使用 nginx 反向代理或 ngrok / Cloudflare Tunnel 等隧道工具）。
+4. 将机器人的 **消息传递终结点** 设置为 `https://<your-host>:<listen_port><listen_path>`。终结点必须通过 HTTPS 公开可访问（开发阶段可使用 nginx 反向代理或 ngrok / Cloudflare Tunnel 等隧道工具）。
 
 ## 配置项
 

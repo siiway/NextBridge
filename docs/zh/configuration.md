@@ -289,10 +289,7 @@ NextBridge 从四个来源加载驱动器（优先级高者覆盖低者）：
 | 本地文件 | 将 `<platform>.py` 放入 `plugins.paths` 列出的目录（文件名 = 平台名） |
 | 内置 | NextBridge 自带的 `drivers/<platform>.py` |
 
-驱动器模块必须在导入时调用 `drivers.registry.register()`，与内置驱动器使用
-相同契约。若名称与内置驱动器冲突，外部来源会**覆盖**内置。外部驱动器还会
-通过 `drivers.registry.register_cli()` 向 CLI 添加子命令（例如配对命令），
-这些子命令与内置驱动器一同在启动时发现。
+驱动器模块必须在导入时调用 `drivers.registry.register()`，与内置驱动器使用相同契约。若名称与内置驱动器冲突，外部来源会**覆盖**内置。外部驱动器还会通过 `drivers.registry.register_cli()` 向 CLI 添加子命令（例如配对命令），这些子命令与内置驱动器一同在启动时发现。
 
 Pip 包通过 `pyproject.toml` 声明驱动器：
 
@@ -301,9 +298,7 @@ Pip 包通过 `pyproject.toml` 声明驱动器：
 myplatform = "nextbridge_myplatform.driver"
 ```
 
-随后将包安装到 NextBridge 运行的环境中。对于镜像文件系统只读或临时的
-Docker 部署，建议安装到挂载的数据目录并通过 `PYTHONPATH` 暴露（入口点
-元数据在容器重建后依然有效）：
+随后将包安装到 NextBridge 运行的环境中。对于镜像文件系统只读或临时的 Docker 部署，建议安装到挂载的数据目录并通过 `PYTHONPATH` 暴露（入口点元数据在容器重建后依然有效）：
 
 ```bash
 docker run --rm -v ./data:/app/data -e NEXTBRIDGE_DATA_PATH=/app/data \
@@ -319,8 +314,7 @@ environment:
   - PYTHONPATH=/app/data/pylibs
 ```
 
-（直接 `pip install --no-deps nextbridge-myplatform` 到 `/app/.venv` 也可行，
-但安装内容位于容器层，容器重建后会丢失。）
+（直接 `pip install --no-deps nextbridge-myplatform` 到 `/app/.venv` 也可行，但安装内容位于容器层，容器重建后会丢失。）
 
 然后添加实例配置：
 

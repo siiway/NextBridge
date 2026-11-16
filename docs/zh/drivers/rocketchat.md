@@ -16,13 +16,7 @@ Rocket.Chat 驱动通过**外发 Webhook（Outgoing Webhook）**接收消息，�
 ### 2. 配置外发 Webhook（接收）
 
 1. 进入**管理 → 集成 → 新建集成 → 外发 WebHook**。
-2. 填写以下内容：
-   - **触发事件**：消息已发送
-   - **启用**：是
-   - **频道**：留空表示监听所有频道，或填写 `#channel-name` 限定范围
-   - **URL**：`http(s)://<服务器地址>:<listen_port><listen_path>`
-     例如：`https://bridge.example.com:8093/rocketchat/webhook`
-   - **令牌**：生成或手动输入一个密钥，并复制到配置文件的 `webhook_token` 字段
+2. 填写以下内容： - **触发事件**：消息已发送 - **启用**：是 - **频道**：留空表示监听所有频道，或填写 `#channel-name` 限定范围 - **URL**：`http(s)://<服务器地址>:<listen_port><listen_path>` 例如：`https://bridge.example.com:8093/rocketchat/webhook` - **令牌**：生成或手动输入一个密钥，并复制到配置文件的 `webhook_token` 字段
 3. 保存集成配置。
 
 ### 3a. API 发送模式——无需额外设置

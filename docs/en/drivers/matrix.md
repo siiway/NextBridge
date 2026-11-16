@@ -26,8 +26,7 @@ Add under `matrix.<instance_id>` in your config file:
 | `enable_e2e` | No | `false` | Enable end-to-end encryption support for encrypted rooms. When enabled, the bot will automatically encrypt messages sent to encrypted rooms and decrypt received messages. |
 | `store_path` | No | `data/e2e` | Path to store encryption keys (required if `enable_e2e` is `true`). This directory will be created if it doesn't exist. |
 
-\* Either `password` or `access_token` must be provided.
-\** Required when `enable_e2e` is `true`.
+\* Either `password` or `access_token` must be provided. \** Required when `enable_e2e` is `true`.
 
 ```json
 {

@@ -14,10 +14,7 @@ The Google Chat driver bridges Google Chat spaces with the rest of your platform
 1. **Create a Google Cloud project** at [console.cloud.google.com](https://console.cloud.google.com/) (or use an existing one).
 2. **Enable the Google Chat API**: go to *APIs & Services → Library*, search for "Google Chat API", and enable it.
 3. **Create a service account**: go to *IAM & Admin → Service Accounts*, create a new account, and download a JSON key file.
-4. **Configure the Chat app**: go to *APIs & Services → Google Chat API → Configuration* and fill in:
-   - **App name**, **Avatar URL**, **Description** (required fields)
-   - Under **Connection settings**, select **HTTP endpoint URL** and enter your bot's public URL, e.g. `https://example.com/google-chat/events`.
-   - Under **Visibility**, choose which users or groups can install the bot.
+4. **Configure the Chat app**: go to *APIs & Services → Google Chat API → Configuration* and fill in: - **App name**, **Avatar URL**, **Description** (required fields) - Under **Connection settings**, select **HTTP endpoint URL** and enter your bot's public URL, e.g. `https://example.com/google-chat/events`. - Under **Visibility**, choose which users or groups can install the bot.
 5. **Add the bot to a space**: In Google Chat, create or open a space, click *Add people & apps*, and add your bot by name.
 
 > The HTTP endpoint must be publicly reachable over HTTPS. Use a reverse proxy (nginx, Caddy) or a tunnel (ngrok / Cloudflare Tunnel) for development.

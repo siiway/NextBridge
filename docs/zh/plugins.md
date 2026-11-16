@@ -198,19 +198,14 @@ plugins:
 
 ## 驱动器插件
 
-驱动器与通用插件分开分发。若 pip 安装的驱动器声明了 `nextbridge.drivers`
-入口点组，将被自动发现：
+驱动器与通用插件分开分发。若 pip 安装的驱动器声明了 `nextbridge.drivers` 入口点组，将被自动发现：
 
 ```toml
 [project.entry-points."nextbridge.drivers"]
 myplatform = "nextbridge_myplatform.driver"
 ```
 
-该模块必须在导入时调用 `drivers.registry.register()`（以及可选的
-`drivers.registry.register_cli()`）。也可以在
-`global.plugins.drivers.external` 中显式声明，或将 `.py` 文件放入
-`global.plugins.paths` 列出的目录——完整的优先级表与示例见
-[配置 → 外部驱动器](./configuration#外部驱动器)。
+该模块必须在导入时调用 `drivers.registry.register()`（以及可选的 `drivers.registry.register_cli()`）。也可以在 `global.plugins.drivers.external` 中显式声明，或将 `.py` 文件放入 `global.plugins.paths` 列出的目录——完整的优先级表与示例见 [配置 → 外部驱动器](./configuration#外部驱动器)。
 
 ## 内置插件
 

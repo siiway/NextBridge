@@ -14,8 +14,7 @@ No extra Python packages are needed beyond what NextBridge already uses.
 
 ### 2. Configure the webhook URL
 
-1. In the bot settings, set the **Webhook URL** to your NextBridge endpoint, e.g.
-   `https://example.com/vocechat/webhook`
+1. In the bot settings, set the **Webhook URL** to your NextBridge endpoint, e.g. `https://example.com/vocechat/webhook`
 2. VoceChat will send a GET request to verify the URL returns HTTP 200. NextBridge handles this automatically.
 
 ### 3. Add the bot to channels

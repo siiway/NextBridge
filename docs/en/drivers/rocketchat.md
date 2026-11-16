@@ -16,13 +16,7 @@ The Rocket.Chat driver receives messages via a **Outgoing Webhook** and supports
 ### 2. Configure an Outgoing Webhook (receive)
 
 1. Go to **Administration → Integrations → New Integration → Outgoing WebHook**.
-2. Set:
-   - **Event Trigger**: Message Sent
-   - **Enabled**: Yes
-   - **Channel**: leave blank to catch all channels, or enter `#channel-name` to limit scope
-   - **URLs**: `http(s)://<your-host>:<listen_port><listen_path>`
-     e.g. `https://bridge.example.com:8093/rocketchat/webhook`
-   - **Token**: generate or type a secret — copy it to `webhook_token` in your config
+2. Set: - **Event Trigger**: Message Sent - **Enabled**: Yes - **Channel**: leave blank to catch all channels, or enter `#channel-name` to limit scope - **URLs**: `http(s)://<your-host>:<listen_port><listen_path>` e.g. `https://bridge.example.com:8093/rocketchat/webhook` - **Token**: generate or type a secret — copy it to `webhook_token` in your config
 3. Save the integration.
 
 ### 3a. API send mode — no extra setup needed

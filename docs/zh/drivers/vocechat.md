@@ -16,8 +16,7 @@ VoceChat 驱动器将自托管的 [VoceChat](https://voce.chat/) 服务器与其
 
 ### 2. 配置 Webhook URL
 
-1. 在机器人设置中，将 **Webhook URL** 设置为 NextBridge 端点地址，例如：
-   `https://example.com/vocechat/webhook`
+1. 在机器人设置中，将 **Webhook URL** 设置为 NextBridge 端点地址，例如： `https://example.com/vocechat/webhook`
 2. VoceChat 会发送 GET 请求来验证 URL 是否返回 HTTP 200，NextBridge 自动处理此验证。
 
 ### 3. 将机器人添加到频道

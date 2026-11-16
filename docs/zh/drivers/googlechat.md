@@ -14,10 +14,7 @@ Google Chat 驱动器通过**服务账号**和 **Google Chat REST API** 将 Goog
 1. 在 [console.cloud.google.com](https://console.cloud.google.com/) **创建 Google Cloud 项目**（或使用已有项目）。
 2. **启用 Google Chat API**：进入 *API 和服务 → 库*，搜索"Google Chat API"并启用。
 3. **创建服务账号**：进入 *IAM 和管理 → 服务账号*，创建新账号并下载 JSON 密钥文件。
-4. **配置 Chat 应用**：进入 *API 和服务 → Google Chat API → 配置* 并填写：
-   - **应用名称**、**头像 URL**、**描述**（必填字段）
-   - 在 **连接设置** 下选择 **HTTP 端点 URL** 并填入机器人的公开地址，例如 `https://example.com/google-chat/events`。
-   - 在 **可见性** 下选择可安装该机器人的用户或群组。
+4. **配置 Chat 应用**：进入 *API 和服务 → Google Chat API → 配置* 并填写： - **应用名称**、**头像 URL**、**描述**（必填字段） - 在 **连接设置** 下选择 **HTTP 端点 URL** 并填入机器人的公开地址，例如 `https://example.com/google-chat/events`。 - 在 **可见性** 下选择可安装该机器人的用户或群组。
 5. **将机器人添加到空间**：在 Google Chat 中创建或打开一个空间，点击 *添加用户和应用*，按名称添加机器人。
 
 > HTTP 端点必须通过 HTTPS 公开可访问。开发阶段可使用 nginx/Caddy 反向代理或 ngrok / Cloudflare Tunnel 隧道工具。

@@ -291,10 +291,7 @@ NextBridge loads third-party drivers from four sources (higher priority wins):
 | Local file | Drop a `<platform>.py` into a directory listed in `plugins.paths` (file stem = platform name) |
 | Built-in | `drivers/<platform>.py` shipped with NextBridge |
 
-A driver module must call `drivers.registry.register()` at import time — the
-same contract as built-in drivers. If a name collides with a built-in driver,
-the external source **overrides** it. External drivers also add their
-`register_cli()` subcommands to the CLI (e.g. pairing commands).
+A driver module must call `drivers.registry.register()` at import time — the same contract as built-in drivers. If a name collides with a built-in driver, the external source **overrides** it. External drivers also add their `register_cli()` subcommands to the CLI (e.g. pairing commands).
 
 Pip packages advertise a driver via `pyproject.toml`:
 
@@ -303,10 +300,7 @@ Pip packages advertise a driver via `pyproject.toml`:
 myplatform = "nextbridge_myplatform.driver"
 ```
 
-Then install the package into the environment NextBridge runs in. For a Docker
-deployment whose image filesystem is read-only or ephemeral, install into the
-mounted data directory and expose it via `PYTHONPATH` (entry-point metadata
-survives container recreates):
+Then install the package into the environment NextBridge runs in. For a Docker deployment whose image filesystem is read-only or ephemeral, install into the mounted data directory and expose it via `PYTHONPATH` (entry-point metadata survives container recreates):
 
 ```bash
 docker run --rm -v ./data:/app/data -e NEXTBRIDGE_DATA_PATH=/app/data \
@@ -322,9 +316,7 @@ environment:
   - PYTHONPATH=/app/data/pylibs
 ```
 
-(`pip install --no-deps nextbridge-myplatform` directly into `/app/.venv` also
-works, but the install lives in the container layer and is lost when the
-container is recreated.)
+(`pip install --no-deps nextbridge-myplatform` directly into `/app/.venv` also works, but the install lives in the container layer and is lost when the container is recreated.)
 
 Then add the instance config:
 
@@ -336,8 +328,7 @@ Then add the instance config:
 }
 ```
 
-If you don't want to rely on entry-point auto-discovery, pin the module
-explicitly:
+If you don't want to rely on entry-point auto-discovery, pin the module explicitly:
 
 ```json
 {
@@ -353,9 +344,7 @@ explicitly:
 }
 ```
 
-External drivers may add CLI subcommands via `drivers.registry.register_cli()`
-(e.g. `python main.py myplatform pair ...`); these are discovered at startup
-alongside built-in drivers.
+External drivers may add CLI subcommands via `drivers.registry.register_cli()` (e.g. `python main.py myplatform pair ...`); these are discovered at startup alongside built-in drivers.
 
 ### General Plugins
 
