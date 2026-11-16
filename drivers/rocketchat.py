@@ -41,12 +41,14 @@
 #   rc_alias  – Display name override  (e.g. "{user}")
 #   rc_avatar – Avatar URL override    (e.g. "{user_avatar}", must be HTTPS)
 
+from __future__ import annotations
+
+from typing import Any
+
 import json
 from drivers.registry import register
 import asyncio
 
-import aiohttp
-from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import model_validator
@@ -57,6 +59,12 @@ from services.config_schema import _DriverConfig
 from services.config import get_proxy, UNSET
 from services.util import LRUDict
 from drivers import BaseDriver
+
+
+# Third-party libraries are imported inside RocketChatDriver.__init__ so this module can be
+# imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+ProxyConnector: Any = None
 
 
 class RocketChatConfig(_DriverConfig):
@@ -92,6 +100,10 @@ class RocketChatConfig(_DriverConfig):
 class RocketChatDriver(BaseDriver[RocketChatConfig]):
     def __init__(self, instance_id: str, config: RocketChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp, ProxyConnector
+        import aiohttp
+        from aiohttp_socks import ProxyConnector
+
         self._session: aiohttp.ClientSession | None = None
         self._username_cache: LRUDict[str, str] = LRUDict(maxsize=1000)
         self._proxy = get_proxy(config.proxy)

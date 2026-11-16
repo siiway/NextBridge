@@ -23,6 +23,8 @@
 #                           webhook events, or from the DingTalk developer
 #                           console for the group)
 
+from __future__ import annotations
+
 from drivers.registry import register
 import asyncio
 import base64
@@ -32,13 +34,6 @@ import json
 import time
 from typing import Any
 
-import aiohttp
-from alibabacloud_tea_openapi import models as open_api_models
-from alibabacloud_tea_util import models as util_models
-from alibabacloud_dingtalk.oauth2_1_0.client import Client as OAuthClient
-from alibabacloud_dingtalk.oauth2_1_0 import models as oauth_models
-from alibabacloud_dingtalk.robot_1_0.client import Client as RobotClient
-from alibabacloud_dingtalk.robot_1_0 import models as robot_models
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -48,6 +43,16 @@ from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message_format import apply_rich_header
 from drivers import BaseDriver
+
+# Third-party SDKs are imported inside DingTalkDriver.__init__ so this module can
+# be imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+open_api_models: Any = None
+util_models: Any = None
+OAuthClient: Any = None
+oauth_models: Any = None
+RobotClient: Any = None
+robot_models: Any = None
 
 _UPLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/upload"
 
@@ -68,6 +73,17 @@ _DINGTALK_ENDPOINT = "api.dingtalk.com"
 class DingTalkDriver(BaseDriver[DingTalkConfig]):
     def __init__(self, instance_id: str, config: DingTalkConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp
+        global open_api_models, util_models
+        global OAuthClient, oauth_models, RobotClient, robot_models
+        import aiohttp
+        from alibabacloud_tea_openapi import models as open_api_models
+        from alibabacloud_tea_util import models as util_models
+        from alibabacloud_dingtalk.oauth2_1_0.client import Client as OAuthClient
+        from alibabacloud_dingtalk.oauth2_1_0 import models as oauth_models
+        from alibabacloud_dingtalk.robot_1_0.client import Client as RobotClient
+        from alibabacloud_dingtalk.robot_1_0 import models as robot_models
+
         self._oauth_client: OAuthClient | None = None
         self._robot_client: RobotClient | None = None
         self._session: aiohttp.ClientSession | None = None

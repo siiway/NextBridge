@@ -29,27 +29,17 @@
 # Rule channel keys:
 #   chat_id – Feishu open chat ID, e.g. "oc_xxxxxxxxxxxxxxxxxx"
 
+from __future__ import annotations
+
 import asyncio
 import io
 import json
 import logging
 import re
 import threading
+from typing import Any
 
-import lark_oapi as lark
 from fastapi import FastAPI, Request, Response
-from lark_oapi.api.contact.v3 import GetUserRequest
-from lark_oapi.api.im.v1 import (
-    CreateFileRequest,
-    CreateFileRequestBody,
-    CreateImageRequest,
-    CreateImageRequestBody,
-    CreateMessageRequest,
-    CreateMessageRequestBody,
-    GetMessageResourceRequest,
-    ReplyMessageRequest,
-    ReplyMessageRequestBody,
-)
 
 from drivers import BaseDriver
 from drivers.registry import register
@@ -59,6 +49,20 @@ from services.config_schema import _DriverConfig
 from services.message_format import apply_rich_header
 from services.message import Attachment, NormalizedMessage
 from services.util import LRUDict
+
+# lark-oapi is imported inside FeishuDriver.__init__ so this module can be
+# imported (e.g. for CLI hook discovery) without it.
+lark: Any = None
+GetUserRequest: Any = None
+CreateFileRequest: Any = None
+CreateFileRequestBody: Any = None
+CreateImageRequest: Any = None
+CreateImageRequestBody: Any = None
+CreateMessageRequest: Any = None
+CreateMessageRequestBody: Any = None
+GetMessageResourceRequest: Any = None
+ReplyMessageRequest: Any = None
+ReplyMessageRequestBody: Any = None
 
 
 class FeishuConfig(_DriverConfig):
@@ -98,6 +102,27 @@ class _LarkLogBridge(logging.Handler):
 class FeishuDriver(BaseDriver[FeishuConfig]):
     def __init__(self, instance_id: str, config: FeishuConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global lark
+        global GetUserRequest
+        global CreateFileRequest, CreateFileRequestBody
+        global CreateImageRequest, CreateImageRequestBody
+        global CreateMessageRequest, CreateMessageRequestBody
+        global GetMessageResourceRequest
+        global ReplyMessageRequest, ReplyMessageRequestBody
+        import lark_oapi as lark
+        from lark_oapi.api.contact.v3 import GetUserRequest
+        from lark_oapi.api.im.v1 import (
+            CreateFileRequest,
+            CreateFileRequestBody,
+            CreateImageRequest,
+            CreateImageRequestBody,
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+            GetMessageResourceRequest,
+            ReplyMessageRequest,
+            ReplyMessageRequestBody,
+        )
+
         self._client: lark.Client | None = None
         self._handler = None
         self._loop: asyncio.AbstractEventLoop | None = None

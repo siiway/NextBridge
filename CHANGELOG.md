@@ -90,6 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `ModuleNotFoundError: psycopg` at startup. NextBridge rewrites
   `postgresql://` to `postgresql+psycopg2://`, leaving URLs that already name a
   driver untouched.
+- **Optional driver dependencies load lazily.** Driver modules import their
+  third-party libraries inside the code that needs them, so the CLI's driver
+  discovery no longer fails when an optional dependency (or a system library it
+  needs, such as `libmagic` for WhatsApp) is missing on the host.
 
 ### Dependencies
 

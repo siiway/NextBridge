@@ -21,21 +21,37 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-
-from neonize.aioze.client import NewAClient
-from neonize.aioze.events import (
-    ConnectedEv,
-    DisconnectedEv,
-    MessageEv,
-    PairStatusEv,
-    QREv,
-)
-from neonize.utils.jid import Jid2String, build_jid
+from typing import TYPE_CHECKING
 
 from drivers import BaseDriver
 from drivers.registry import register
 from services.message import Attachment, NormalizedMessage
 from services.config_schema import _DriverConfig
+
+if TYPE_CHECKING:  # annotations only — never imported at runtime
+    from neonize.aioze.client import NewAClient
+    from neonize.aioze.events import MessageEv
+
+# neonize is imported lazily, inside the code paths that actually need it.
+# Importing it costs real work (it loads libmagic through `magic`) and only the
+# instances that are actually configured for WhatsApp should pay for it — the
+# startup CLI hook discovery imports every driver module.
+_NEONIZE_LIB_IMPORT_ERROR = (
+    "neonize is not importable — install it with `uv add neonize`, and make "
+    "sure libmagic is present (Debian/Ubuntu: apt install libmagic1, "
+    "Fedora/RHEL: dnf install file-libs, macOS: brew install libmagic)"
+)
+
+
+def _neonize():
+    """Import neonize lazily and fail with an actionable message."""
+    try:
+        from neonize.aioze import client as neonize_client
+        from neonize.aioze import events as neonize_events
+        from neonize.utils import jid as neonize_jid
+    except Exception as exc:  # pragma: no cover - depends on host libs
+        raise RuntimeError(f"{_NEONIZE_LIB_IMPORT_ERROR}: {exc}") from exc
+    return neonize_client, neonize_events, neonize_jid
 
 
 class WhatsAppConfig(_DriverConfig):
@@ -45,9 +61,17 @@ class WhatsAppConfig(_DriverConfig):
 class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
     def __init__(self, instance_id: str, config: WhatsAppConfig, bridge):
         super().__init__(instance_id, config, bridge)
-        self._client: NewAClient | None = None
+        self._client = None
 
     async def start(self):
+        neonize_client, neonize_events, _ = _neonize()
+        NewAClient = neonize_client.NewAClient
+        ConnectedEv = neonize_events.ConnectedEv
+        DisconnectedEv = neonize_events.DisconnectedEv
+        MessageEv = neonize_events.MessageEv
+        PairStatusEv = neonize_events.PairStatusEv
+        QREv = neonize_events.QREv
+
         self.bridge.register_sender(self.instance_id, self.send)
 
         db_path = self.config.storage_dir or str(
@@ -92,6 +116,9 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
             pass
 
     async def _handle(self, evt: MessageEv) -> None:
+        _, _, neonize_jid = _neonize()
+        Jid2String = neonize_jid.Jid2String
+
         src = evt.Info.MessageSource
         if src.IsFromMe:
             return
@@ -164,7 +191,8 @@ class WhatsAppDriver(BaseDriver[WhatsAppConfig]):
         user, server = (
             chat_id.split("@", 1) if "@" in chat_id else (chat_id, "s.whatsapp.net")
         )
-        jid = build_jid(user, server)
+        _, _, neonize_jid = _neonize()
+        jid = neonize_jid.build_jid(user, server)
 
         body = text or ""
         if attachments:

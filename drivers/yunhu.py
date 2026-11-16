@@ -18,12 +18,14 @@
 #   chat_id   – Yunhu chat (group) ID
 #   chat_type – "group" or "user" (default "group")
 
+from __future__ import annotations
+
+from typing import Any
+
 from drivers.registry import register
 import asyncio
 from urllib.parse import quote, urlparse
 
-import aiohttp
-from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -33,6 +35,12 @@ from services.config_schema import _DriverConfig
 from services.message_format import apply_rich_header
 from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+
+
+# Third-party libraries are imported inside YunhuDriver.__init__ so this module can be
+# imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+ProxyConnector: Any = None
 
 
 class YunhuConfig(_DriverConfig):
@@ -58,6 +66,10 @@ _PROXY_MEDIA_SUFFIXES = (".discordapp.com", ".discordapp.net", ".discord.com")
 class YunhuDriver(BaseDriver[YunhuConfig]):
     def __init__(self, instance_id: str, config: YunhuConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp, ProxyConnector
+        import aiohttp
+        from aiohttp_socks import ProxyConnector
+
         self._token: str = config.token
         self._session: aiohttp.ClientSession | None = None
         self._proxy = get_proxy(config.proxy)

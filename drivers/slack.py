@@ -30,17 +30,10 @@ import hashlib
 import hmac as _hmac
 import json
 import time
-from typing import Literal
+from typing import Any, Literal
 
-import aiohttp
-from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-from slack_sdk.socket_mode.aiohttp import SocketModeClient
-from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
-from slack_sdk.socket_mode.request import SocketModeRequest
-from slack_sdk.socket_mode.response import SocketModeResponse
-from slack_sdk.web.async_client import AsyncWebClient
 
 from drivers import BaseDriver
 from drivers.registry import register
@@ -50,6 +43,16 @@ from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
 from services.util import LRUDict
+
+# Third-party libraries are imported inside SlackDriver.__init__ so this module
+# can be imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+ProxyConnector: Any = None
+SocketModeClient: Any = None
+AsyncBaseSocketModeClient: Any = None
+SocketModeRequest: Any = None
+SocketModeResponse: Any = None
+AsyncWebClient: Any = None
 
 
 class SlackConfig(_DriverConfig):
@@ -88,6 +91,17 @@ def _verify_slack_signature(signing_secret: str, headers, body: bytes) -> bool:
 class SlackDriver(BaseDriver[SlackConfig]):
     def __init__(self, instance_id: str, config: SlackConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp, ProxyConnector
+        global SocketModeClient, AsyncBaseSocketModeClient
+        global SocketModeRequest, SocketModeResponse, AsyncWebClient
+        import aiohttp
+        from aiohttp_socks import ProxyConnector
+        from slack_sdk.socket_mode.aiohttp import SocketModeClient
+        from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
+        from slack_sdk.socket_mode.request import SocketModeRequest
+        from slack_sdk.socket_mode.response import SocketModeResponse
+        from slack_sdk.web.async_client import AsyncWebClient
+
         self._web: AsyncWebClient | None = None
         self._sm: SocketModeClient | None = None
         self._session: aiohttp.ClientSession | None = None

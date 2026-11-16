@@ -20,14 +20,15 @@
 #   recipient – Phone number for 1-on-1 chats (e.g. "+12025551234")
 #               or "group.<base64id>" for group chats
 
+from __future__ import annotations
+
+from typing import Any
+
 from drivers.registry import register
 import asyncio
 import base64
 import json
 import mimetypes
-
-import aiohttp
-from aiohttp_socks import ProxyConnector
 
 import services.media as media
 from services.message import Attachment, NormalizedMessage
@@ -35,6 +36,12 @@ from services.config_schema import _DriverConfig
 from services.message_format import apply_rich_header
 from services.config import get_proxy, UNSET
 from drivers import BaseDriver
+
+
+# Third-party libraries are imported inside SignalDriver.__init__ so this module can be
+# imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+ProxyConnector: Any = None
 
 
 class SignalConfig(_DriverConfig):
@@ -47,6 +54,10 @@ class SignalConfig(_DriverConfig):
 class SignalDriver(BaseDriver[SignalConfig]):
     def __init__(self, instance_id: str, config: SignalConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp, ProxyConnector
+        import aiohttp
+        from aiohttp_socks import ProxyConnector
+
         self._session: aiohttp.ClientSession | None = None
         self._proxy = get_proxy(config.proxy)
 

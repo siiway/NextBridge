@@ -18,33 +18,11 @@
 # Rule channel keys:
 #   room_id – Matrix room ID, e.g. "!abc123:matrix.org"
 
-from pathlib import Path
-from typing import cast
+from __future__ import annotations
 
-import fresholm.import_hook  # noqa: F401
-from aiohttp import ClientSession, TCPConnector
-from aiohttp_socks import ProxyConnector
-from mautrix.api import HTTPAPI
-from mautrix.client import Client
-from mautrix.client.syncer import EventHandler
-from mautrix.crypto import OlmMachine
-from mautrix.types import (
-    AudioInfo,
-    ContentURI,
-    EventType,
-    FileInfo,
-    ImageInfo,
-    InReplyTo,
-    LoginType,
-    MediaMessageEventContent,
-    MessageEvent,
-    MessageType,
-    RelatesTo,
-    RoomID,
-    TextMessageEventContent,
-    UserID,
-    VideoInfo,
-)
+from pathlib import Path
+from typing import Any, cast
+
 from pydantic import model_validator
 
 from drivers import BaseDriver
@@ -54,6 +32,31 @@ from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
+
+# mautrix (and aiohttp / fresholm) are imported inside MatrixDriver.__init__ so
+# this module can be imported (e.g. for CLI hook discovery) without them.
+ClientSession: Any = None
+TCPConnector: Any = None
+ProxyConnector: Any = None
+HTTPAPI: Any = None
+Client: Any = None
+EventHandler: Any = None
+OlmMachine: Any = None
+AudioInfo: Any = None
+ContentURI: Any = None
+EventType: Any = None
+FileInfo: Any = None
+ImageInfo: Any = None
+InReplyTo: Any = None
+LoginType: Any = None
+MediaMessageEventContent: Any = None
+MessageEvent: Any = None
+MessageType: Any = None
+RelatesTo: Any = None
+RoomID: Any = None
+TextMessageEventContent: Any = None
+UserID: Any = None
+VideoInfo: Any = None
 
 
 class MatrixConfig(_DriverConfig):
@@ -80,12 +83,14 @@ class MatrixConfig(_DriverConfig):
         return self
 
 
-_FILE_TYPES = {
-    "image": MessageType.IMAGE,
-    "video": MessageType.VIDEO,
-    "voice": MessageType.AUDIO,
-    "file": MessageType.FILE,
-}
+def _file_types() -> dict[str, Any]:
+    """Message-type mapping for outgoing media (built lazily)."""
+    return {
+        "image": MessageType.IMAGE,
+        "video": MessageType.VIDEO,
+        "voice": MessageType.AUDIO,
+        "file": MessageType.FILE,
+    }
 
 
 def _make_info(
@@ -103,6 +108,36 @@ def _make_info(
 class MatrixDriver(BaseDriver[MatrixConfig]):
     def __init__(self, instance_id: str, config: MatrixConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global ClientSession, TCPConnector, ProxyConnector
+        global HTTPAPI, Client, EventHandler, OlmMachine
+        global AudioInfo, ContentURI, EventType, FileInfo, ImageInfo, InReplyTo
+        global LoginType, MediaMessageEventContent, MessageEvent, MessageType
+        global RelatesTo, RoomID, TextMessageEventContent, UserID, VideoInfo
+        import fresholm.import_hook  # noqa: F401
+        from aiohttp import ClientSession, TCPConnector
+        from aiohttp_socks import ProxyConnector
+        from mautrix.api import HTTPAPI
+        from mautrix.client import Client
+        from mautrix.client.syncer import EventHandler
+        from mautrix.crypto import OlmMachine
+        from mautrix.types import (
+            AudioInfo,
+            ContentURI,
+            EventType,
+            FileInfo,
+            ImageInfo,
+            InReplyTo,
+            LoginType,
+            MediaMessageEventContent,
+            MessageEvent,
+            MessageType,
+            RelatesTo,
+            RoomID,
+            TextMessageEventContent,
+            UserID,
+            VideoInfo,
+        )
+
         self._client: Client | None = None
         self._crypto: OlmMachine | None = None
         self._proxy = get_proxy(config.proxy)
@@ -524,7 +559,7 @@ class MatrixDriver(BaseDriver[MatrixConfig]):
                     url=mxc_uri,
                     info=_make_info(att.type, mime, len(data_bytes)),
                     file_name=fname,
-                    file_type=_FILE_TYPES.get(att.type, MessageType.FILE),
+                    file_type=_file_types().get(att.type, MessageType.FILE),
                     relates_to=relates_obj,
                 )
             except Exception as e:

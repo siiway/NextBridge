@@ -19,6 +19,8 @@
 #
 # Note: webhook_url should be configured per channel in rules, not at instance level.
 
+from __future__ import annotations
+
 from drivers.registry import register
 import asyncio
 import io
@@ -30,10 +32,7 @@ import traceback
 from html import unescape
 from urllib.parse import urlparse
 
-import discord
-import aiohttp
-
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import field_validator
 
@@ -45,6 +44,11 @@ from services.util import LRUDict, get_data_path, mask_url_credentials
 from services.config_schema import _DriverConfig, CoercedBool
 from services.config import get_proxy, get as get_config, UNSET
 from drivers import BaseDriver
+
+# Third-party libraries are imported inside DiscordDriver.__init__ so this module
+# can be imported (e.g. for CLI hook discovery) without them.
+discord: Any = None
+aiohttp: Any = None
 
 
 class DiscordConfig(_DriverConfig):
@@ -156,6 +160,10 @@ def resolve_native_command_name(prefix: str) -> str:
 class DiscordDriver(BaseDriver[DiscordConfig]):
     def __init__(self, instance_id: str, config: DiscordConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global discord, aiohttp
+        import discord
+        import aiohttp
+
         self.config = config
         self._client: discord.Client | None = None
         self._tree: discord.app_commands.CommandTree | None = None
