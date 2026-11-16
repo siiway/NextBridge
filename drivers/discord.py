@@ -1011,8 +1011,14 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
         # Bridge formats by expected send path. If we switch from webhook to bot
         # (e.g. reply bridging), re-apply bot formatting here so bot_msg_format/
         # msg_format and richheader still work.
-        if force_bot and self._send_method == "webhook" and webhook_url is not None:
-            fmt = kwargs.get("bot_msg_format") or kwargs.get("msg_format")
+        if is_webhook_send or (
+            force_bot and self._send_method == "webhook" and webhook_url is not None
+        ):
+            fmt = (
+                kwargs.get("webhook_msg_format")
+                if is_webhook_send
+                else (kwargs.get("bot_msg_format") or kwargs.get("msg_format"))
+            )
             if isinstance(fmt, str) and fmt:
                 username_value = kwargs.get("username", "")
                 if isinstance(username_value, str):
