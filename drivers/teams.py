@@ -20,12 +20,14 @@
 #                     (e.g. "https://smba.trafficmanager.net/amer/")
 #   conversation_id – Value of activity.conversation.id
 
+from __future__ import annotations
+
+from typing import Any
+
 import asyncio
 import json
 import time
 
-import aiohttp
-from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
@@ -36,6 +38,12 @@ from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
+
+
+# Third-party libraries are imported inside TeamsDriver.__init__ so this module can be
+# imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+ProxyConnector: Any = None
 
 
 class TeamsConfig(_DriverConfig):
@@ -54,6 +62,10 @@ _SCOPE = "https://api.botframework.com/.default"
 class TeamsDriver(BaseDriver[TeamsConfig]):
     def __init__(self, instance_id: str, config: TeamsConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp, ProxyConnector
+        import aiohttp
+        from aiohttp_socks import ProxyConnector
+
         self._session: aiohttp.ClientSession | None = None
         self._access_token: str = ""
         self._token_expires: float = 0.0

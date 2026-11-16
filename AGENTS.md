@@ -3,10 +3,17 @@
 1. 请忽略本文档语言，跟随用户的语言回答
 2. 项目使用 `uv` 作为包管理器，依赖须写入 `pyproject.toml` 而非 `requirements.txt` 或 `uv.lock`
 3. 项目可用 lint/type check: `ruff check --fix` & `ruff format` & `ty check` (未在虚拟环境可能需要 `uv run ...`)
-4. 在 增/删/改 功能时，同步修改对应的中文 & 英文文档部分 (`docs/` 下)
-5. 在进行功能/行为性更改（非底层或对用户无影响逻辑更改）后，及时更新文档以反映最新状态
-6. 在增加新 driver 时，需要在 `README.md` 的 `Special Thanks` 部分增加 driver 使用的库 (没有则不管)
-7. 在达到 1.0 版本之前，不需要考虑代码的旧版本兼容性 (但是需要记忆下破坏性修改，以便在 release notes 中提及)
+4. 文档站源码在 `docs/` 下（VitePress），中英文均在同一个仓库：`docs/en/`、`docs/zh/`
+5. 在 增/删/改 功能时，同步修改对应的中文 & 英文文档部分（`docs/en/` 与 `docs/zh/`）
+6. 在进行功能/行为性更改（非底层或对用户无影响逻辑更改）后，及时更新文档以反映最新状态
+7. 在增加新 driver 时，需要在 `README.md` 的 `Special Thanks` 部分增加 driver 使用的库 (没有则不管)
+8. 在达到 1.0 版本之前，不需要考虑代码的旧版本兼容性 (但是需要记忆下破坏性修改，以便在 release notes 中提及)
+9. driver 的第三方依赖必须在 `__init__` 中延迟导入，模块顶层只放标准库与核心依赖（`fastapi` / `pydantic`）。CLI 启动时会 import 全部 driver 收集 `register_cli()`，顶层导入可选依赖会让缺少该依赖的环境直接报错
+10. driver 的第三方依赖若为**可选**（例如 `neonize` 需要系统库 `libmagic`），延迟导入失败时要抛出带可操作提示的 `RuntimeError`，而不是裸 `ImportError`
+11. **改动依赖或 PostgreSQL 相关代码后必须额外验证**（现有 `pytest` 只用 SQLite，覆盖不到这些路径）：
+    - 跑 `uv lock` 后确认 `uv.lock` 的 sqlalchemy 仍在 `>=2.1,<2.2`
+    - 用真实 PostgreSQL 跑一遍启动迁移，确认 8 个 migration 全部通过（见 `RELEASING.md`）
+    - 在没有 `libmagic` 的干净容器里 import 所有 driver，确认无一失败（见 `RELEASING.md`）
 
 # 可用的 driver api 文档
 

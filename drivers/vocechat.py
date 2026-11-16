@@ -25,11 +25,13 @@
 #   gid – VoceChat group/channel ID  (integer or string)
 #   uid – VoceChat user ID for DMs   (integer or string)
 
+from __future__ import annotations
+
+from typing import Any
+
 import asyncio
 import json
 
-import aiohttp
-from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
@@ -41,6 +43,12 @@ from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
 from services.util import LRUDict
+
+
+# Third-party libraries are imported inside VoceChatDriver.__init__ so this module can be
+# imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+ProxyConnector: Any = None
 
 
 class VoceChatConfig(_DriverConfig):
@@ -55,6 +63,10 @@ class VoceChatConfig(_DriverConfig):
 class VoceChatDriver(BaseDriver[VoceChatConfig]):
     def __init__(self, instance_id: str, config: VoceChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp, ProxyConnector
+        import aiohttp
+        from aiohttp_socks import ProxyConnector
+
         self._session: aiohttp.ClientSession | None = None
         # uid → (name, avatar)
         self._user_cache: LRUDict[int, tuple[str, str]] = LRUDict(maxsize=1000)

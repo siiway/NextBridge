@@ -1197,7 +1197,7 @@ requires-dist = [
     { name = "requests", extras = ["socks"], specifier = ">=2.32.5" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
     { name = "slack-sdk", specifier = ">=3.40.1" },
-    { name = "sqlalchemy", specifier = ">=2.0.48" },
+    { name = "sqlalchemy", specifier = ">=2.1,<2.2" },
     { name = "tomli-w", specifier = ">=1.0" },
     { name = "tzlocal", specifier = ">=5.3.1" },
     { name = "unpaddedbase64", specifier = ">=2.1.0" },

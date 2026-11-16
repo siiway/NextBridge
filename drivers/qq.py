@@ -16,6 +16,8 @@
 #   stream_threshold – If > 0, force stream mode when file exceeds this many bytes,
 #                      regardless of file_send_mode (default 0 = disabled)
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import datetime
@@ -32,10 +34,9 @@ from pathlib import Path
 from string import Template
 from typing import Any, Literal
 
-import websockets
-import websockets.exceptions
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse, Response
+from pydantic import AliasChoices, Field
 
 import services.logger as log
 from drivers import BaseDriver
@@ -48,6 +49,10 @@ from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
 from services.message_format import parse_richheader_tag
 from services.util import LRUDict, mask_url_credentials, strip_invisible_chars
+
+# websockets is imported inside QqDriver.__init__ so this module can be imported
+# (e.g. for CLI hook discovery) without it.
+websockets: Any = None
 
 
 class QqConfig(_DriverConfig):
@@ -74,11 +79,15 @@ class QqConfig(_DriverConfig):
     # generated as: {forward_render_base_url}/{page_id}
     # (mount path is NOT appended automatically).
     forward_render_base_url: str = ""
-    # Merged-forward face rendering strategy:
-    # - false: render by cqface mapping (unicode)
-    # - true/unset: render by default gif host
-    # - string: use custom gif host base URL
-    forward_render_cqface_gif: bool | str = True
+    # CQFace GIF host strategy (applies to both combined-forward HTML pages and
+    # the remote fallback for main-message faces missing from the local db):
+    # - false: no remote host (forward rendering uses unicode, missing faces dropped)
+    # - true/unset: use the default host
+    # - string: use a custom host base URL
+    cqface_gif_host: bool | str = Field(
+        default=True,
+        validation_alias=AliasChoices("cqface_gif_host", "forward_render_cqface_gif"),
+    )
     # QQ has no native "edit message" API. When an edit is bridged from another
     # platform (e.g. Discord/Telegram), simulate it by sending a NEW message that
     # quotes (replies to) the original bridged message and prepends `edit_prefix`.
@@ -91,7 +100,7 @@ class QqConfig(_DriverConfig):
     proxy: str | None = UNSET
 
 
-_DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://nextbridge.siiway.org/db/cqface-gif/"
+_DEFAULT_FORWARD_CQFACE_GIF_HOST: str = "https://cqface.p.wyf9.top/dist/"
 _FORWARD_TEMPLATE_PATH: Path = (
     Path(__file__).resolve().parent.parent / "templates" / "qq_forward_template.html"
 )
@@ -141,6 +150,29 @@ def _utc_now() -> datetime.datetime:
 _FACE_DB: Path = (Path(__file__).parent.parent / "db" / "cqface-gif").resolve()
 
 
+def _normalize_face_gif_host(host: str) -> str:
+    """Normalize a face GIF base URL to always end with a single slash."""
+    normalized = (host or "").strip()
+    if not normalized:
+        return ""
+    if not normalized.startswith(("http://", "https://")):
+        normalized = f"https://{normalized.lstrip('/')}"
+    if not normalized.endswith("/"):
+        normalized = f"{normalized}/"
+    return normalized
+
+
+def _resolve_face_gif_host_setting(cfg: bool | str) -> str:
+    """Map a ``bool | str`` host setting to a base URL, or ``""`` to disable."""
+    if cfg is False:
+        return ""
+    if cfg is True:
+        return _DEFAULT_FORWARD_CQFACE_GIF_HOST
+    if isinstance(cfg, str):
+        return _normalize_face_gif_host(cfg) or _DEFAULT_FORWARD_CQFACE_GIF_HOST
+    return _DEFAULT_FORWARD_CQFACE_GIF_HOST
+
+
 def _load_face_gif(face_id_raw) -> bytes | None:
     """
     Safely load a QQ face GIF from the local database.
@@ -186,6 +218,10 @@ class QqDriver(BaseDriver[QqConfig]):
 
     def __init__(self, instance_id: str, config: QqConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global websockets
+        import websockets
+        import websockets.exceptions  # noqa: F401
+
         self._ws: Any = None  # websockets connection (type varies by version)
         # echo_id → Future; used to await responses for specific actions
         self._pending: dict[str, asyncio.Future] = {}
@@ -1076,15 +1112,24 @@ class QqDriver(BaseDriver[QqConfig]):
                         except (TypeError, ValueError):
                             pass
                     else:
-                        gif_data = _load_face_gif(face_id_raw)
-                        if gif_data is not None:
-                            # face_id is validated integer at this point
-                            name = f"face_{int(face_id_raw)}.gif"
-                            attachments.append(
-                                Attachment(
-                                    type="image", url="", name=name, data=gif_data
-                                )
+                        try:
+                            face_id = int(face_id_raw)
+                        except (TypeError, ValueError):
+                            _logger.warning(
+                                f"Invalid face ID {face_id_raw!r} — ignored"
                             )
+                            face_id = -1
+                        if face_id >= 0:
+                            gif_data = await self._fetch_face_gif(face_id)
+                            if gif_data is not None:
+                                attachments.append(
+                                    Attachment(
+                                        type="image",
+                                        url="",
+                                        name=f"face_{face_id}.gif",
+                                        data=gif_data,
+                                    )
+                                )
 
                 case "json":
                     # Rich JSON message (contact card, news, mini-app, etc.)
@@ -1175,30 +1220,40 @@ class QqDriver(BaseDriver[QqConfig]):
 
         return text, attachments, reply_id, mentions
 
-    def _normalize_cqface_gif_host(self, host: str) -> str:
-        normalized = (host or "").strip()
-        if not normalized:
-            return ""
-        if not normalized.startswith(("http://", "https://")):
-            normalized = f"https://{normalized.lstrip('/')}"
-        if not normalized.endswith("/"):
-            normalized = f"{normalized}/"
-        return normalized
-
     def _forward_cqface_gif_host(self) -> str:
-        cfg = self.config.forward_render_cqface_gif
+        return _resolve_face_gif_host_setting(self.config.cqface_gif_host)
 
-        if cfg is False:
-            return ""
-        if cfg is True:
-            return _DEFAULT_FORWARD_CQFACE_GIF_HOST
-        if isinstance(cfg, str):
-            custom = self._normalize_cqface_gif_host(cfg)
-            if custom:
-                return custom
-            return _DEFAULT_FORWARD_CQFACE_GIF_HOST
+    def _cqface_message_gif_host(self) -> str:
+        """Base URL used to fetch face GIFs missing from the local database."""
+        return _resolve_face_gif_host_setting(self.config.cqface_gif_host)
 
-        return _DEFAULT_FORWARD_CQFACE_GIF_HOST
+    async def _fetch_face_gif(self, face_id: int) -> bytes | None:
+        """Load a face GIF locally, falling back to the configured remote host.
+
+        The remote fetch only happens when the local database lacks the GIF, so
+        hosts that ship the full ``db/cqface-gif/`` tree never hit the network.
+        Failures are logged at debug level and degrade to dropping the segment.
+        """
+        local = _load_face_gif(face_id)
+        if local is not None:
+            return local
+
+        host = self._cqface_message_gif_host()
+        if not host:
+            return None
+
+        data = await media.fetch(
+            f"{host}{face_id}.gif", self.config.max_file_size, self._media_proxy
+        )
+        if data is None:
+            self.logger.debug(
+                f"QQ [{self.instance_id}] face {face_id} missing locally and "
+                f"unavailable at {host}"
+            )
+            return None
+
+        data_bytes, _mime = data
+        return data_bytes
 
     async def _upload_file_from_bytes(
         self,

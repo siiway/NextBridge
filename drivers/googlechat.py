@@ -27,21 +27,17 @@
 #
 # * Exactly one of service_account_file or service_account_json is required.
 
+from __future__ import annotations
+
 import asyncio
 import json
 import uuid
 from pathlib import Path
+from typing import Any
 
-import aiohttp
-import google.auth.transport.requests as _ga_req
-import google.oauth2.service_account as _sa
-import requests
-from aiohttp_socks import ProxyConnector
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import model_validator
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from drivers import BaseDriver
 from drivers.registry import register
@@ -50,6 +46,16 @@ from services.config import UNSET, get_proxy
 from services.config_schema import _DriverConfig
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
+
+# Third-party libraries are imported inside GoogleChatDriver.__init__ so this
+# module can be imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+_ga_req: Any = None
+_sa: Any = None
+requests: Any = None
+ProxyConnector: Any = None
+HTTPAdapter: Any = None
+Retry: Any = None
 
 
 class GoogleChatConfig(_DriverConfig):
@@ -77,6 +83,15 @@ _API_BASE = "https://chat.googleapis.com/v1"
 class GoogleChatDriver(BaseDriver[GoogleChatConfig]):
     def __init__(self, instance_id: str, config: GoogleChatConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp, _ga_req, _sa, requests, ProxyConnector, HTTPAdapter, Retry
+        import aiohttp
+        import google.auth.transport.requests as _ga_req
+        import google.oauth2.service_account as _sa
+        import requests
+        from aiohttp_socks import ProxyConnector
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+
         self._session: aiohttp.ClientSession | None = None
         self._creds: _sa.Credentials | None = None
         self._token_lock: asyncio.Lock = asyncio.Lock()

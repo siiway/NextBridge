@@ -14,12 +14,11 @@
 # Rule channel keys:
 #   channel_id – KOOK text channel ID
 
+from __future__ import annotations
+
 import io
 import re
-
-import khl
-from aiohttp import ClientSession
-from aiohttp_socks import ProxyConnector
+from typing import Any
 
 from drivers import BaseDriver
 from drivers.registry import register
@@ -29,6 +28,12 @@ from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
 from services.message_format import apply_rich_header
+
+# Third-party libraries are imported inside KookDriver.__init__ so this module
+# can be imported (e.g. for CLI hook discovery) without them.
+khl: Any = None
+ClientSession: Any = None
+ProxyConnector: Any = None
 
 
 class KookConfig(_DriverConfig):
@@ -40,6 +45,11 @@ class KookConfig(_DriverConfig):
 class KookDriver(BaseDriver[KookConfig]):
     def __init__(self, instance_id: str, config: KookConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global khl, ClientSession, ProxyConnector
+        import khl
+        from aiohttp import ClientSession
+        from aiohttp_socks import ProxyConnector
+
         self._bot: khl.Bot | None = None
         self._proxy = get_proxy(config.proxy)
 

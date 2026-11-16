@@ -215,3 +215,32 @@ class TestMessageDB:
         # Explicitly updating avatar_url updates it
         db.save_user("qq", "10001", "Alice_New", avatar_url="https://example.com/b.png")
         assert db.get_user_avatar("qq", "10001") == "https://example.com/b.png"
+
+
+class TestPostgresUrlNormalization:
+    """SQLAlchemy 2.1 defaults ``postgresql://`` to psycopg (v3), but this
+    project only ships psycopg2-binary. A bare URL must be rewritten."""
+
+    def test_bare_url_pinned_to_psycopg2(self):
+        from services.db import _normalize_postgres_url
+
+        assert (
+            _normalize_postgres_url("postgresql://u:p@host/db")
+            == "postgresql+psycopg2://u:p@host/db"
+        )
+
+    def test_explicit_driver_untouched(self):
+        from services.db import _normalize_postgres_url
+
+        for url in (
+            "postgresql+psycopg2://u:p@host/db",
+            "postgresql+psycopg://u:p@host/db",
+            "postgresql+asyncpg://u:p@host/db",
+        ):
+            assert _normalize_postgres_url(url) == url
+
+    def test_non_postgres_urls_untouched(self):
+        from services.db import _normalize_postgres_url
+
+        for url in ("sqlite:///data.db", "sqlite:////abs/data.db", "mysql://u@h/db"):
+            assert _normalize_postgres_url(url) == url

@@ -70,6 +70,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Rule and config writes are atomic** (`temp + fsync + os.replace`) with a
   `.bak` backup and comment/anchor-preserving YAML round-tripping, replacing
   the previous non-atomic `save_config` path used for edits.
+- **QQ face GIFs get a remote fallback.** When `cqface_mode: "gif"` is active
+  and a face is missing from the local `db/cqface-gif/` database, the driver now
+  downloads it from the configured face GIF host instead of dropping the
+  segment. The host is resolved with `media.fetch`, so it honours `proxy` and
+  `max_file_size`, and a failure still degrades to dropping the segment.
+- **`forward_render_cqface_gif` renamed to `cqface_gif_host`.** The option is no
+  longer specific to combined-forward rendering: it now also drives the
+  main-message fallback above. The old key still works as a deprecated alias, so
+  existing configs keep loading unchanged.
+- **QQ face GIF default host moved.** `cqface_gif_host: true` now points at
+  `https://cqface.p.wyf9.top/dist/` instead of
+  `https://nextbridge.siiway.org/db/cqface-gif/`, so the docs site no longer has
+  to ship the 50 MB face database. Old URLs keep working through a 301 redirect
+  on the docs site. Set the option to a custom URL to override.
+- **Bare `postgresql://` URLs are pinned to psycopg2.** SQLAlchemy 2.1 changed
+  the default DBAPI for the `postgresql://` dialect from psycopg2 to psycopg
+  (v3). This project ships `psycopg2-binary` only, so a bare URL now fails with
+  `ModuleNotFoundError: psycopg` at startup. NextBridge rewrites
+  `postgresql://` to `postgresql+psycopg2://`, leaving URLs that already name a
+  driver untouched.
+- **Optional driver dependencies load lazily.** Driver modules import their
+  third-party libraries inside the code that needs them, so the CLI's driver
+  discovery no longer fails when an optional dependency (or a system library it
+  needs, such as `libmagic` for WhatsApp) is missing on the host.
 
 ### Dependencies
 

@@ -26,6 +26,8 @@
 # Rule channel keys:
 #   chat_id – Telegram chat ID (negative for groups, e.g. "-100123456789")
 
+from __future__ import annotations
+
 import asyncio
 import html
 import io
@@ -33,23 +35,6 @@ import re
 import time
 from typing import Any, TypedDict
 from urllib.parse import urlencode
-
-# Runtime import (not TYPE_CHECKING): httpx.Proxy / httpx.URL are referenced in
-# the _HTTPXRequestCommonKwargs annotation below, which is evaluated at import
-# time, so removing this import would raise NameError. httpx is a hard dependency
-# (declared in pyproject and required by python-telegram-bot).
-import httpx
-from PIL import Image, UnidentifiedImageError
-from telegram import (
-    InputMediaPhoto,
-    InputMediaVideo,
-    LinkPreviewOptions,
-    ReplyParameters,
-    Update,
-)
-from telegram.error import TelegramError
-from telegram.ext import Application, ContextTypes, MessageHandler, filters
-from telegram.request import HTTPXRequest
 
 import services.logger as log
 from drivers import BaseDriver
@@ -60,6 +45,23 @@ from services.config_schema import _DriverConfig, CoercedBool
 from services.message import Attachment, NormalizedMessage
 from services.message_format import telegram_richheader_html
 from services.util import LRUDict
+
+# Third-party libraries are imported inside TelegramDriver.__init__ so this module
+# can be imported (e.g. for CLI hook discovery) without them.
+httpx: Any = None
+Image: Any = None
+UnidentifiedImageError: Any = None
+Application: Any = None
+ContextTypes: Any = None
+MessageHandler: Any = None
+filters: Any = None
+TelegramError: Any = None
+HTTPXRequest: Any = None
+InputMediaPhoto: Any = None
+InputMediaVideo: Any = None
+LinkPreviewOptions: Any = None
+ReplyParameters: Any = None
+Update: Any = None
 
 
 def _sanitize_telegram_url(url: str | None) -> str:
@@ -293,27 +295,48 @@ def _attachment_fallback_label(
     return f"\n[{display_type}: {label}]"
 
 
-_CONTENT_FILTER = (
-    (
-        filters.TEXT
-        | filters.PHOTO
-        | filters.VIDEO
-        | filters.VOICE
-        | filters.AUDIO
-        | filters.Document.ALL
-        | filters.ANIMATION
-        | filters.Sticker.ALL
+def _content_filter():
+    """Message filter for all non-command content types (built lazily)."""
+    return (
+        (
+            filters.TEXT
+            | filters.PHOTO
+            | filters.VIDEO
+            | filters.VOICE
+            | filters.AUDIO
+            | filters.Document.ALL
+            | filters.ANIMATION
+            | filters.Sticker.ALL
+        )
+        & ~filters.COMMAND
+        & ~filters.UpdateType.EDITED_MESSAGE
     )
-    & ~filters.COMMAND
-    & ~filters.UpdateType.EDITED_MESSAGE
-)
 
-_COMMAND_FILTER = filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE
+
+def _command_filter():
+    return filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE
 
 
 class TelegramDriver(BaseDriver[TelegramConfig]):
     def __init__(self, instance_id: str, config: TelegramConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global httpx, Image, UnidentifiedImageError
+        global Application, ContextTypes, MessageHandler, filters, TelegramError
+        global HTTPXRequest, InputMediaPhoto, InputMediaVideo
+        global LinkPreviewOptions, ReplyParameters, Update
+        import httpx
+        from PIL import Image, UnidentifiedImageError
+        from telegram import (
+            InputMediaPhoto,
+            InputMediaVideo,
+            LinkPreviewOptions,
+            ReplyParameters,
+            Update,
+        )
+        from telegram.error import TelegramError
+        from telegram.ext import Application, ContextTypes, MessageHandler, filters
+        from telegram.request import HTTPXRequest
+
         self._app: Application | None = None
         self._proxy = get_proxy(config.proxy)
         # user_id → (monotonic timestamp, avatar URL) cache to avoid re-fetching
@@ -342,8 +365,10 @@ class TelegramDriver(BaseDriver[TelegramConfig]):
             .get_updates_request(get_updates_req)
             .build()
         )
-        self._app.add_handler(MessageHandler(_CONTENT_FILTER, self._on_message))
-        self._app.add_handler(MessageHandler(_COMMAND_FILTER, self._on_command_message))
+        self._app.add_handler(MessageHandler(_content_filter(), self._on_message))
+        self._app.add_handler(
+            MessageHandler(_command_filter(), self._on_command_message)
+        )
         self._app.add_handler(
             MessageHandler(filters.UpdateType.EDITED_MESSAGE, self._on_edited_message)
         )

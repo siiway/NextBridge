@@ -23,11 +23,11 @@
 # The "rich_header" kwarg (if present) is applied as a [Title · Content] prefix
 # to "text" and is not included as a separate field.
 
-from drivers.registry import register
-from typing import Literal
+from __future__ import annotations
 
-import aiohttp
-from aiohttp_socks import ProxyConnector
+from drivers.registry import register
+from typing import Any, Literal
+
 from pydantic import Field
 
 from services.message import Attachment
@@ -35,6 +35,12 @@ from services.config_schema import _DriverConfig
 from services.config import get_proxy, UNSET
 from services.message_format import apply_rich_header
 from drivers import BaseDriver
+
+
+# Third-party libraries are imported inside WebhookDriver.__init__ so this
+# module can be imported (e.g. for CLI hook discovery) without them.
+aiohttp: Any = None
+ProxyConnector: Any = None
 
 
 class WebhookConfig(_DriverConfig):
@@ -47,6 +53,10 @@ class WebhookConfig(_DriverConfig):
 class WebhookDriver(BaseDriver[WebhookConfig]):
     def __init__(self, instance_id: str, config: WebhookConfig, bridge):
         super().__init__(instance_id, config, bridge)
+        global aiohttp, ProxyConnector
+        import aiohttp
+        from aiohttp_socks import ProxyConnector
+
         self._session: aiohttp.ClientSession | None = None
         self._proxy = get_proxy(config.proxy)
 

@@ -29,3 +29,74 @@ def test_reverse_mode_uses_configured_websocket_path():
     )
 
     assert driver._reverse_ws_path() == "/custom/napcat"
+
+
+# ---------------------------------------------------------------------------
+# Face GIF loading: local database first, remote host only as a fallback
+# ---------------------------------------------------------------------------
+
+
+def _driver(**kwargs) -> QqDriver:
+    return QqDriver("qq_main", QqConfig(**kwargs), MagicMock())
+
+
+def test_face_gif_prefers_local_database(monkeypatch):
+    monkeypatch.setattr("drivers.qq._load_face_gif", lambda face_id: b"local-gif")
+
+    async def fail_fetch(*args, **kwargs):
+        raise AssertionError("remote host must not be contacted when local hit")
+
+    monkeypatch.setattr("drivers.qq.media.fetch", fail_fetch)
+
+    import asyncio
+
+    assert asyncio.run(_driver()._fetch_face_gif(14)) == b"local-gif"
+
+
+def test_face_gif_falls_back_to_remote_host(monkeypatch):
+    monkeypatch.setattr("drivers.qq._load_face_gif", lambda face_id: None)
+    calls = []
+
+    async def fake_fetch(url, max_bytes, proxy=None):
+        calls.append(url)
+        return b"remote-gif", "image/gif"
+
+    monkeypatch.setattr("drivers.qq.media.fetch", fake_fetch)
+
+    import asyncio
+
+    driver = _driver(cqface_gif_host="https://cqface.example.com/dist")
+    assert asyncio.run(driver._fetch_face_gif(14)) == b"remote-gif"
+    assert calls == ["https://cqface.example.com/dist/14.gif"]
+
+
+def test_face_gif_fallback_disabled_when_host_is_false(monkeypatch):
+    monkeypatch.setattr("drivers.qq._load_face_gif", lambda face_id: None)
+
+    async def fail_fetch(*args, **kwargs):
+        raise AssertionError("remote host disabled, must not fetch")
+
+    monkeypatch.setattr("drivers.qq.media.fetch", fail_fetch)
+
+    import asyncio
+
+    assert asyncio.run(_driver(cqface_gif_host=False)._fetch_face_gif(14)) is None
+
+
+def test_face_gif_missing_everywhere_returns_none(monkeypatch):
+    monkeypatch.setattr("drivers.qq._load_face_gif", lambda face_id: None)
+
+    async def fake_fetch(url, max_bytes, proxy=None):
+        return None
+
+    monkeypatch.setattr("drivers.qq.media.fetch", fake_fetch)
+
+    import asyncio
+
+    assert asyncio.run(_driver()._fetch_face_gif(9999)) is None
+
+
+def test_legacy_forward_render_cqface_gif_alias_still_works():
+    """The pre-rename key must keep working so existing configs do not break."""
+    driver = _driver(forward_render_cqface_gif="https://legacy.example.com/gif")
+    assert driver._cqface_message_gif_host() == "https://legacy.example.com/gif/"
