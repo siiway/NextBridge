@@ -234,6 +234,14 @@ NextBridge uses SQLAlchemy for database operations, which supports multiple data
   When using SQLite with a relative path (e.g., `sqlite:///data.db`), the path is resolved relative to the data directory (`data/`). Absolute paths (e.g., `sqlite:////var/lib/nextbridge/data.db`) are used as-is.
 :::
 
+::: tip PostgreSQL driver
+  NextBridge ships `psycopg2-binary`, so a bare `postgresql://` URL is rewritten to
+  `postgresql+psycopg2://` automatically (SQLAlchemy 2.1 would otherwise pick the
+  psycopg 3 driver, which is not installed). Writing the driver explicitly is
+  still fine, and any other driver you install yourself — for example
+  `postgresql+psycopg://` — is used as given.
+:::
+
 ::: warning Connection Pooling
   Connection pool settings (`pool_size`, `max_overflow`, `pool_recycle`) only apply to non-SQLite databases. SQLite uses a file-based storage and doesn't support connection pooling in the same way.
 :::

@@ -70,6 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Rule and config writes are atomic** (`temp + fsync + os.replace`) with a
   `.bak` backup and comment/anchor-preserving YAML round-tripping, replacing
   the previous non-atomic `save_config` path used for edits.
+- **Bare `postgresql://` URLs are pinned to psycopg2.** SQLAlchemy 2.1 changed
+  the default DBAPI for the `postgresql://` dialect from psycopg2 to psycopg
+  (v3). This project ships `psycopg2-binary` only, so a bare URL now fails with
+  `ModuleNotFoundError: psycopg` at startup. NextBridge rewrites
+  `postgresql://` to `postgresql+psycopg2://`, leaving URLs that already name a
+  driver untouched.
 
 ### Dependencies
 

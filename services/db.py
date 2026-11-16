@@ -125,6 +125,24 @@ class MetricsCounter(_Base):
     updated_at = Column(Integer, nullable=False, default=0)
 
 
+def _normalize_postgres_url(url: str) -> str:
+    """Pin bare ``postgresql://`` URLs to the psycopg2 driver.
+
+    SQLAlchemy 2.1 changed the default DBAPI for the ``postgresql://`` dialect
+    from psycopg2 to psycopg (v3). This project ships ``psycopg2-binary`` only,
+    so a bare URL would fail at startup with ``ModuleNotFoundError: psycopg``.
+    Normalizing here keeps existing configs working unchanged.
+
+    A URL that already names a driver (``postgresql+psycopg2://``,
+    ``postgresql+asyncpg://``, ...) is returned untouched.
+    """
+    if not url.startswith("postgresql://"):
+        return url
+    normalized = "postgresql+psycopg2://" + url[len("postgresql://") :]
+    logger.debug(f"Normalized postgresql URL to psycopg2 driver: {normalized}")
+    return normalized
+
+
 class MessageDB:
     """Handles mapping of message IDs between different platforms."""
 
@@ -171,6 +189,7 @@ class MessageDB:
         # Relative SQLite paths are resolved under data/ by the logic below.
         # Use sqlite:///data.db as default to avoid data/data.db.
         url = db_config.get("url", "sqlite:///data.db")
+        url = _normalize_postgres_url(url)
 
         sqlite_db_path: Path | None = None
         # Handle SQLite relative paths

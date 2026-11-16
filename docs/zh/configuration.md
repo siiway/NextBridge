@@ -234,6 +234,12 @@ NextBridge 使用 SQLAlchemy 进行数据库操作，支持多种数据库后端
   使用 SQLite 的相对路径（如 `sqlite:///data.db`）时，路径将相对于数据目录（`data/`）解析。绝对路径（如 `sqlite:////var/lib/nextbridge/data.db`）将按原样使用。
 :::
 
+::: tip PostgreSQL 驱动
+  NextBridge 只内置了 `psycopg2-binary`，因此裸写 `postgresql://` 会被自动改写为
+  `postgresql+psycopg2://`（SQLAlchemy 2.1 默认会选 psycopg 3 驱动，而它并未安装）。
+  显式写出驱动同样可用；你自己安装的其它驱动（例如 `postgresql+psycopg://`）会按原样使用。
+:::
+
 ::: warning 连接池
   连接池设置（`pool_size`、`max_overflow`、`pool_recycle`）仅适用于非 SQLite 数据库。SQLite 使用基于文件的存储，不支持同样的连接池机制。
 :::
