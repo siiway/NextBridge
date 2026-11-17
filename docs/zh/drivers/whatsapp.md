@@ -1,5 +1,3 @@
-> 本文档由 AI 编写，已经人工审核。
-
 # WhatsApp
 
 WhatsApp 驱动器使用 [neonize](https://github.com/krypton-byte/neonize)——[go-whatsapp (whatsmeow)](https://github.com/tulir/whatsmeow) 的 Python 绑定——直接连接 WhatsApp Web，**无需 Node.js**。

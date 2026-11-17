@@ -1,5 +1,3 @@
-> This document was written by AI and has been manually reviewed.
-
 # Rules Reference
 
 ## Rules file formats

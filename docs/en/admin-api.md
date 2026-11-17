@@ -1,5 +1,3 @@
-> This document was written by AI and has been manually reviewed.
-
 # Admin API
 
 NextBridge exposes a small HTTP API for runtime inspection and management. It is served by the shared HTTP server under the `/_nextbridge` prefix.

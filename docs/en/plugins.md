@@ -1,5 +1,3 @@
-> This document was written by AI and has been manually reviewed.
-
 # Plugin Development
 
 NextBridge supports a general plugin system for extending functionality beyond driver integrations. Plugins can subscribe to events, register custom commands, add database migrations, and access the full bridge API.

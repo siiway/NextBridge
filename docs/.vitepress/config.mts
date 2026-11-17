@@ -6,10 +6,44 @@ import { defineConfig } from 'vitepress'
 // version-aware beyond the label below.
 const VERSION = 'v0.4'
 
-// Legacy releases, newest first. Each entry links to the frozen Pages alias of
-// its branch. Only the latest legacy release is shown in the nav to keep it
-// compact; extend the list when a new release line is frozen.
-const LEGACY = [{ text: 'v0.3', link: 'https://v0-3-legacy.nextbridge.pages.dev' }]
+// Previous release lines, newest first. Each entry links to the Pages alias of
+// its frozen branch. Prepending one entry per release is all the nav needs.
+const PREVIOUS = [{ version: 'v0.3', origin: 'https://v0-3-legacy.nextbridge.pages.dev' }]
+
+function versionNav(prefix: string) {
+  return {
+    text: `${VERSION} (latest)`,
+    items: PREVIOUS.map((release) => ({
+      text: release.version,
+      link: `${release.origin}${prefix}/getting-started`,
+    })),
+  }
+}
+
+// Every page gets this blockquote injected at build time, per language, so the
+// notice lives in one place instead of at the top of 60 markdown files. The
+// `en`/`zh` source roots map 1:1 to the locale, and the landing pages are
+// skipped because they render a hero instead of an article body.
+const AI_NOTICE = {
+  en: '> This document was written by AI and has been partially reviewed by humans. If you find a mistake, please [report it](https://github.com/siiway/NextBridge/issues/new?labels=documentation).',
+  zh: '> 本文档由 AI 编写并已经部分人工审核。如发现错误，请 [向我们报告](https://github.com/siiway/NextBridge/issues/new?labels=documentation)！',
+}
+
+function aiNoticePlugin(md: any) {
+  md.core.ruler.before('normalize', 'nb-ai-notice', (state: any) => {
+    const relativePath = state.env?.relativePath as string | undefined
+    if (!relativePath) return
+
+    const [lang, ...rest] = relativePath.split('/')
+    const notice = AI_NOTICE[lang as keyof typeof AI_NOTICE]
+    if (!notice) return
+
+    // Landing pages use the home layout, and the root index is a redirect.
+    if (rest.join('/') === 'index.md') return
+
+    state.src = `${notice}\n\n${state.src}`
+  })
+}
 
 function enSidebar() {
   const prefix = '/en'
@@ -108,6 +142,9 @@ export default defineConfig({
   description: 'The chat bridge that links up all the major chat platforms!',
   lastUpdated: true,
   cleanUrls: true,
+  markdown: {
+    config: aiNoticePlugin,
+  },
   sitemap: {
     hostname: 'https://nextbridge.siiway.org',
   },
@@ -135,8 +172,7 @@ export default defineConfig({
           { text: 'Drivers', link: '/en/drivers/' },
           // Version badge only. Historical releases link *here*, so this site
           // never has to enumerate them (which would need editing every release).
-          { text: `${VERSION} (latest)`, link: '/en/getting-started' },
-          { text: 'Legacy', items: LEGACY },
+          versionNav('/en'),
         ],
         sidebar: enSidebar(),
         editLink: {
@@ -157,8 +193,7 @@ export default defineConfig({
           { text: '指南', link: '/zh/getting-started' },
           { text: '驱动器', link: '/zh/drivers/' },
           // Keep the label parallel to the English one.
-          { text: `${VERSION} (latest)`, link: '/zh/getting-started' },
-          { text: '旧版本', items: LEGACY },
+          versionNav('/zh'),
         ],
         sidebar: zhSidebar(),
         editLink: {

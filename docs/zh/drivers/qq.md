@@ -1,5 +1,3 @@
-> 本文档由 AI 编写，已经人工审核。
-
 # QQ
 
 NextBridge 通过 OneBot 11 WebSocket 协议连接 QQ。支持多种协议后端：[NapCat](https://napneko.github.io)（默认）、[Lagrange.OneBot](https://github.com/LagrangeDev/Lagrange.Core)，以及任何通用 OneBot 11 实现。

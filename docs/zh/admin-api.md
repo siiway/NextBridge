@@ -1,5 +1,3 @@
-> 本文档由 AI 编写，已经人工审核。
-
 # 管理 API
 
 NextBridge 提供一组用于运行时查看与管理的 HTTP API，由共享 HTTP 服务器在 `/_nextbridge` 前缀下提供。

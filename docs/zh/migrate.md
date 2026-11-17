@@ -14,7 +14,7 @@ NextBridge 在 1.0 之前不保证向后兼容，因此小版本升级也可能�
 
 ## 升级前
 
-1. **备份 `data/`**。里面有 `config.*`、`rules.*`、`data.db` 以及可选的 `cqface-map.yaml`。
+1. **备份 `data/`**。里面有 `config.*`、`rules.*` 和 `data.db`。CQFace 映射表随仓库发布在 `db/cqface-map.yaml`，在 `data/` 下放一份同名文件即可覆盖它。
 2. **检查配置键**。v0.4 会严格校验配置文件，旧版本遗留的键会在启动时直接报错，而不再被静默忽略。[配置文件参考](/zh/configuration)是最权威的依据。
 
 ## 配置变更
@@ -58,8 +58,7 @@ v0.4 新增了若干 `global.*` 配置段。全部可选且有合理默认值，
 ## 行为变更
 
 - **规则文件在启动时校验。** 格式错误的 `rules.*` 会拒绝启动，而不是在运行时静默忽略规则。
-- **`cqface_mode: "gif"` 支持远程拉取。** 本地 `db/cqface-gif/` 缺失的表情会从 `cqface_gif_host` 下载，而不是直接丢弃。GIF 现在位于
-  <https://cqface.p.wyf9.top/dist/>；旧的 `nextbridge.siiway.org/db/cqface-gif/` 会 301 到新地址。
+- **`cqface_mode: "gif"` 支持远程拉取。** 本地 `db/cqface-gif/` 缺失的表情会从 `cqface_gif_host` 下载，而不是直接丢弃。本地数据库仍随仓库发布且始终优先使用；默认远程主机改为 <https://cqface.p.wyf9.top/dist/>，旧的 `nextbridge.siiway.org/db/cqface-gif/` 会 301 到新地址。
 - **管理 API 默认拒绝访问（fail-closed）。** 禁用管理 API 时，只有 `/_nextbridge/health` 公开。
 - **慢速发送不再阻塞队列。** 超过 `send_timeout` 的消息会转后台继续发送。
 

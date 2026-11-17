@@ -1,5 +1,3 @@
-> This document was written by AI and has been manually reviewed.
-
 # Discord
 
 The Discord driver receives messages through the Discord gateway (bot token) and can send via either a **webhook** or the bot itself.

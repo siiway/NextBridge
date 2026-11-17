@@ -1,5 +1,3 @@
-> This document was written by AI and has been manually reviewed.
-
 # QQ
 
 NextBridge connects to QQ via the OneBot 11 WebSocket protocol. Multiple protocol backends are supported: [NapCat](https://napneko.github.io) (default), [Lagrange.OneBot](https://github.com/LagrangeDev/Lagrange.Core), and any generic OneBot 11 implementation.

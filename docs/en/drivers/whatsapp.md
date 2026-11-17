@@ -1,5 +1,3 @@
-> This document was written by AI and has been manually reviewed.
-
 # WhatsApp
 
 The WhatsApp driver uses [neonize](https://github.com/krypton-byte/neonize) — Python bindings for [go-whatsapp (whatsmeow)](https://github.com/tulir/whatsmeow) — to connect directly to WhatsApp Web. No Node.js is required.

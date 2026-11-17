@@ -1,5 +1,3 @@
-> This document was written by AI and has been manually reviewed.
-
 # Drivers Overview
 
 A **driver** is the adapter between NextBridge and a specific chat platform. Each driver handles receiving messages from its platform and sending messages to it.

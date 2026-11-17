@@ -1,4 +1,6 @@
-> This document was written by AI and has been manually reviewed.
+---
+aside: false
+---
 
 # Platform Support Status
 

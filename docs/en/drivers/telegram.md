@@ -1,5 +1,3 @@
-> This document was written by AI and has been manually reviewed.
-
 # Telegram
 
 The Telegram driver uses [python-telegram-bot](https://python-telegram-bot.org/) with long polling to receive messages and the Bot API to send.
