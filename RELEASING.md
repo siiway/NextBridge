@@ -103,19 +103,23 @@ git checkout -b v0.4-legacy v0.4
 
 - `docs/.vitepress/config.mts`
   - `VERSION` 改为被冻结的版本号（如 `'v0.4'`）
-  - `CURRENT_ORIGIN` 指向生产域（只写域名，不带版本号，发版时无需再改）
+  - 历史分支不再有「更新版本」，把 `PREVIOUS` 清空，`versionNav()` 的 `items` 改成
+    一个指向 `CURRENT_ORIGIN` 的「最新版本文档 / Latest release docs」条目
   - `sitemap.hostname` 改为该分支自己的别名
   - `editLink.pattern` 里的分支名改为 `v0.4-legacy`
   - `title` / `description` 保持 `NextBridge Legacy ${VERSION}` 模板即可，它会自动
-    标注版本；nav 里的版本下拉同理只用 `Legacy ${VERSION}` 模板
+    标注版本
 - `docs/public/_redirects`
   - 本版路径 `/en/vX.Y/*` 重定向到去掉版本段的 `/en/:splat`
   - 更新版本的路径重定向到 `https://nextbridge.siiway.org/...`
   - 删掉本版不存在的页面条目
+- 删掉 `docs/en/migrate.md`、`docs/zh/migrate.md` 里指向更老版本的 `::: tip` 块，
+  连同侧边栏里的迁移页条目一起移除
 - 本地 `bun run build` 确认无死链后推送
 
-**历史站的版本导航只引用最新版，不枚举版本列表。** 这样以后每次发版都不需要回头
-修改每一条 legacy 分支 —— 它们永远指向 `CURRENT_ORIGIN`。
+**历史站的版本导航只引用最新版。** 主分支的 `PREVIOUS` 每发一版往上加一项，历史
+分支只留一个指向 `CURRENT_ORIGIN` 的条目，这样以后每次发版都不需要回头修改每一条
+legacy 分支。
 
 推送后 Pages 会自动创建分支部署，别名即可访问，无需在 dashboard 额外操作。
 
@@ -123,16 +127,18 @@ git checkout -b v0.4-legacy v0.4
 
 | 事件 | Pages 行为 | Docker CI |
 | --- | --- | --- |
-| push `main` | 生产部署 | 构建 `latest`、`main`、`<sha>-amd64/arm64` |
-| push `dev` | 预览部署 | 构建 `unstable`、`dev`、`<sha>` |
+| push `main`，commit message 含 `<docker-build>` | 生产部署 | 构建 `latest`、`main`、`<sha>-amd64/arm64` |
+| push `main`，不含标记 | 生产部署 | 不触发 |
+| push `dev`，commit message 含 `<docker-build>` | 预览部署 | 构建 `unstable`、`dev`、`<sha>` |
+| push `dev`，不含标记 | 预览部署 | 不触发 |
 | push `vX.Y-legacy` | 预览部署（分支别名） | 不触发 |
-| push tag `vX.Y` | 无构建 | 构建 `X.Y`、`X.Y.Z`（`X` 仅 v1+） |
+| push tag `vX.Y` | 无构建 | 构建 `X.Y`、`X.Y.Z`（`X` 仅 v1+，tag 不受标记限制） |
 | PR | 预览部署 | 不触发（`pull_request` 触发被注释掉了） |
 | 改 `docs/**` 或 `*.md` | 生产/预览部署 | 不触发（`paths-ignore` 已排除） |
 
 ## 手动测试 Docker 构建
 
-`pull_request` 触发是**故意关闭**的，避免任何人通过开 PR 消耗构建额度。需要测试镜像时用下面任一方式，都只消耗自己的额度。
+`pull_request` 触发是**故意关闭**的，避免任何人通过开 PR 消耗构建额度。分支上的日常 push 也不会构建——只有 commit message 里带 `<docker-build>` 才会，所以需要镜像时记得在提交信息里写上这个标记。需要测试镜像时用下面任一方式，都只消耗自己的额度。
 
 ### 方式 A：`workflow_dispatch`（推荐，零改动）
 
@@ -154,9 +160,9 @@ gh run watch
 1. **workflow 文件必须已存在于该 ref 上**。如果你正在改 `docker.yml` 本身，需要先
    把改动推到分支，否则 `--ref` 指向的分支会用旧版定义（GitHub 从被指定的 ref 读取
    工作流定义，这一点和 `pull_request` 不同）。
-2. dispatch 的 `github.event_name` 是 `workflow_dispatch`，不等于 `pull_request`，
-   所以**会真的推镜像**，tag 为 `<branch>-<sha>`。测试时请确认分支名不会撞上
-   `latest` / `unstable`。
+2. dispatch 的 `github.event_name` 是 `workflow_dispatch`，不受 `<docker-build>`
+   标记限制，所以**会真的推镜像**，tag 为 `<branch>-<sha>`。测试时请确认分支名不会
+   撞上 `latest` / `unstable`。
 3. 在 `main` 上手动 dispatch 会覆盖 `latest`，因为它命中了
    `enable={{is_default_branch}}`。想避免的话在**非 main 分支**上跑。
 

@@ -2,8 +2,7 @@ import { defineConfig } from 'vitepress'
 
 // This build always represents the current (latest) release line. Historical
 // releases are built from their own long-lived `vX.Y-legacy` branches and served
-// from the corresponding Pages branch alias, so nothing in this file is
-// version-aware beyond the label below.
+// from the corresponding Pages branch alias.
 const VERSION = 'v0.4'
 
 // Previous release lines, newest first. Each entry links to the Pages alias of
@@ -170,8 +169,6 @@ export default defineConfig({
         nav: [
           { text: 'Guide', link: '/en/getting-started' },
           { text: 'Drivers', link: '/en/drivers/' },
-          // Version badge only. Historical releases link *here*, so this site
-          // never has to enumerate them (which would need editing every release).
           versionNav('/en'),
         ],
         sidebar: enSidebar(),
@@ -192,7 +189,6 @@ export default defineConfig({
         nav: [
           { text: '指南', link: '/zh/getting-started' },
           { text: '驱动器', link: '/zh/drivers/' },
-          // Keep the label parallel to the English one.
           versionNav('/zh'),
         ],
         sidebar: zhSidebar(),
