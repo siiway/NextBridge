@@ -48,7 +48,12 @@ from services.config_schema import _DriverConfig
 from services.db import msg_db
 from services.message import Attachment, NormalizedMessage
 from services.message_format import parse_richheader_tag
-from services.util import LRUDict, mask_url_credentials, strip_invisible_chars
+from services.util import (
+    LRUDict,
+    get_data_path,
+    mask_url_credentials,
+    strip_invisible_chars,
+)
 
 # websockets is imported inside QqDriver.__init__ so this module can be imported
 # (e.g. for CLI hook discovery) without it.
@@ -145,9 +150,16 @@ def _utc_now() -> datetime.datetime:
 # CQ face GIF database
 # ---------------------------------------------------------------------------
 
-# Resolved once at import time so path traversal checks are always anchored to
-# the same absolute directory, even if the working directory changes.
-_FACE_DB: Path = (Path(__file__).parent.parent / "db" / "cqface-gif").resolve()
+
+# Face GIFs are not shipped in the repo or the image. A synced copy under the
+# data directory wins, then a copy inside the repo (for source checkouts that
+# still have one). Missing everywhere is fine — the driver falls back to the
+# remote host.
+def _face_db_dirs() -> tuple[Path, ...]:
+    return (
+        (Path(get_data_path()) / "cqface-gif").resolve(),
+        (Path(__file__).parent.parent / "db" / "cqface-gif").resolve(),
+    )
 
 
 def _normalize_face_gif_host(host: str) -> str:
@@ -182,8 +194,8 @@ def _load_face_gif(face_id_raw) -> bytes | None:
       cannot contain path separators or ``..``, so no traversal is possible
       by construction.
     - Layer 2: The resolved candidate path is checked with
-      ``Path.is_relative_to(_FACE_DB)`` as a hard guarantee — this catches
-      any edge cases such as OS-level symlinks that point outside the db dir.
+      ``Path.is_relative_to`` as a hard guarantee — this catches any edge
+      cases such as OS-level symlinks that point outside the db dir.
 
     Returns ``None`` if the ID is invalid, escapes the database directory,
     or the file simply does not exist.
@@ -196,21 +208,24 @@ def _load_face_gif(face_id_raw) -> bytes | None:
         _logger.warning(f"Invalid face ID {face_id_raw!r} — ignored")
         return None
 
-    candidate = (_FACE_DB / f"{face_id}.gif").resolve()
+    for face_db in _face_db_dirs():
+        candidate = (face_db / f"{face_id}.gif").resolve()
 
-    # Layer 2 path-traversal guard.
-    if not candidate.is_relative_to(_FACE_DB):
-        _logger.warning(f"Face path {candidate} escapes database dir — blocked")
-        return None
+        # Layer 2 path-traversal guard.
+        if not candidate.is_relative_to(face_db):
+            _logger.warning(f"Face path {candidate} escapes database dir — blocked")
+            continue
 
-    if not candidate.is_file():
-        return None
+        if not candidate.is_file():
+            continue
 
-    try:
-        return candidate.read_bytes()
-    except OSError as e:
-        _logger.error(f"Failed to read face GIF {candidate}: {e}")
-        return None
+        try:
+            return candidate.read_bytes()
+        except OSError as e:
+            _logger.error(f"Failed to read face GIF {candidate}: {e}")
+            return None
+
+    return None
 
 
 class QqDriver(BaseDriver[QqConfig]):

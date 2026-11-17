@@ -21,7 +21,7 @@ NextBridge 通过 OneBot 11 WebSocket 协议连接 QQ。支持多种协议后端
 | `reverse_ws_path` | 否 | `/onebot/v11/<实例ID>` | `connection_mode: "reverse"` 时 NextBridge 提供的 WebSocket 路径。 |
 | `ws_ssl_verify` | 否 | `true` | WSS 连接是否验证 TLS 证书。自签名证书请设为 `false` |
 | `max_file_size` | 否 | `10485760`（10 MB） | 发送附件时单个文件的最大下载字节数 |
-| `cqface_mode` | 否 | `"gif"` | QQ 表情段的呈现方式。`"gif"` 将表情以动态 GIF 图上传（优先取自本地 `db/cqface-gif/` 数据库；本地缺失时回退到 `cqface_gif_host` 配置的远程主机下载）；`"emoji"` 以内联文本呈现，如 `:cqface306:`。 |
+| `cqface_mode` | 否 | `"gif"` | QQ 表情段的呈现方式。`"gif"` 将表情以动态 GIF 图上传（优先取自本地表情库；本地缺失时回退到 `cqface_gif_host` 配置的远程主机下载，见[表情 GIF 资源](#表情-gif-资源)）；`"emoji"` 以内联文本呈现，如 `:cqface306:`。 |
 | `file_send_mode` | 否 | `"stream"` | 向 QQ 上传文件和视频的方式。`"stream"` 使用分块 `upload_file_stream`（推荐用于大文件）；`"base64"` 将整个内容编码后直接传给 `upload_group_file`。 |
 | `stream_threshold` | 否 | `0`（禁用） | 大于 0 时，当文件或视频超过该字节数时自动切换为 `"stream"` 模式，忽略 `file_send_mode` 的设置。 |
 | `forward_render_enabled` | 否 | `false` | 启用 QQ 合并转发消息渲染为 HTML 页面 |
@@ -31,7 +31,7 @@ NextBridge 通过 OneBot 11 WebSocket 协议连接 QQ。支持多种协议后端
 | `forward_render_image_method` | 否 | `"url"` | 合并转发页面的图片渲染方式：`"url"`（通过数据库+桥接 URL 提供）或 `"base64"`（内联 data URI） |
 | `forward_render_asset_ttl_seconds` | 否 | `1209600`（14 天） | 合并转发页面缓存图片/资源的 TTL |
 | `forward_render_base_url` | 否 | — | 合并转发页面链接的自定义公共 URL 前缀。设置后链接格式为 `{base_url}/{page_id}`（不会自动追加挂载路径） |
-| `cqface_gif_host` | 否 | `true` | 表情 GIF 主机。既用于合并转发 HTML 页面中的 `<img>` 来源，也作为主消息路径下本地 `db/cqface-gif/` 缺失时的远程回退。`false` 完全禁用远程主机（合并转发回退为 unicode 表情，主路径缺失的表情直接丢弃）、`true` 使用默认主机 `https://cqface.p.wyf9.top/dist/`、字符串则自定义基础 URL。 |
+| `cqface_gif_host` | 否 | `true` | 表情 GIF 主机。既用于合并转发 HTML 页面中的 `<img>` 来源，也作为主消息路径下本地表情库缺失时的远程回退。`false` 完全禁用远程主机（合并转发回退为 unicode 表情，主路径缺失的表情直接丢弃）、`true` 使用默认主机 `https://cqface.p.wyf9.top/dist/`、字符串则自定义基础 URL。 |
 | `edit_via_reply` | 否 | `true` | 当其他平台编辑了已桥接的消息时，通过发送一条引用原始消息并添加 `edit_prefix` 前缀的新消息来在 QQ 上模拟编辑。设为 `false` 可完全忽略收到的编辑。 |
 | `edit_prefix` | 否 | `"[编辑]"` | 添加到模拟编辑消息前的前缀，用于与普通消息区分。仅在 `edit_via_reply` 为 `true` 时生效。 |
 | `enable_recall` | 否 | `true` | 是否同步消息撤回。启用后，QQ 上的撤回会被检测并桥接到其他平台，其他平台的撤回也会通过原生 `delete_msg` API 应用到 QQ。设为 `false` 可完全禁用撤回同步。 |
@@ -110,6 +110,24 @@ NextBridge 默认桥接**群消息**。通过指定 `user_id`（而非 `group_id
 - **页面设置**：合并转发页面右上角提供设置入口，可切换颜色模式与合并转发显示方式，并使用 LocalStorage 记忆。
 - **不可靠 UID 标记**：当 OneBot 后端在同一批合并转发中无法可靠对应发送者 ID 时，页面会把该 UID 标记为不可靠。
 - **按规则覆盖 TTL**：`forward_render_ttl_seconds` 可通过规则中的 `msg` 配置按规则覆盖。
+
+## 表情 GIF 资源
+
+表情 GIF **不随 NextBridge 打包**。开启 `cqface_mode: "gif"` 时，表情段会先在本地表情库中查找，只有缺失时才下载：
+
+1. `<data>/cqface-gif/<id>.gif`（同步下来的副本，通常用这个）
+2. 源码目录里的 `db/cqface-gif/<id>.gif`（如果你还留着的话）
+3. `<cqface_gif_host><id>.gif`，即远程主机
+
+想要完整的本地副本（离线使用或自建部署），把它同步到数据目录即可：
+
+```sh
+uv run scripts/sync_cqface.py
+# 或指定其它数据目录 / 镜像
+uv run scripts/sync_cqface.py --dest /srv/nextbridge/data/cqface-gif
+```
+
+脚本会下载 [wyf9/cqface](https://github.com/wyf9/cqface) 的归档，并把其中的 `dist/*.gif` 写入目标目录；已存在的文件默认跳过，加 `--force` 才覆盖，因此手工补充的表情不会被覆盖。
 
 ## 消息编辑同步
 

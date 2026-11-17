@@ -100,3 +100,23 @@ def test_legacy_forward_render_cqface_gif_alias_still_works():
     """The pre-rename key must keep working so existing configs do not break."""
     driver = _driver(forward_render_cqface_gif="https://legacy.example.com/gif")
     assert driver._cqface_message_gif_host() == "https://legacy.example.com/gif/"
+
+
+def test_face_gif_reads_from_synced_data_directory(tmp_path, monkeypatch):
+    """A synced copy under the data dir wins over the in-repo copy."""
+    (tmp_path / "cqface-gif").mkdir()
+    (tmp_path / "cqface-gif" / "14.gif").write_bytes(b"synced-gif")
+    monkeypatch.setenv("NEXTBRIDGE_DATA_PATH", str(tmp_path))
+
+    from drivers.qq import _load_face_gif
+
+    assert _load_face_gif(14) == b"synced-gif"
+
+
+def test_face_gif_missing_from_every_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXTBRIDGE_DATA_PATH", str(tmp_path))
+    monkeypatch.setattr("drivers.qq._face_db_dirs", lambda: (tmp_path,))
+
+    from drivers.qq import _load_face_gif
+
+    assert _load_face_gif(14) is None
