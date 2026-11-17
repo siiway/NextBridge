@@ -903,6 +903,7 @@ class QqDriver(BaseDriver[QqConfig]):
         avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
         self_id = str(event.get("self_id", ""))
         source_mentioned_self = any(str(m.get("id", "")) == self_id for m in mentions)
+        username = self._cached_qid(user_id)
 
         msg = NormalizedMessage(
             platform=self.platform_name,
@@ -920,11 +921,32 @@ class QqDriver(BaseDriver[QqConfig]):
             source_mentioned_self=source_mentioned_self,
             time=datetime.datetime.fromtimestamp(time).isoformat() if time else None,
             source_proxy=self._media_proxy,
-            username="",
+            username=username,
             is_dm=True,
         )
         await self.bridge.on_message(msg)
         self._schedule_qid_refresh(user_id)
+
+    def _cached_qid(self, user_id: str) -> str:
+        """Return a known qid without calling the NapCat API.
+
+        get_stranger_info times out often enough that it must never sit on the
+        message path: only the in-memory cache and the persisted row are
+        consulted here, and the API fills them in from a background task.
+        """
+        if not user_id:
+            return ""
+        qid = self._qid_cache.get(user_id, "")
+        if qid:
+            return qid
+        try:
+            qid = msg_db().get_user_qid(self.instance_id, user_id) or ""
+        except Exception:
+            self.logger.opt(exception=True).debug("persisted qid lookup failed")
+            return ""
+        if qid:
+            self._qid_cache[user_id] = qid
+        return qid
 
     def _schedule_qid_refresh(self, user_id: str) -> None:
         """Refresh and persist qid without delaying message forwarding."""
@@ -936,8 +958,13 @@ class QqDriver(BaseDriver[QqConfig]):
 
     async def _refresh_qid(self, user_id: str) -> None:
         qid = await self._get_qid(user_id)
-        if qid:
+        if not qid:
+            return
+        self._qid_cache[user_id] = qid
+        try:
             msg_db().save_user_qid(self.instance_id, user_id, qid)
+        except Exception:
+            self.logger.opt(exception=True).debug("persist qid failed")
 
     async def _on_group_message(self, event: dict):
         # NapCat echoes the bot's own sent messages back as real events;
@@ -973,12 +1000,10 @@ class QqDriver(BaseDriver[QqConfig]):
             )
             return
 
-        # Do not resolve qid on the message-critical path.  The NapCat API
-        # lookup can be slow and this driver intentionally drains events with a
-        # single ordered worker; waiting here would stall every later message.
-        # user_id is a stable fallback and _get_qid remains available for
-        # features that explicitly need the human-readable QQ id.
-        username = user_id
+        # Never resolve a qid inline: this driver drains events with a single
+        # ordered worker and get_stranger_info is prone to timeouts. Use what is
+        # cached or persisted, and let the background refresh fill in the rest.
+        username = self._cached_qid(user_id)
 
         # QQ avatar endpoint (public, no auth)
         avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"

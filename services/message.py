@@ -37,7 +37,7 @@ class NormalizedMessage:
     source_proxy: str | None = (
         None  # proxy URL for downloading attachments from source platform
     )
-    username: str = ""  # user's platform-specific name
+    username: str = ""  # platform username, without the "@" (may be empty)
     is_dm: bool = False  # whether this message is a direct/private message
     is_edit: bool = False  # whether this is a message edit event
     edit_target_id: str | None = (

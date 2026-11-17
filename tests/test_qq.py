@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock
 
 from drivers.qq import QqConfig, QqDriver
@@ -48,8 +49,6 @@ def test_face_gif_prefers_local_database(monkeypatch):
 
     monkeypatch.setattr("drivers.qq.media.fetch", fail_fetch)
 
-    import asyncio
-
     assert asyncio.run(_driver()._fetch_face_gif(14)) == b"local-gif"
 
 
@@ -78,8 +77,6 @@ def test_face_gif_fallback_disabled_when_host_is_false(monkeypatch):
 
     monkeypatch.setattr("drivers.qq.media.fetch", fail_fetch)
 
-    import asyncio
-
     assert asyncio.run(_driver(cqface_gif_host=False)._fetch_face_gif(14)) is None
 
 
@@ -90,8 +87,6 @@ def test_face_gif_missing_everywhere_returns_none(monkeypatch):
         return None
 
     monkeypatch.setattr("drivers.qq.media.fetch", fake_fetch)
-
-    import asyncio
 
     assert asyncio.run(_driver()._fetch_face_gif(9999)) is None
 
@@ -120,3 +115,40 @@ def test_face_gif_missing_from_every_directory(tmp_path, monkeypatch):
     from drivers.qq import _load_face_gif
 
     assert _load_face_gif(14) is None
+
+
+def test_cached_qid_prefers_memory_cache(monkeypatch):
+    driver = _driver()
+    driver._qid_cache["10001"] = "custom_qid"
+
+    def fail(*args, **kwargs):
+        raise AssertionError("database must not be hit on a memory cache hit")
+
+    monkeypatch.setattr("drivers.qq.msg_db", fail)
+
+    assert driver._cached_qid("10001") == "custom_qid"
+
+
+def test_cached_qid_uses_persisted_row(monkeypatch):
+    driver = _driver()
+    fake_db = MagicMock()
+    fake_db.get_user_qid.return_value = "persisted_qid"
+    monkeypatch.setattr("drivers.qq.msg_db", lambda: fake_db)
+
+    assert driver._cached_qid("10002") == "persisted_qid"
+    fake_db.get_user_qid.assert_called_once_with(driver.instance_id, "10002")
+    assert driver._qid_cache["10002"] == "persisted_qid"
+
+
+def test_cached_qid_never_calls_the_api(monkeypatch):
+    driver = _driver()
+    fake_db = MagicMock()
+    fake_db.get_user_qid.return_value = None
+    monkeypatch.setattr("drivers.qq.msg_db", lambda: fake_db)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("get_stranger_info must stay off the message path")
+
+    monkeypatch.setattr(driver, "_get_qid", fail)
+
+    assert driver._cached_qid("10003") == ""

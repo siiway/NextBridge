@@ -1207,6 +1207,7 @@ class DiscordDriver(BaseDriver[DiscordConfig]):
             "user_avatar": kwargs.get("user_avatar"),
             "msg": kwargs.get("msg"),
             "time": kwargs.get("time"),
+            "username": kwargs.get("username"),
             "nickname": kwargs.get("nickname"),
             "source_mentioned_self": kwargs.get("source_mentioned_self"),
         }

@@ -206,7 +206,7 @@ uv run main.py validate -d custom-data/
 | `{user_avatar}` | 发送者的头像 URL（可能为空） |
 | `{msg}` | 消息文本内容 |
 | `{time}` | 消息时间戳（ISO 格式） |
-| `{username}` | 平台原生用户名（如适用会带 `@` 前缀） |
+| `{username}` | 发送者标识。平台提供用户名时以 `@` 开头（Discord、Telegram、Slack、KOOK、Mattermost、Rocket.Chat、QQ 的 qid）；平台没有用户名时回退为用户 ID，且不带 `@` —— 只靠这个前缀就能区分两者。 |
 | `{nickname}` | 发送者的显示名称（`{user}` 的别名） |
 | `{source_mentioned_self}` | 源消息是否提及了机器人自身 |
 

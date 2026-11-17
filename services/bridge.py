@@ -958,15 +958,21 @@ class Bridge:
                 "msg_format",
                 '<richheader title="{user}" content="{user_id} ({platform})"/> \n{msg}',
             )
-        # Format username with @ prefix if it exists
+        # {username} carries a leading "@" only when it is an actual platform
+        # username. Without one (QQ qids are optional, several platforms have
+        # none at all) it degrades to the raw user ID, which keeps the field
+        # non-empty without pretending the ID is a username.
         username_value = getattr(msg, "username", "")
         if self.sanitize_nickname:
             username_value = strip_invisible_chars(username_value)
-        if username_value and not username_value.startswith("@"):
-            username_value = f"@{username_value}"
-        # If username is empty, fallback to user_id
-        if not username_value:
-            username_value = msg.user_id
+        username_value = username_value.strip()
+        if username_value:
+            if not username_value.startswith("@"):
+                username_value = f"@{username_value}"
+        else:
+            username_value = (msg.user_id or "").strip()
+            if username_value.startswith("@"):
+                username_value = username_value[1:]
 
         display_nickname = msg.nickname
         display_user = msg.user

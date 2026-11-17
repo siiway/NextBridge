@@ -105,9 +105,9 @@ class SlackDriver(BaseDriver[SlackConfig]):
         self._web: AsyncWebClient | None = None
         self._sm: SocketModeClient | None = None
         self._session: aiohttp.ClientSession | None = None
-        self._user_cache: LRUDict[str, tuple[str, str]] = LRUDict(
+        self._user_cache: LRUDict[str, tuple[str, str, str]] = LRUDict(
             maxsize=1000
-        )  # user_id → (name, avatar_url)
+        )  # user_id → (display_name, username, avatar_url)
         self._proxy = get_proxy(config.proxy)
         self._msg_queue: asyncio.Queue = asyncio.Queue()
         self._msg_worker_task: asyncio.Task | None = None
@@ -261,7 +261,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
         if not channel_id or not user_id:
             return
 
-        display_name, user_avatar = await self._get_user_info(user_id)
+        display_name, username, user_avatar = await self._get_user_info(user_id)
 
         attachments: list[Attachment] = []
         for f in event.get("files", []):
@@ -281,6 +281,7 @@ class SlackDriver(BaseDriver[SlackConfig]):
             user_avatar=user_avatar,
             text=text,
             attachments=attachments,
+            username=username,
             message_id=str(event.get("ts", "")),
             reply_parent=str(event.get("thread_ts", ""))
             if event.get("thread_ts")
@@ -289,17 +290,17 @@ class SlackDriver(BaseDriver[SlackConfig]):
         )
         await self.bridge.on_message(normalized)
 
-    async def _get_user_info(self, user_id: str) -> tuple[str, str]:
-        """Return (display_name, avatar_url) for a Slack user, with caching."""
+    async def _get_user_info(self, user_id: str) -> tuple[str, str, str]:
+        """Return (display_name, username, avatar_url) for a Slack user, with caching."""
         if user_id in self._user_cache:
             return self._user_cache[user_id]
         if self._web is None:
-            return user_id, ""
+            return user_id, "", ""
         try:
             resp = await self._web.users_info(user=user_id)
             u = resp["user"]
             if u is None:
-                return user_id, ""
+                return user_id, "", ""
             profile = u.get("profile", {})
             name = (
                 profile.get("display_name")
@@ -307,11 +308,12 @@ class SlackDriver(BaseDriver[SlackConfig]):
                 or u.get("name")
                 or user_id
             )
+            username = u.get("name", "")
             avatar = profile.get("image_192") or profile.get("image_72") or ""
         except Exception:
-            name, avatar = user_id, ""
-        self._user_cache[user_id] = (name, avatar)
-        return name, avatar
+            name, username, avatar = user_id, "", ""
+        self._user_cache[user_id] = (name, username, avatar)
+        return name, username, avatar
 
     async def _download_file(self, f: dict, max_size: int) -> Attachment | None:
         url = f.get("url_private_download") or f.get("url_private", "")

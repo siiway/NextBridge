@@ -215,6 +215,7 @@ class RocketChatDriver(BaseDriver[RocketChatConfig]):
             attachments=attachments,
             mentions=mentions,
             source_proxy=self._media_proxy,
+            username=username,
         )
         self._msg_queue.put_nowait(normalized)
         return JSONResponse({})

@@ -772,3 +772,37 @@ class TestDispatchContinueOnError:
 
         mock_sender1.assert_awaited_once()
         mock_sender2.assert_awaited_once()
+
+
+class TestUsernameSemantics:
+    """`{username}` is "@name" for a real username, bare user id otherwise."""
+
+    def test_username_gets_at_prefix(self, bridge):
+        msg = NormalizedMessage(user_id="42", username="alice")
+        _, extra = bridge._build_formatted(msg, {"msg_format": "{username}"})
+        assert extra["username"] == "@alice"
+
+    def test_existing_at_prefix_is_kept_once(self, bridge):
+        msg = NormalizedMessage(user_id="42", username="@alice")
+        _, extra = bridge._build_formatted(msg, {"msg_format": "{username}"})
+        assert extra["username"] == "@alice"
+
+    def test_missing_username_falls_back_to_user_id(self, bridge):
+        msg = NormalizedMessage(user_id="123456", username="")
+        _, extra = bridge._build_formatted(msg, {"msg_format": "{username}"})
+        assert extra["username"] == "123456"
+
+    def test_fallback_user_id_never_starts_with_at(self, bridge):
+        msg = NormalizedMessage(user_id="@alice:matrix.org", username="")
+        _, extra = bridge._build_formatted(msg, {"msg_format": "{username}"})
+        assert extra["username"] == "alice:matrix.org"
+
+    def test_blank_username_falls_back_to_user_id(self, bridge):
+        msg = NormalizedMessage(user_id="123456", username="   ")
+        _, extra = bridge._build_formatted(msg, {"msg_format": "{username}"})
+        assert extra["username"] == "123456"
+
+    def test_empty_user_id_yields_empty_field(self, bridge):
+        msg = NormalizedMessage(user_id="", username="")
+        _, extra = bridge._build_formatted(msg, {"msg_format": "{username}"})
+        assert extra["username"] == ""

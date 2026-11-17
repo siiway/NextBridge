@@ -70,6 +70,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Rule and config writes are atomic** (`temp + fsync + os.replace`) with a
   `.bak` backup and comment/anchor-preserving YAML round-tripping, replacing
   the previous non-atomic `save_config` path used for edits.
+- **`{username}` now tells usernames and user IDs apart.** The field starts with
+  `@` only when the platform supplied a real username (Discord, Telegram, Slack,
+  KOOK, Mattermost, Rocket.Chat, QQ qid); when there is none it falls back to
+  the user ID and strips any leading `@`, so an ID can never be mistaken for a
+  username. QQ messages previously reused the QQ number as the username in
+  groups, which made them render as `@1234567`; they now use the qid from the
+  in-memory cache or the persisted `user_mappings` row and fall back to the QQ
+  number until a background lookup fills it in.
 - **QQ face GIFs are no longer bundled, and missing ones are fetched.** The
   372-face `db/cqface-gif/` tree left the repo, so checkouts and images are 50 MB
   smaller. `cqface_mode: "gif"` now looks a face up in `<data>/cqface-gif/`

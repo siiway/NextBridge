@@ -206,7 +206,7 @@ Controls how the message is formatted when sent to a target.
 | `{user_avatar}` | Avatar URL of the sender (may be empty) |
 | `{msg}` | The message text content |
 | `{time}` | Message timestamp (ISO format) |
-| `{username}` | Platform-native username (with `@` prefix if applicable) |
+| `{username}` | Sender handle. Starts with `@` when the platform exposes a username (Discord, Telegram, Slack, KOOK, Mattermost, Rocket.Chat, QQ qid). Platforms without one fall back to the user ID, which never carries a `@`, so the prefix alone tells the two apart. |
 | `{nickname}` | Sender's display name (alias for `{user}`) |
 | `{source_mentioned_self}` | Whether the source message mentioned the bot itself |
 
