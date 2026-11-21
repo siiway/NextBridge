@@ -63,7 +63,7 @@ class DiscordConfig(_DriverConfig):
     allow_mentions_roles: CoercedBool = False
     sanitize_mass_mentions: CoercedBool = True
     enable_recall: CoercedBool = True
-    auto_link_image_hosts: list[str] = ["discordmedia.com", "tenor.com"]
+    auto_link_image_hosts: list[str] = ["discordmedia.com", "tenor.com", "klipy.com"]
     auto_link_image_show_original_url: CoercedBool = True
     proxy: str | None = UNSET
     enable_native_commands: CoercedBool = True
